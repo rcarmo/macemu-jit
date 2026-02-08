@@ -49,6 +49,7 @@
 #include <errno.h>
 #include <vector>
 #include <string>
+#include <atomic>
 #include <math.h>
 #include <strings.h>
 
@@ -116,7 +117,9 @@ static bool mouse_wheel_reverse;
 
 static uint8 *the_buffer = NULL;					// Mac frame buffer (where MacOS draws into)
 static uint8 *the_buffer_copy = NULL;				// Copy of Mac frame buffer (for refreshed modes)
-static uint8 *the_buffer_display = NULL;			// Double-buffer snapshot (redraw thread reads from here)
+static uint8 *the_buffer_display_a = NULL;			// Double-buffer snapshot A (redraw thread reads from here)
+static uint8 *the_buffer_display_b = NULL;			// Double-buffer snapshot B (redraw thread reads from here)
+static std::atomic<uint8 *> display_read_buffer(nullptr);
 static uint32 the_buffer_size;						// Size of allocated the_buffer
 static bool use_double_buffer = false;				// Flag: double-buffered frame buffer active
 
@@ -684,7 +687,9 @@ driver_base::driver_base(SDL_monitor_desc &m)
 {
 	the_buffer = NULL;
 	the_buffer_copy = NULL;
-	the_buffer_display = NULL;
+	the_buffer_display_a = NULL;
+	the_buffer_display_b = NULL;
+	display_read_buffer.store(NULL, std::memory_order_relaxed);
 }
 
 static void delete_sdl_video_surfaces()
@@ -940,8 +945,13 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 			guest_surface = SDL_CreateRGBSurface(0, width, height, 8, 0, 0, 0, 0);
 			if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface created for 8bit (VOSF)\n");
 #else
-			guest_surface = SDL_CreateRGBSurfaceFrom(the_buffer, width, height, 8, pitch, 0, 0, 0, 0);
-			if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface from the_buffer for 8bit (no VOSF)\n");
+				if (use_double_buffer) {
+					guest_surface = SDL_CreateRGBSurface(0, width, height, 8, 0, 0, 0, 0);
+					if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface created for 8bit (double-buffer)\n");
+				} else {
+					guest_surface = SDL_CreateRGBSurfaceFrom(the_buffer, width, height, 8, pitch, 0, 0, 0, 0);
+					if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface from the_buffer for 8bit (no VOSF)\n");
+				}
 #endif
 			break;
 		case VIDEO_DEPTH_16BIT:
@@ -955,8 +965,13 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 #else
 			// Mac stores 32-bit as big-endian ARGB. On little-endian ARM, this appears as BGRA.
 			// Use masks matching SDL_PIXELFORMAT_BGRA8888: B=0xff, G=0xff00, R=0xff0000, A=0xff000000
-			guest_surface = SDL_CreateRGBSurfaceFrom(the_buffer, width, height, 32, pitch, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
-			if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface from the_buffer for 32bit BGRA (no VOSF, little-endian)\n");
+				if (use_double_buffer) {
+					guest_surface = SDL_CreateRGBSurface(0, width, height, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+					if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface created for 32bit BGRA (double-buffer)\n");
+				} else {
+					guest_surface = SDL_CreateRGBSurfaceFrom(the_buffer, width, height, 32, pitch, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+					if (getenv("B2_DEBUG_VIDEO")) printf("VIDEO: guest_surface from the_buffer for 32bit BGRA (no VOSF, little-endian)\n");
+				}
 #endif
 			host_surface = guest_surface;
             break;
@@ -1223,16 +1238,23 @@ void driver_base::init()
 		memset(the_buffer, 0, the_buffer_size);
 
 		// Allocate double-buffer display snapshot if requested.
-		// NOTE: For non-VOSF modes, guest_surface wraps the_buffer directly
-		// (SDL_CreateRGBSurfaceFrom), so Screen_blit writes snapshot data back
-		// into the_buffer. This is acceptable: the write-back contains the same
-		// pixel values from the VBI snapshot, and any JIT writes that land during
-		// the redraw window will be captured in the next VBI snapshot.
 		use_double_buffer = PrefsFindBool("doublebuffer");
 #if defined(USE_JIT) || defined(JIT)
 		if (use_double_buffer) {
-			the_buffer_display = (uint8 *)calloc(1, the_buffer_size);
-			printf("Double-buffered frame buffer enabled (%u bytes)\n", the_buffer_size);
+			the_buffer_display_a = (uint8 *)calloc(1, the_buffer_size);
+			the_buffer_display_b = (uint8 *)calloc(1, the_buffer_size);
+			if (the_buffer_display_a && the_buffer_display_b) {
+				display_read_buffer.store(the_buffer_display_a, std::memory_order_release);
+				printf("Double-buffered frame buffer enabled (%u bytes)\n", the_buffer_size);
+			} else {
+				free(the_buffer_display_a);
+				free(the_buffer_display_b);
+				the_buffer_display_a = NULL;
+				the_buffer_display_b = NULL;
+				display_read_buffer.store(NULL, std::memory_order_release);
+				use_double_buffer = false;
+				printf("Double-buffered frame buffer disabled (allocation failed)\n");
+			}
 		}
 #else
 		use_double_buffer = false;
@@ -1355,10 +1377,15 @@ driver_base::~driver_base()
 			free(the_buffer_copy);
 			the_buffer_copy = NULL;
 		}
-		if (the_buffer_display) {
-			free(the_buffer_display);
-			the_buffer_display = NULL;
+		if (the_buffer_display_a) {
+			free(the_buffer_display_a);
+			the_buffer_display_a = NULL;
 		}
+		if (the_buffer_display_b) {
+			free(the_buffer_display_b);
+			the_buffer_display_b = NULL;
+		}
+		display_read_buffer.store(NULL, std::memory_order_relaxed);
 	}
 #ifdef ENABLE_VOSF
 	else {
@@ -1994,9 +2021,12 @@ void VideoVBL(void)
 
 	// Snapshot the frame buffer for the redraw thread (double-buffering)
 	// This runs on the CPU thread while the frame buffer lock is held,
-	// so the redraw thread can read from the_buffer_display without locking.
-	if (use_double_buffer && the_buffer_display && the_buffer) {
-		memcpy(the_buffer_display, the_buffer, the_buffer_size);
+	// so the redraw thread can read from the active display buffer without locking.
+	if (use_double_buffer && the_buffer_display_a && the_buffer_display_b && the_buffer) {
+		uint8 *read_ptr = display_read_buffer.load(std::memory_order_acquire);
+		uint8 *write_ptr = (read_ptr == the_buffer_display_a) ? the_buffer_display_b : the_buffer_display_a;
+		memcpy(write_ptr, the_buffer, the_buffer_size);
+		display_read_buffer.store(write_ptr, std::memory_order_release);
 	}
 
 	// Temporarily give up frame buffer lock (this is the point where
@@ -2025,9 +2055,12 @@ void VideoInterrupt(void)
 
 	// Snapshot the frame buffer for the redraw thread (double-buffering)
 	// This runs on the CPU thread while the frame buffer lock is held,
-	// so the redraw thread can read from the_buffer_display without locking.
-	if (use_double_buffer && the_buffer_display && the_buffer) {
-		memcpy(the_buffer_display, the_buffer, the_buffer_size);
+	// so the redraw thread can read from the active display buffer without locking.
+	if (use_double_buffer && the_buffer_display_a && the_buffer_display_b && the_buffer) {
+		uint8 *read_ptr = display_read_buffer.load(std::memory_order_acquire);
+		uint8 *write_ptr = (read_ptr == the_buffer_display_a) ? the_buffer_display_b : the_buffer_display_a;
+		memcpy(write_ptr, the_buffer, the_buffer_size);
+		display_read_buffer.store(write_ptr, std::memory_order_release);
 	}
 
 	// Temporarily give up frame buffer lock (this is the point where
@@ -2765,7 +2798,9 @@ static void update_display_static(driver_base *drv)
 
 	// When double-buffering, read from the VBI snapshot instead of the_buffer
 	// to avoid contention with the JIT CPU thread.
-	uint8 *read_buffer = (use_double_buffer && the_buffer_display) ? the_buffer_display : the_buffer;
+	uint8 *read_buffer = use_double_buffer ? display_read_buffer.load(std::memory_order_acquire) : the_buffer;
+	if (!read_buffer)
+		read_buffer = the_buffer;
 
 	// Log once on first call
 	if (getenv("B2_DEBUG_VIDEO") && debug_frame_count == 0) {
@@ -2929,7 +2964,9 @@ static void update_display_static_bbox(driver_base *drv)
 	bool blit = (int)VIDEO_MODE_DEPTH == VIDEO_DEPTH_16BIT;
 
 	// When double-buffering, read from the VBI snapshot instead of the_buffer
-	uint8 *read_buffer = (use_double_buffer && the_buffer_display) ? the_buffer_display : the_buffer;
+	uint8 *read_buffer = use_double_buffer ? display_read_buffer.load(std::memory_order_acquire) : the_buffer;
+	if (!read_buffer)
+		read_buffer = the_buffer;
 
 	// Debug: detect pitch mismatch for 16-bit mode
 	if (blit && !g_bbox_16bit_debug) {
@@ -3132,8 +3169,8 @@ static void video_refresh_window_static(void)
 	if (++tick_counter >= frame_skip) {
 		tick_counter = 0;
 		const VIDEO_MODE &mode = drv->mode;
-		// With double-buffering, the redraw thread reads from the_buffer_display
-		// which is snapshotted atomically at VBI time — no locking needed.
+		// With double-buffering, the redraw thread reads from the active display buffer
+		// which is swapped atomically at VBI time — no locking needed.
 		// Without double-buffering, lock the frame buffer to prevent tearing.
 		if (!use_double_buffer)
 			LOCK_FRAME_BUFFER;

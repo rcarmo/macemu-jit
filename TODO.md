@@ -50,10 +50,10 @@ Wrap the `memcmp`/`memcpy`/`Screen_blit` loop in `update_display_static_bbox()` 
 
 **Files**: `BasiliskII/src/SDL/video_sdl2.cpp`, `BasiliskII/src/prefs_items.cpp`
 
-Instead of locking, use two frame buffers:
+Instead of locking, use two frame buffers plus a ping-pong snapshot:
 - `the_buffer`: JIT writes here (current Mac frame buffer, in reserved memory)
-- `the_buffer_display`: Redraw thread reads from here (plain `calloc`, host-only)
-- Snapshot `the_buffer` → `the_buffer_display` at `VideoInterrupt()`/`VideoVBL()` time
+- `the_buffer_display_a` / `the_buffer_display_b`: Redraw thread reads from the active snapshot (plain `calloc`, host-only)
+- Snapshot `the_buffer` → inactive display buffer at `VideoInterrupt()`/`VideoVBL()` time, then atomically swap the read pointer
 
 This eliminates lock contention: the redraw thread reads from a stable snapshot while the JIT keeps writing to `the_buffer`. Cost is ~300 KB for 640×480×32bpp — negligible on the Pi 3B's 1GB.
 
@@ -61,14 +61,14 @@ Gated by the `doublebuffer` CLI/prefs argument (default: off). Enable with `doub
 
 - [x] Evaluate feasibility given `MEMBaseDiff` is baked into JIT-compiled blocks — confirmed safe: `MEMBaseDiff` references `RAMBaseHost`, not `the_buffer` pointer directly
 - [x] Add `doublebuffer` pref descriptor to `prefs_items.cpp` and default in `AddPrefsDefaults()`
-- [x] Allocate `the_buffer_display` via `calloc` in `driver_base::init()`, gated by `#if defined(USE_JIT) || defined(JIT)`
+- [x] Allocate `the_buffer_display_a`/`_b` via `calloc` in `driver_base::init()`, gated by `#if defined(USE_JIT) || defined(JIT)` (disable if allocation fails)
 - [x] Add VBI snapshot (`memcpy`) in `VideoVBL()` (SheepShaver) and `VideoInterrupt()` (BasiliskII)
-- [x] Add `read_buffer` indirection in `update_display_static()` and `update_display_static_bbox()` — all `the_buffer` read sites replaced
+- [x] Add `read_buffer` indirection in `update_display_static()` and `update_display_static_bbox()` — read from atomic display pointer with fallback to `the_buffer`
 - [x] Skip `LOCK_FRAME_BUFFER`/`UNLOCK_FRAME_BUFFER` in `video_refresh_window_static()` when double-buffering is active
-- [x] Initialize `the_buffer_display = NULL` in constructor, free in destructor
+- [x] Initialize display buffers to `NULL` in constructor, free in destructor
 - [ ] Test on hardware with `doublebuffer true`
 
-> **Done.** Implemented as an opt-in feature gated by `--doublebuffer true`. The JIT writes to `the_buffer` (vm\_acquire\_framebuffer, Mac-addressable). At each VBI, the CPU thread copies `the_buffer` → `the_buffer_display` (calloc'd, host-only). The redraw thread reads from `the_buffer_display` via a `read_buffer` pointer indirection in both `update_display_static()` and `update_display_static_bbox()`. When active, the redraw thread skips frame buffer locking entirely since it only reads from the VBI-snapshotted copy. Note: for non-VOSF modes, guest\_surface wraps `the_buffer` directly (via `SDL_CreateRGBSurfaceFrom`), so Screen\_blit writes snapshot data back into `the_buffer` — this is acceptable since the write-back contains the same pixel values from the VBI snapshot.
+> **Done.** Implemented as an opt-in feature gated by `--doublebuffer true`. The JIT writes to `the_buffer` (vm\_acquire\_framebuffer, Mac-addressable). At each VBI, the CPU thread copies `the_buffer` → the inactive display buffer and atomically swaps the read pointer. The redraw thread reads from the active snapshot via a `read_buffer` pointer indirection in both `update_display_static()` and `update_display_static_bbox()`. When active, the redraw thread skips frame buffer locking entirely since it only reads from the VBI-snapshotted copy. Note: for non-VOSF 8/32-bit modes, guest\_surface now uses an independent SDL surface when double-buffering, so Screen\_blit never writes into `the_buffer`.
 
 ---
 
