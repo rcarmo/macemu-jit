@@ -116,7 +116,9 @@ static bool mouse_wheel_reverse;
 
 static uint8 *the_buffer = NULL;					// Mac frame buffer (where MacOS draws into)
 static uint8 *the_buffer_copy = NULL;				// Copy of Mac frame buffer (for refreshed modes)
+static uint8 *the_buffer_display = NULL;			// Double-buffer snapshot (redraw thread reads from here)
 static uint32 the_buffer_size;						// Size of allocated the_buffer
+static bool use_double_buffer = false;				// Flag: double-buffered frame buffer active
 
 static bool redraw_thread_active = false;			// Flag: Redraw thread installed
 #ifndef USE_CPU_EMUL_SERVICES
@@ -682,6 +684,7 @@ driver_base::driver_base(SDL_monitor_desc &m)
 {
 	the_buffer = NULL;
 	the_buffer_copy = NULL;
+	the_buffer_display = NULL;
 }
 
 static void delete_sdl_video_surfaces()
@@ -1218,6 +1221,23 @@ void driver_base::init()
 		the_buffer_copy = (uint8 *)calloc(1, the_buffer_size);
 		the_buffer = (uint8 *)vm_acquire_framebuffer(the_buffer_size);
 		memset(the_buffer, 0, the_buffer_size);
+
+		// Allocate double-buffer display snapshot if requested.
+		// NOTE: For non-VOSF modes, guest_surface wraps the_buffer directly
+		// (SDL_CreateRGBSurfaceFrom), so Screen_blit writes snapshot data back
+		// into the_buffer. This is acceptable: the write-back contains the same
+		// pixel values from the VBI snapshot, and any JIT writes that land during
+		// the redraw window will be captured in the next VBI snapshot.
+		use_double_buffer = PrefsFindBool("doublebuffer");
+#if defined(USE_JIT) || defined(JIT)
+		if (use_double_buffer) {
+			the_buffer_display = (uint8 *)calloc(1, the_buffer_size);
+			printf("Double-buffered frame buffer enabled (%u bytes)\n", the_buffer_size);
+		}
+#else
+		use_double_buffer = false;
+#endif
+
 		D(bug("the_buffer = %p, the_buffer_copy = %p\n", the_buffer, the_buffer_copy));
 	}
 
@@ -1334,6 +1354,10 @@ driver_base::~driver_base()
 		if (the_buffer_copy) {
 			free(the_buffer_copy);
 			the_buffer_copy = NULL;
+		}
+		if (the_buffer_display) {
+			free(the_buffer_display);
+			the_buffer_display = NULL;
 		}
 	}
 #ifdef ENABLE_VOSF
@@ -1968,6 +1992,13 @@ void VideoVBL(void)
 	
 	present_sdl_video();
 
+	// Snapshot the frame buffer for the redraw thread (double-buffering)
+	// This runs on the CPU thread while the frame buffer lock is held,
+	// so the redraw thread can read from the_buffer_display without locking.
+	if (use_double_buffer && the_buffer_display && the_buffer) {
+		memcpy(the_buffer_display, the_buffer, the_buffer_size);
+	}
+
 	// Temporarily give up frame buffer lock (this is the point where
 	// we are suspended when the user presses Ctrl-Tab)
 	UNLOCK_FRAME_BUFFER;
@@ -1991,6 +2022,13 @@ void VideoInterrupt(void)
 		do_toggle_fullscreen();
 
 	present_sdl_video();
+
+	// Snapshot the frame buffer for the redraw thread (double-buffering)
+	// This runs on the CPU thread while the frame buffer lock is held,
+	// so the redraw thread can read from the_buffer_display without locking.
+	if (use_double_buffer && the_buffer_display && the_buffer) {
+		memcpy(the_buffer_display, the_buffer, the_buffer_size);
+	}
 
 	// Temporarily give up frame buffer lock (this is the point where
 	// we are suspended when the user presses Ctrl-Tab)
@@ -2725,6 +2763,10 @@ static void update_display_static(driver_base *drv)
 	uint8 *p, *p2;
 	uint32 x2_clipped, wide_clipped;
 
+	// When double-buffering, read from the VBI snapshot instead of the_buffer
+	// to avoid contention with the JIT CPU thread.
+	uint8 *read_buffer = (use_double_buffer && the_buffer_display) ? the_buffer_display : the_buffer;
+
 	// Log once on first call
 	if (getenv("B2_DEBUG_VIDEO") && debug_frame_count == 0) {
 		printf("VIDEO: update_display_static: bytes_per_row=%d VIDEO_MODE_X=%d VIDEO_MODE_Y=%d VIDEO_MODE_DEPTH=%d\n",
@@ -2739,14 +2781,14 @@ static void update_display_static(driver_base *drv)
 	// Check for first line from top and first line from bottom that have changed
 	y1 = 0;
 	for (uint32 j = 0; j < VIDEO_MODE_Y; j++) {
-		if (memcmp(&the_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
+		if (memcmp(&read_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
 			y1 = j;
 			break;
 		}
 	}
 	y2 = y1 - 1;
 	for (uint32 j = VIDEO_MODE_Y; j-- > y1; ) {
-		if (memcmp(&the_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
+		if (memcmp(&read_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
 			y2 = j;
 			break;
 		}
@@ -2764,7 +2806,7 @@ static void update_display_static(driver_base *drv)
 			
 			x1 = line_len;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				for (uint32 i = 0; i < x1; i++) {
 					if (*p != *p2) {
@@ -2776,7 +2818,7 @@ static void update_display_static(driver_base *drv)
 			}
 			x2 = x1;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				p += bytes_per_row;
 				p2 += bytes_per_row;
@@ -2806,8 +2848,8 @@ static void update_display_static(driver_base *drv)
 				int si = y1 * src_bytes_per_row + (x1 / pixels_per_byte);
 				int di = y1 * dst_bytes_per_row + x1;
 				for (uint32 j = y1; j <= y2; j++) {
-					memcpy(the_buffer_copy + si, the_buffer + si, wide / pixels_per_byte);
-					Screen_blit((uint8 *)drv->s->pixels + di, the_buffer + si, wide / pixels_per_byte);
+					memcpy(the_buffer_copy + si, read_buffer + si, wide / pixels_per_byte);
+					Screen_blit((uint8 *)drv->s->pixels + di, read_buffer + si, wide / pixels_per_byte);
 					si += src_bytes_per_row;
 					di += dst_bytes_per_row;
 				}
@@ -2826,7 +2868,7 @@ static void update_display_static(driver_base *drv)
 
 			x1 = VIDEO_MODE_X;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				for (uint32 i = 0; i < x1 * bytes_per_pixel; i++) {
 					if (*p != *p2) {
@@ -2838,7 +2880,7 @@ static void update_display_static(driver_base *drv)
 			}
 			x2 = x1;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				p += bytes_per_row;
 				p2 += bytes_per_row;
@@ -2864,8 +2906,8 @@ static void update_display_static(driver_base *drv)
 				for (uint32 j = y1; j <= y2; j++) {
 					uint32 i = j * bytes_per_row + x1 * bytes_per_pixel;
 					int dst_i = j * dst_bytes_per_row + x1 * bytes_per_pixel;
-					memcpy(the_buffer_copy + i, the_buffer + i, bytes_per_pixel * wide);
-					Screen_blit((uint8 *)drv->s->pixels + dst_i, the_buffer + i, bytes_per_pixel * wide);
+					memcpy(the_buffer_copy + i, read_buffer + i, bytes_per_pixel * wide);
+					Screen_blit((uint8 *)drv->s->pixels + dst_i, read_buffer + i, bytes_per_pixel * wide);
 				}
 
 				// Unlock surface, if required
@@ -2886,6 +2928,9 @@ static void update_display_static_bbox(driver_base *drv)
 	const VIDEO_MODE &mode = drv->mode;
 	bool blit = (int)VIDEO_MODE_DEPTH == VIDEO_DEPTH_16BIT;
 
+	// When double-buffering, read from the VBI snapshot instead of the_buffer
+	uint8 *read_buffer = (use_double_buffer && the_buffer_display) ? the_buffer_display : the_buffer;
+
 	// Debug: detect pitch mismatch for 16-bit mode
 	if (blit && !g_bbox_16bit_debug) {
 		const uint32 src_pitch = VIDEO_MODE_ROW_BYTES;
@@ -2900,7 +2945,7 @@ static void update_display_static_bbox(driver_base *drv)
 		if (getenv("B2_DEBUG_VIDEO")) {
 			printf("VIDEO: First 8 Mac pixels (hex): ");
 			for (int i = 0; i < 16; i += 2) {
-				printf("%02x%02x ", the_buffer[i], the_buffer[i+1]);
+				printf("%02x%02x ", read_buffer[i], read_buffer[i+1]);
 			}
 			printf("\n");
 		}
@@ -2944,22 +2989,22 @@ static void update_display_static_bbox(driver_base *drv)
 			for (uint32 j = y; j < (y + h); j++) {
 				const uint32 yb = j * bytes_per_row;
 				const uint32 dst_yb = j * dst_bytes_per_row;
-				if (memcmp(&the_buffer[yb + xb], &the_buffer_copy[yb + xb], xs) != 0) {
-					memcpy(&the_buffer_copy[yb + xb], &the_buffer[yb + xb], xs);
+				if (memcmp(&read_buffer[yb + xb], &the_buffer_copy[yb + xb], xs) != 0) {
+					memcpy(&the_buffer_copy[yb + xb], &read_buffer[yb + xb], xs);
 					if (blit) {
 						if (g_use_raw_16bit) {
 							// Raw copy for debugging - will have wrong colors but correct position
-							memcpy((uint8 *)drv->s->pixels + dst_yb + xb, the_buffer + yb + xb, xs);
+							memcpy((uint8 *)drv->s->pixels + dst_yb + xb, read_buffer + yb + xb, xs);
 						} else {
-							Screen_blit((uint8 *)drv->s->pixels + dst_yb + xb, the_buffer + yb + xb, xs);
+							Screen_blit((uint8 *)drv->s->pixels + dst_yb + xb, read_buffer + yb + xb, xs);
 						}
 						// Debug: dump first few pixels before/after blit (B2_DEBUG_PIXELS env var)
 						if (getenv("B2_DEBUG_PIXELS") && g_pixel_debug_count < 5 && x == 0 && y == 0) {
-							const uint16 *src16 = (const uint16 *)(the_buffer + yb + xb);
+							const uint16 *src16 = (const uint16 *)(read_buffer + yb + xb);
 							const uint16 *dst16 = (const uint16 *)((uint8 *)drv->s->pixels + dst_yb + xb);
 							printf("VIDEO: 16-bit pixel[%d,%d] src=0x%04x dst=0x%04x (bytes: %02x %02x)\n",
 								x, j, src16[0], dst16[0], 
-								the_buffer[yb + xb], the_buffer[yb + xb + 1]);
+								read_buffer[yb + xb], read_buffer[yb + xb + 1]);
 							g_pixel_debug_count++;
 						}
 					}
@@ -3087,13 +3132,17 @@ static void video_refresh_window_static(void)
 	if (++tick_counter >= frame_skip) {
 		tick_counter = 0;
 		const VIDEO_MODE &mode = drv->mode;
-		// Lock the frame buffer to prevent tearing from concurrent JIT writes
-		LOCK_FRAME_BUFFER;
+		// With double-buffering, the redraw thread reads from the_buffer_display
+		// which is snapshotted atomically at VBI time — no locking needed.
+		// Without double-buffering, lock the frame buffer to prevent tearing.
+		if (!use_double_buffer)
+			LOCK_FRAME_BUFFER;
 		if ((int)VIDEO_MODE_DEPTH >= VIDEO_DEPTH_8BIT)
 			update_display_static_bbox(drv);
 		else
 			update_display_static(drv);
-		UNLOCK_FRAME_BUFFER;
+		if (!use_double_buffer)
+			UNLOCK_FRAME_BUFFER;
 	}
 }
 

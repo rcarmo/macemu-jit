@@ -88,6 +88,7 @@ prefs_desc common_prefs_items[] = {
 	{"delay", TYPE_INT32, false,	"additional delay [uS] every 64k instructions"},
 	{"init_grab", TYPE_BOOLEAN, false,	"initially grabbing mouse"},
 	{"xpram", TYPE_STRING, false, "path of xpram file"},
+	{"doublebuffer", TYPE_BOOLEAN, false, "double-buffer frame buffer for JIT"},
 	{NULL, TYPE_END, false, NULL} // End of list
 };
 
@@ -122,6 +123,7 @@ void AddPrefsDefaults(void)
 	PrefsAddInt32("jitcachesize", 8192);
 	PrefsAddBool("jitlazyflush", true);
 	PrefsAddBool("jitinline", true);
+	PrefsAddBool("doublebuffer", false);
 #else
 	PrefsAddBool("jit", false);
 #endif
