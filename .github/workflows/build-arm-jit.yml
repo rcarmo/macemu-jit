@@ -359,6 +359,18 @@ jobs:
         with:
           name: basilisk2-arm32-nojit-vosf
           path: release/nojit-vosf/
+
+      - name: Normalize release asset names
+        run: |
+          for dir in release/jit release/jit-vendored-sdl release/nojit release/nojit-vosf; do
+            variant=$(basename "$dir")
+            if [ -f "$dir/README.md" ]; then
+              mv "$dir/README.md" "$dir/README-$variant.md"
+            fi
+            if [ -f "$dir/BUILD-INFO.txt" ]; then
+              mv "$dir/BUILD-INFO.txt" "$dir/BUILD-INFO-$variant.txt"
+            fi
+          done
           
       - name: Create experimental release
         uses: softprops/action-gh-release@v2
