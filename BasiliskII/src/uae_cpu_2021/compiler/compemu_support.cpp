@@ -4051,38 +4051,48 @@ static inline void create_popalls(void)
 	compemu_raw_jmp_m_indexed(uae_p32(cache_tags), r, sizeof(void *));
 
 	/* now the exit points */
+	/* Each popall stub gets a DMB ISH (Data Memory Barrier, inner-shareable)
+	 * to ensure all JIT-generated stores (especially to the Mac frame buffer)
+	 * are visible to other cores/threads before we return to the emulator loop.
+	 * This prevents the redraw thread from reading stale data. */
 	align_target(align_jumps);
 	popall_do_nothing=get_target();
+	DMB_ISH();
 	raw_inc_sp(stack_space);
 	raw_pop_preserved_regs();
 	compemu_raw_jmp(uae_p32(do_nothing));
 
 	align_target(align_jumps);
 	popall_execute_normal=get_target();
+	DMB_ISH();
 	raw_inc_sp(stack_space);
 	raw_pop_preserved_regs();
 	compemu_raw_jmp(uae_p32(execute_normal));
 
 	align_target(align_jumps);
 	popall_cache_miss=get_target();
+	DMB_ISH();
 	raw_inc_sp(stack_space);
 	raw_pop_preserved_regs();
 	compemu_raw_jmp(uae_p32(cache_miss));
 
 	align_target(align_jumps);
 	popall_recompile_block=get_target();
+	DMB_ISH();
 	raw_inc_sp(stack_space);
 	raw_pop_preserved_regs();
 	compemu_raw_jmp(uae_p32(recompile_block));
 
 	align_target(align_jumps);
 	popall_exec_nostats=get_target();
+	DMB_ISH();
 	raw_inc_sp(stack_space);
 	raw_pop_preserved_regs();
 	compemu_raw_jmp(uae_p32(exec_nostats));
 
 	align_target(align_jumps);
 	popall_check_checksum=get_target();
+	DMB_ISH();
 	raw_inc_sp(stack_space);
 	raw_pop_preserved_regs();
 	compemu_raw_jmp(uae_p32(check_checksum));

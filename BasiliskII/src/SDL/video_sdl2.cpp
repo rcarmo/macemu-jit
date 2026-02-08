@@ -1178,7 +1178,17 @@ void driver_base::init()
 	int aligned_height = (VIDEO_MODE_Y + 15) & ~15;
 
 #ifdef ENABLE_VOSF
+#if defined(USE_JIT) || defined(JIT)
+	// VOSF (Video on SEGV Fault) is incompatible with JIT: the JIT emits
+	// direct ARM STR instructions to write to the Mac frame buffer, bypassing
+	// the mprotect/SIGSEGV mechanism that VOSF uses to track dirty pages.
+	// This results in missed display updates and visual corruption.
+	use_vosf = false;
+	printf("VOSF disabled: incompatible with JIT direct memory writes\n");
+#else
 	use_vosf = true;
+#endif
+	if (use_vosf) {
 	// Allocate memory for frame buffer (SIZE is extended to page-boundary)
 	the_buffer_size = page_extend((aligned_height + 2) * pitch);
 	the_buffer = (uint8 *)vm_acquire_framebuffer(the_buffer_size);
@@ -1200,6 +1210,7 @@ void driver_base::init()
 		vm_release(the_buffer, the_buffer_size);
 		the_host_buffer = NULL;
 	}
+	} // if (use_vosf)
 #endif
 	if (!use_vosf) {
 		// Allocate memory for frame buffer
@@ -1217,11 +1228,11 @@ void driver_base::init()
 
 	adapt_to_video_mode();
 	
-	// set default B/W palette (Mac convention: index 0=black, index 1=white)
+	// set default B/W palette (Mac convention: bit 0=white, bit 1=black)
 	// Blit_Expand_1_To_8 writes raw bit values as palette indices
 	sdl_palette = SDL_AllocPalette(256);
-	sdl_palette->colors[0] = (SDL_Color){ .r = 0,   .g = 0,   .b = 0,   .a = 255 };  // Black
-	sdl_palette->colors[1] = (SDL_Color){ .r = 255, .g = 255, .b = 255, .a = 255 };  // White
+	sdl_palette->colors[0] = (SDL_Color){ .r = 255, .g = 255, .b = 255, .a = 255 };  // White (Mac bit 0)
+	sdl_palette->colors[1] = (SDL_Color){ .r = 0,   .g = 0,   .b = 0,   .a = 255 };  // Black (Mac bit 1)
 	SDL_SetSurfacePalette(s, sdl_palette);
 
 	if (PrefsFindBool("init_grab") && !PrefsFindBool("hardcursor")) grab_mouse();
@@ -3036,9 +3047,11 @@ static void video_refresh_dga_vosf(void)
 	if (++tick_counter >= frame_skip) {
 		tick_counter = 0;
 		if (mainBuffer.dirty) {
+			LOCK_FRAME_BUFFER;
 			LOCK_VOSF;
 			update_display_dga_vosf(drv);
 			UNLOCK_VOSF;
+			UNLOCK_FRAME_BUFFER;
 		}
 	}
 }
@@ -3054,9 +3067,11 @@ static void video_refresh_window_vosf(void)
 	if (++tick_counter >= frame_skip) {
 		tick_counter = 0;
 		if (mainBuffer.dirty) {
+			LOCK_FRAME_BUFFER;
 			LOCK_VOSF;
 			update_display_window_vosf(drv);
 			UNLOCK_VOSF;
+			UNLOCK_FRAME_BUFFER;
 		}
 	}
 }
@@ -3072,10 +3087,13 @@ static void video_refresh_window_static(void)
 	if (++tick_counter >= frame_skip) {
 		tick_counter = 0;
 		const VIDEO_MODE &mode = drv->mode;
+		// Lock the frame buffer to prevent tearing from concurrent JIT writes
+		LOCK_FRAME_BUFFER;
 		if ((int)VIDEO_MODE_DEPTH >= VIDEO_DEPTH_8BIT)
 			update_display_static_bbox(drv);
 		else
 			update_display_static(drv);
+		UNLOCK_FRAME_BUFFER;
 	}
 }
 

@@ -42,13 +42,6 @@ jobs:
             vosf_enabled: false
             artifact_suffix: "-jit"
             
-          # JIT build with VOSF enabled
-          - name: "JIT + VOSF (System SDL2)"
-            jit_enabled: true
-            sdl_source: system
-            vosf_enabled: true
-            artifact_suffix: "-jit-vosf"
-            
           # JIT build with vendored SDL2 (built from source)
           - name: "JIT (Vendored SDL2)"
             jit_enabled: true
@@ -349,12 +342,6 @@ jobs:
           name: basilisk2-arm32-jit
           path: release/jit/
           
-      - name: Download JIT + VOSF artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: basilisk2-arm32-jit-vosf
-          path: release/jit-vosf/
-          
       - name: Download JIT (Vendored SDL2) artifact
         uses: actions/download-artifact@v4
         with:
@@ -393,14 +380,13 @@ jobs:
             - ALSA audio support
             
             ### Build Variants
-            Five build variants are available:
-            1. **JIT** - ARM JIT with system SDL2 (no VOSF)
-            2. **JIT + VOSF** - ARM JIT with VOSF screen updates enabled
-            3. **JIT (Vendored SDL2)** - ARM JIT with SDL2 built from source
-            4. **No-JIT** - Interpreted CPU for debugging (no VOSF)
-            5. **No-JIT + VOSF** - Interpreted CPU with VOSF enabled
+            Four build variants are available:
+            1. **JIT** - ARM JIT with system SDL2 (VOSF auto-disabled)
+            2. **JIT (Vendored SDL2)** - ARM JIT with SDL2 built from source
+            3. **No-JIT** - Interpreted CPU for debugging (no VOSF)
+            4. **No-JIT + VOSF** - Interpreted CPU with VOSF enabled
             
-            **VOSF** (Video On SEGV Fault) uses memory protection to detect which parts of the Mac framebuffer changed, potentially improving performance for partial screen updates.
+            **Note:** VOSF (Video On SEGV Fault) is automatically disabled when JIT is active, as the JIT emits raw ARM store instructions that bypass mprotect-based dirty page detection.
             
             ### Requirements
             - 32-bit Raspberry Pi OS (armhf) / Debian 12 Bookworm
@@ -422,7 +408,6 @@ jobs:
             Built from commit: ${{ github.sha }}
           files: |
             release/jit/*
-            release/jit-vosf/*
             release/jit-vendored-sdl/*
             release/nojit/*
             release/nojit-vosf/*

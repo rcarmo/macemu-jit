@@ -6,7 +6,9 @@ This document tracks the development status, known issues, and actionable items 
 
 **Build**: ✅ Compiles successfully via GitHub Actions (ARM32 cross-compilation on Debian 12)  
 **Runtime**: ⚠️ Runs but has display corruption issues  
-**Fix in progress**: 🔧 RGB565 blitter fix pushed (commit 7211573a) — awaiting hardware validation
+**Fixes applied**:
+- 🔧 RGB565 blitter fix (commit 7211573a) — awaiting hardware validation
+- 🔧 JIT video corruption remediation — DMB ISH barriers, frame buffer locking, VOSF auto-disable, B/W palette fix (see [JIT_FINDINGS.md](JIT_FINDINGS.md) and [TODO.md](TODO.md))
 
 ## Known Issues
 
@@ -25,6 +27,9 @@ This document tracks the development status, known issues, and actionable items 
 
 | Area                                      | Likelihood | Notes                                                                                                                                   |
 | ----------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **JIT/redraw thread data race**           | **CONFIRMED** | JIT emits raw ARM `STR` to `the_buffer` with no locking; redraw thread reads concurrently via `memcmp`/`memcpy`. **Fixed**: DMB ISH barriers + frame buffer locking. See [JIT_FINDINGS.md](JIT_FINDINGS.md) |
+| **Missing ARM memory barriers**           | **CONFIRMED** | No `DMB`/`DSB` in JIT codegen; stores invisible across cores on Cortex-A53 SMP. **Fixed**: `DMB_ISH()` at all six `popall_*` exit stubs |
+| **VOSF incompatible with JIT**            | **CONFIRMED** | `mprotect`-based dirty tracking broken by JIT direct writes. **Fixed**: auto-disabled via compile-time guard |
 | Screen_blit format conversion             | HIGH       | Mac is big-endian, ARM is little-endian. The blitters in `video_blit.cpp` may not handle all depth/format combinations correctly on ARM |
 | Pitch mismatch in update_display_static   | MEDIUM     | The `update_display_static()` and `update_display_static_bbox()` functions have separate code paths for low bit depths vs 8+ bits       |
 | SDL_UpdateTexture vs guest_surface format | MEDIUM     | Recent change from `SDL_LockTexture` to `SDL_UpdateTexture` may have format assumptions                                                 |
@@ -97,24 +102,30 @@ Mac framebuffer (1/2/4/8-bit) → guest_surface (8-bit paletted)
 
 **Status**: ⏳ Awaiting hardware test to confirm fix
 
-#### Gap 3: VOSF on ARM
+#### Gap 3: VOSF on ARM — ⚠️ INCOMPATIBLE WITH JIT
 
-**Location**: [configure.ac#L1503](BasiliskII/src/Unix/configure.ac#L1503)
+**Location**: [configure.ac#L1503](BasiliskII/src/Unix/configure.ac#L1503), [video_sdl2.cpp driver_base::init()](BasiliskII/src/SDL/video_sdl2.cpp)
 
-**Analysis**: VOSF (Video On SEGV Fault) CAN be enabled on ARM if signal handling is available. The configure script checks for `sigsegv_recovery` which is set via cross-compile variables.
+**Analysis**: VOSF (Video On SEGV Fault) CAN be enabled on ARM if signal handling is available. However, **VOSF is fundamentally incompatible with JIT direct memory writes**:
 
-**CI Build Matrix** now includes VOSF variants:
+- The JIT emits raw ARM `STR` instructions (`canbang=1`) that bypass `mprotect`-based dirty page detection
+- Every JIT write to a re-protected video page triggers a SIGSEGV → handler → `mprotect` cycle (~4,500 signals/sec at 60fps for a 640×480×8bpp framebuffer)
+- Race window between `PFLAG_CLEAR_RANGE` and `Screen_blit` in `update_display_window_vosf()` causes missed updates
+- See [JIT_FINDINGS.md §4](JIT_FINDINGS.md) for full analysis
+
+**Resolution**: VOSF is now **auto-disabled at compile time** when JIT is defined via a `#if defined(USE_JIT) || defined(JIT)` guard in `driver_base::init()`. The JIT+VOSF CI build variant has been removed as redundant.
+
+**CI Build Matrix** (updated):
 | Build | JIT | VOSF | SDL2 |
 |-------|-----|------|------|
-| `basilisk2-arm32-jit` | ✅ | ❌ | System |
-| `basilisk2-arm32-jit-vosf` | ✅ | ✅ | System |
-| `basilisk2-arm32-jit-vendored-sdl` | ✅ | ❌ | Vendored |
+| `basilisk2-arm32-jit` | ✅ | ❌ (auto-disabled) | System |
+| `basilisk2-arm32-jit-vendored-sdl` | ✅ | ❌ (auto-disabled) | Vendored |
 | `basilisk2-arm32-nojit` | ❌ | ❌ | System |
 | `basilisk2-arm32-nojit-vosf` | ❌ | ✅ | System |
 
-**VOSF benefits**: Uses memory protection to detect dirty pages, only updates changed regions of framebuffer.
+**VOSF benefits** (non-JIT only): Uses memory protection to detect dirty pages, only updates changed regions of framebuffer.
 
-**Status**: ✅ VOSF builds added to CI matrix
+**Status**: ✅ VOSF works for non-JIT builds; auto-disabled for JIT builds
 
 #### Gap 4: ROM Patching (JIT vs Non-JIT)
 
@@ -172,32 +183,22 @@ ExpandMap[i] = SDL_MapRGB(drv->s->format, pal[c*3+0], pal[c*3+1], pal[c*3+2]);
 - Set Mac to 2-bit/4-bit greyscale and check gradient rendering
 - Check if `ExpandMap` values match expected SDL pixel format
 
-**🐛 BUG FOUND: Default B/W palette is inverted!**
+**🐛 ~~BUG FOUND~~ ✅ FIXED: Default B/W palette**
 
-Location: [video_sdl2.cpp#L1221-L1223](BasiliskII/src/SDL/video_sdl2.cpp#L1221-L1223)
+Location: [video_sdl2.cpp#L1231](BasiliskII/src/SDL/video_sdl2.cpp#L1231)
 
+**Problem** (was): Only index 1 was set to black; index 0 was uninitialized. Mac monochrome convention is bit 0 = WHITE, bit 1 = BLACK. `Blit_Expand_1_To_8` writes raw bit values as palette indices.
+
+**Fix applied**:
 ```c
-// set default B/W palette
+// set default B/W palette (Mac convention: bit 0=white, bit 1=black)
 sdl_palette = SDL_AllocPalette(256);
-sdl_palette->colors[1] = (SDL_Color){ .r = 0, .g = 0, .b = 0, .a = 255 };
+sdl_palette->colors[0] = (SDL_Color){ .r = 255, .g = 255, .b = 255, .a = 255 };  // White (Mac bit 0)
+sdl_palette->colors[1] = (SDL_Color){ .r = 0,   .g = 0,   .b = 0,   .a = 255 };  // Black (Mac bit 1)
 SDL_SetSurfacePalette(s, sdl_palette);
 ```
 
-**Problem**: 
-- Only index 1 is set to black; index 0 is uninitialized (likely 0,0,0,0 = black with alpha=0)
-- Mac monochrome convention: **bit 0 = BLACK, bit 1 = WHITE** (inverted from intuition)
-- `Blit_Expand_1_To_8` writes raw bit values (0 or 1) as palette indices
-- Result: Mac white (bit=1) → index 1 → black | Mac black (bit=0) → index 0 → uninitialized black
-- **Both values produce black — monochrome display will be all black!**
-
-**Fix needed**:
-```c
-// set default B/W palette (Mac convention: 0=black, 1=white)
-sdl_palette = SDL_AllocPalette(256);
-sdl_palette->colors[0] = (SDL_Color){ .r = 0,   .g = 0,   .b = 0,   .a = 255 };  // Black
-sdl_palette->colors[1] = (SDL_Color){ .r = 255, .g = 255, .b = 255, .a = 255 };  // White
-SDL_SetSurfacePalette(s, sdl_palette);
-```
+**Status**: ✅ Fixed — awaiting 1-bit mode hardware test
 
 **Note**: The MacOS Monitors control panel should send proper palette data via `set_palette()` which will correctly populate `ExpandMap[]` and set the SDL palette. But the **default** palette used before MacOS initializes video is wrong.
 
@@ -317,15 +318,18 @@ BGR blitters are for unusual display configurations (BGR pixel order) not common
 
 ## CI Build Matrix
 
-The CI workflow builds three variants:
+The CI workflow builds four variants:
 
-| Variant | JIT | SDL2 | Use Case |
-|---------|-----|------|----------|
-| `basilisk2-arm32-jit` | ✅ Enabled | System | Main release build |
-| `basilisk2-arm32-jit-vendored-sdl` | ✅ Enabled | From source | Matches original build config |
-| `basilisk2-arm32-nojit` | ❌ Disabled | System | Isolate JIT vs video bugs |
+| Variant | JIT | VOSF | SDL2 | Use Case |
+|---------|-----|------|------|----------|
+| `basilisk2-arm32-jit` | ✅ Enabled | ❌ Auto-disabled | System | Main release build |
+| `basilisk2-arm32-jit-vendored-sdl` | ✅ Enabled | ❌ Auto-disabled | From source | Matches original build config |
+| `basilisk2-arm32-nojit` | ❌ Disabled | ❌ | System | Isolate JIT vs video bugs |
+| `basilisk2-arm32-nojit-vosf` | ❌ Disabled | ✅ Enabled | System | Test VOSF path (non-JIT only) |
 
 The Python blitter tests run on every push as a separate job.
+
+**Note**: The JIT+VOSF build variant was removed — VOSF is auto-disabled at runtime when JIT is active, making it redundant. See [Gap 3](#gap-3-vosf-on-arm--️-incompatible-with-jit).
 
 ---
 

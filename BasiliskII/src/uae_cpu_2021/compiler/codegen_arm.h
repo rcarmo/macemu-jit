@@ -1289,4 +1289,19 @@ enum {
 #define CC_PKHTB_rrrASRi(cc,Rd,Rn,Rm,s)		_W(((cc) << 28) | (0x68 << 20) | (Rn << 16) | (Rd << 12) | (0x5 << 4) | SHIFT_PK(Rm, s))
 #define PKHTB_rrrASRi(Rd,Rn,Rm,s)			CC_PKHTB_rrrASRi(NATIVE_CC_AL,Rd,Rn,Rm,s)
 
+/* Data Memory Barrier instructions (ARMv7+)
+ * Used to ensure store visibility across cores before JIT block exit.
+ * Encoding: 11110 1010111 1111 1111 0000 0101 option
+ *   option=0xF (SY)    Full system barrier
+ *   option=0xE (ST)    Store-only barrier (full system)
+ *   option=0xB (ISH)   Inner shareable barrier (loads+stores)
+ *   option=0xA (ISHST) Inner shareable store-only barrier
+ */
+#define DMB_SY()							_W(0xf57ff05f)
+#define DMB_ST()							_W(0xf57ff05e)
+#define DMB_ISH()							_W(0xf57ff05b)
+#define DMB_ISHST()							_W(0xf57ff05a)
+#define DSB_SY()							_W(0xf57ff04f)
+#define DSB_ISH()							_W(0xf57ff04b)
+
 #endif /* ARM_RTASM_H */
