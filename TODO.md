@@ -99,7 +99,7 @@ In `driver_base::init()` (line 1180), add a check: if JIT is enabled, skip the V
 
 - [x] Add `USE_JIT` / `JIT` guard in `driver_base::init()` — VOSF is now auto-disabled at compile time when JIT is defined
 - [x] Non-VOSF fallback path is exercised in the JIT+VOSF build (compile-time guard skips VOSF init)
-- [ ] Update `BRANCH_GAPS.md` to document this decision
+- [x] Update `BRANCH_GAPS.md` to document this decision
 - [x] Remove JIT+VOSF build variant from CI matrix
 
 > **Done.** A `#if defined(USE_JIT) || defined(JIT)` guard in `driver_base::init()` in `video_sdl2.cpp` forces `use_vosf = false` and prints a diagnostic message. The VOSF init block is wrapped in `if (use_vosf)` so it is cleanly skipped. This means the JIT+VOSF build variant now produces identical runtime behavior to the plain JIT build — the CI matrix entry has been removed accordingly.
@@ -132,6 +132,7 @@ Run the `basilisk2-arm32-jit` build (with Phase 1 fixes applied) at 16-bit depth
 - [ ] Verify color accuracy (no red/blue swap, no green shift)
 - [ ] Verify the B2_DEBUG_PIXELS output matches expected values
 - [ ] Compare with `B2_RAW_16BIT=1` mode to isolate blitter vs pipeline issues
+- [ ] Run `BasiliskII/tests/test_blit_rgb565_obo` on host as a math sanity check
 
 ### 3.2 Test low bit depths (1/2/4/8-bit)
 
