@@ -184,14 +184,19 @@ jobs:
           export CC=arm-linux-gnueabihf-gcc
           export CXX=arm-linux-gnueabihf-g++
           
-          # Set PKG_CONFIG_PATH based on SDL source
+          # Set pkg-config paths (always include armhf system .pc dirs)
+          export ARMHF_PKGCONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
           if [ "${{ matrix.sdl_source }}" = "vendored" ]; then
-            export PKG_CONFIG_PATH=/opt/sdl2-armhf/lib/pkgconfig
+            export PKG_CONFIG_PATH="/opt/sdl2-armhf/lib/pkgconfig:${ARMHF_PKGCONFIG_PATH}"
             export LDFLAGS="-L/opt/sdl2-armhf/lib -Wl,-rpath,/opt/sdl2-armhf/lib"
             export CPPFLAGS="-I/opt/sdl2-armhf/include"
           else
-            export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+            export PKG_CONFIG_PATH="${ARMHF_PKGCONFIG_PATH}"
           fi
+
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+          pkg-config --modversion libvncserver || true
+          pkg-config --libs libvncserver || true
           
           # Set cross-compile variables for ARM Linux signal handling
           export BII_CROSS_HAVE_EXTENDED_SIGNALS=yes
@@ -243,11 +248,14 @@ jobs:
           export CXX=arm-linux-gnueabihf-g++
           
           if [ "${{ matrix.sdl_source }}" = "vendored" ]; then
-            export PKG_CONFIG_PATH=/opt/sdl2-armhf/lib/pkgconfig
+            export PKG_CONFIG_PATH="/opt/sdl2-armhf/lib/pkgconfig:/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
             export LDFLAGS="-L/opt/sdl2-armhf/lib -Wl,-rpath,/opt/sdl2-armhf/lib"
           else
-            export PKG_CONFIG_PATH=/usr/lib/arm-linux-gnueabihf/pkgconfig
+            export PKG_CONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
           fi
+
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+          pkg-config --libs libvncserver || true
           
           # Build and capture output
           if ! make -j$(nproc) 2>&1 | tee build.log; then
