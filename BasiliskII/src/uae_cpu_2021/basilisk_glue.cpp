@@ -104,8 +104,11 @@ bool Init680x0(void)
 	init_m68k();
 #if USE_JIT
 	UseJIT = compiler_use_jit();
+	printf("JIT: compiler_use_jit() returned %s\n", UseJIT ? "true" : "false");
 	if (UseJIT)
 	    compiler_init();
+#else
+	printf("JIT: not compiled in (USE_JIT=0)\n");
 #endif
 	return true;
 }
@@ -144,11 +147,15 @@ void Start680x0(void)
 {
 	m68k_reset();
 #if USE_JIT
-    if (UseJIT)
+    if (UseJIT) {
+	printf("JIT: starting compiled execution\n");
 	m68k_compile_execute();
-    else
+    } else
 #endif
+    {
+	printf("CPU: starting interpreted execution\n");
 	m68k_execute();
+    }
 }
 
 

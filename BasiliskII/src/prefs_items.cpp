@@ -119,7 +119,7 @@ void AddPrefsDefaults(void)
 	
 #if USE_JIT
 	// JIT compiler specific options
-//	PrefsAddBool("jit", true);
+	PrefsAddBool("jit", true);
 	PrefsAddBool("jitfpu", true);
 	PrefsAddBool("jitdebug", false);
 	PrefsAddInt32("jitcachesize", 8192);

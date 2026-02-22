@@ -7,6 +7,7 @@ This document tracks the development status, known issues, and actionable items 
 **Build**: ✅ Compiles successfully via GitHub Actions (ARM32 cross-compilation on Debian 12)  
 **Runtime**: ⚠️ Runs but has display corruption issues  
 **Fixes applied**:
+
 - 🔧 RGB565 blitter fix (commit 7211573a) — awaiting hardware validation
 - 🔧 JIT video corruption remediation — DMB ISH barriers, frame buffer locking, VOSF auto-disable, B/W palette fix (see [JIT_FINDINGS.md](JIT_FINDINGS.md) and [TODO.md](TODO.md))
 
@@ -25,16 +26,16 @@ This document tracks the development status, known issues, and actionable items 
 
 **Root Cause Candidates**:
 
-| Area                                      | Likelihood | Notes                                                                                                                                   |
-| ----------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Area                                      | Likelihood    | Notes                                                                                                                                                                                                       |
+| ----------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **JIT/redraw thread data race**           | **CONFIRMED** | JIT emits raw ARM `STR` to `the_buffer` with no locking; redraw thread reads concurrently via `memcmp`/`memcpy`. **Fixed**: DMB ISH barriers + frame buffer locking. See [JIT_FINDINGS.md](JIT_FINDINGS.md) |
-| **Missing ARM memory barriers**           | **CONFIRMED** | No `DMB`/`DSB` in JIT codegen; stores invisible across cores on Cortex-A53 SMP. **Fixed**: `DMB_ISH()` at all six `popall_*` exit stubs |
-| **VOSF incompatible with JIT**            | **CONFIRMED** | `mprotect`-based dirty tracking broken by JIT direct writes. **Fixed**: auto-disabled via compile-time guard |
-| Screen_blit format conversion             | HIGH       | Mac is big-endian, ARM is little-endian. The blitters in `video_blit.cpp` may not handle all depth/format combinations correctly on ARM |
-| Pitch mismatch in update_display_static   | MEDIUM     | The `update_display_static()` and `update_display_static_bbox()` functions have separate code paths for low bit depths vs 8+ bits       |
-| SDL_UpdateTexture vs guest_surface format | MEDIUM     | Recent change from `SDL_LockTexture` to `SDL_UpdateTexture` may have format assumptions                                                 |
-| JIT memory byte-swap operations           | LOW        | ARM JIT uses `REV`/`REV16`/`REVSH` instructions for byte swapping - these appear correct                                                |
-| Texture pixel format mismatch             | MEDIUM     | Texture is BGRA8888, but guest surfaces vary by depth                                                                                   |
+| **Missing ARM memory barriers**           | **CONFIRMED** | No `DMB`/`DSB` in JIT codegen; stores invisible across cores on Cortex-A53 SMP. **Fixed**: `DMB_ISH()` at all six `popall_*` exit stubs                                                                     |
+| **VOSF incompatible with JIT**            | **CONFIRMED** | `mprotect`-based dirty tracking broken by JIT direct writes. **Fixed**: auto-disabled via compile-time guard                                                                                                |
+| Screen_blit format conversion             | HIGH          | Mac is big-endian, ARM is little-endian. The blitters in `video_blit.cpp` may not handle all depth/format combinations correctly on ARM                                                                     |
+| Pitch mismatch in update_display_static   | MEDIUM        | The `update_display_static()` and `update_display_static_bbox()` functions have separate code paths for low bit depths vs 8+ bits                                                                           |
+| SDL_UpdateTexture vs guest_surface format | MEDIUM        | Recent change from `SDL_LockTexture` to `SDL_UpdateTexture` may have format assumptions                                                                                                                     |
+| JIT memory byte-swap operations           | LOW           | ARM JIT uses `REV`/`REV16`/`REVSH` instructions for byte swapping - these appear correct                                                                                                                    |
+| Texture pixel format mismatch             | MEDIUM        | Texture is BGRA8888, but guest surfaces vary by depth                                                                                                                                                       |
 
 ---
 
@@ -97,6 +98,7 @@ Mac framebuffer (1/2/4/8-bit) → guest_surface (8-bit paletted)
 2. `Blit_RGB565_OBO` formula was marked "untested" and was completely wrong
 
 **Fix applied** (commit 7211573a):
+
 - Changed `native_byte_order` to `false` on little-endian hosts
 - Rewrote `Blit_RGB565_OBO` formula with correct bit extraction (validated with Python)
 
@@ -116,12 +118,13 @@ Mac framebuffer (1/2/4/8-bit) → guest_surface (8-bit paletted)
 **Resolution**: VOSF is now **auto-disabled at compile time** when JIT is defined via a `#if defined(USE_JIT) || defined(JIT)` guard in `driver_base::init()`. The JIT+VOSF CI build variant has been removed as redundant.
 
 **CI Build Matrix** (updated):
-| Build | JIT | VOSF | SDL2 |
-|-------|-----|------|------|
-| `basilisk2-arm32-jit` | ✅ | ❌ (auto-disabled) | System |
-| `basilisk2-arm32-jit-vendored-sdl` | ✅ | ❌ (auto-disabled) | Vendored |
-| `basilisk2-arm32-nojit` | ❌ | ❌ | System |
-| `basilisk2-arm32-nojit-vosf` | ❌ | ✅ | System |
+
+| Build                              | JIT | VOSF               | SDL2     |
+| ---------------------------------- | --- | ------------------ | -------- |
+| `basilisk2-arm32-jit`              | ✅  | ❌ (auto-disabled) | System   |
+| `basilisk2-arm32-jit-vendored-sdl` | ✅  | ❌ (auto-disabled) | Vendored |
+| `basilisk2-arm32-nojit`            | ❌  | ❌                 | System   |
+| `basilisk2-arm32-nojit-vosf`       | ❌  | ✅                 | System   |
 
 **VOSF benefits** (non-JIT only): Uses memory protection to detect dirty pages, only updates changed regions of framebuffer.
 
@@ -144,6 +147,7 @@ Both `uae_cpu/basilisk_glue.cpp` and `uae_cpu_2021/basilisk_glue.cpp` include th
 **Problem**: Low bit depth modes (1-bit monochrome, 2-bit greyscale, 4-bit greyscale/color) use a different code path with potential endianness issues.
 
 **Pipeline for 1/2/4-bit modes**:
+
 ```
 Mac framebuffer (1/2/4-bit packed)
     → Blit_Expand_*_To_8() expands to 8-bit indices
@@ -160,6 +164,7 @@ Mac framebuffer (1/2/4-bit packed)
 | `Blit_Expand_4_To_8` | 1 byte (2 pixels) | 2 bytes (2 indices) | 4-bit extraction MSB-first |
 
 **`ExpandMap[]` initialization** ([video_sdl2.cpp#L2049](BasiliskII/src/SDL/video_sdl2.cpp#L2049)):
+
 ```c
 ExpandMap[i] = SDL_MapRGB(drv->s->format, pal[c*3+0], pal[c*3+1], pal[c*3+2]);
 ```
@@ -171,14 +176,17 @@ ExpandMap[i] = SDL_MapRGB(drv->s->format, pal[c*3+0], pal[c*3+1], pal[c*3+2]);
 2. **ExpandMap type mismatch**: `ExpandMap` is `uint32` but `Blit_Expand_*_To_8` writes `uint8` indices. The subsequent `Blit_Expand_*_To_16/32` functions use `ExpandMap` as a lookup table. On 16-bit destination, this writes `uint16` values to memory — **potential endianness issue if destination expects different byte order**.
 
 3. **Destination offset calculation** ([video_sdl2.cpp#L2795](BasiliskII/src/SDL/video_sdl2.cpp#L2795)):
+
    ```c
    int di = y1 * dst_bytes_per_row + x1;
    ```
+
    For `x1` in pixel units and destination in bytes, this assumes 1 byte per pixel for the expanded 8-bit surface. But `drv->s` is a 32-bit BGRA surface, so `x1` should be multiplied by `BytesPerPixel`.
 
 4. **Screen_blit function selection**: For low bit depths, `Screen_blitter_init()` selects based on `native_byte_order` which we fixed to `false` for 16-bit. But for 8-bit paletted → 32-bit BGRA, which blitter is used? The `Blit_Expand_8_To_32` path goes through `ExpandMap[]` which already contains SDL-native pixel values.
 
 **Testing needed**:
+
 - Set Mac to 1-bit B&W mode and check if display inverts or garbles
 - Set Mac to 2-bit/4-bit greyscale and check gradient rendering
 - Check if `ExpandMap` values match expected SDL pixel format
@@ -190,6 +198,7 @@ Location: [video_sdl2.cpp#L1231](BasiliskII/src/SDL/video_sdl2.cpp#L1231)
 **Problem** (was): Only index 1 was set to black; index 0 was uninitialized. Mac monochrome convention is bit 0 = WHITE, bit 1 = BLACK. `Blit_Expand_1_To_8` writes raw bit values as palette indices.
 
 **Fix applied**:
+
 ```c
 // set default B/W palette (Mac convention: bit 0=white, bit 1=black)
 sdl_palette = SDL_AllocPalette(256);
@@ -203,6 +212,7 @@ SDL_SetSurfacePalette(s, sdl_palette);
 **Note**: The MacOS Monitors control panel should send proper palette data via `set_palette()` which will correctly populate `ExpandMap[]` and set the SDL palette. But the **default** palette used before MacOS initializes video is wrong.
 
 **Debug approach**:
+
 ```bash
 # Enable pixel debugging
 export B2_DEBUG_PIXELS=1
@@ -216,18 +226,15 @@ export B2_DEBUG_VIDEO=1
 ### High Priority
 
 1. ~~**[BUG]** Add diagnostic mode to dump pixel data before/after Screen_blit~~ ✅ DONE
-
    - Added `B2_DEBUG_PIXELS` env var (commit 7211573a)
    - Added blitter selection logging to `Screen_blitter_init()`
 
 2. ~~**[BUG]** Verify 16-bit format conversion~~ ✅ FIX APPLIED
-
    - Fixed `native_byte_order` parameter in video_sdl2.cpp
    - Fixed `Blit_RGB565_OBO` formula in video_blit.cpp
    - Validated with Python test suite (all colors pass)
 
 3. **[BUG]** Test with raw memcpy for low bit depths
-
    - Location: video_sdl2.cpp `update_display_static()`
    - Action: Bypass Screen_blit and use direct memcpy to isolate issue
    - Existing debug: `B2_RAW_16BIT` env var exists for 16-bit
@@ -239,17 +246,14 @@ export B2_DEBUG_VIDEO=1
 ### Medium Priority
 
 5. **[FEATURE]** Add comprehensive video debug logging
-
    - Existing: `B2_DEBUG_VIDEO` env var
    - Action: Extend to log pixel format at each stage of pipeline
 
 6. **[INVESTIGATE]** Compare master branch video path
-
    - The master branch uses the same video_sdl2.cpp but without ARM JIT
    - Test if corruption occurs with `--disable-jit-compiler`
 
 7. **[INVESTIGATE]** Test with software renderer
-
    - Bypass OpenGL ES entirely
    - Use `SDL_HINT_RENDER_DRIVER=software`
 
@@ -260,7 +264,6 @@ export B2_DEBUG_VIDEO=1
 ### Low Priority
 
 9. **[CLEANUP]** Remove dead debug code from present_sdl_video()
-
    - Commit 3b448b3c removed some debug logging
    - Some g\_\* debug variables remain unused
 
@@ -272,13 +275,13 @@ export B2_DEBUG_VIDEO=1
 
 ## Debug Environment Variables
 
-| Variable          | Purpose                                        |
-| ----------------- | ---------------------------------------------- |
-| `B2_DEBUG_VIDEO`  | Enable video pipeline logging                  |
-| `B2_DEBUG_PIXELS` | Dump pixel values before/after blit (16-bit)   |
-| `B2_DEBUG_INPUT`  | Enable evdev input logging                     |
-| `B2_RAW_16BIT`    | Bypass Screen_blit for 16-bit mode             |
-| `B2_EVDEV_MOUSE` | Override evdev mouse device path   |
+| Variable          | Purpose                                      |
+| ----------------- | -------------------------------------------- |
+| `B2_DEBUG_VIDEO`  | Enable video pipeline logging                |
+| `B2_DEBUG_PIXELS` | Dump pixel values before/after blit (16-bit) |
+| `B2_DEBUG_INPUT`  | Enable evdev input logging                   |
+| `B2_RAW_16BIT`    | Bypass Screen_blit for 16-bit mode           |
+| `B2_EVDEV_MOUSE`  | Override evdev mouse device path             |
 
 ---
 
@@ -292,19 +295,20 @@ python3 BasiliskII/src/CrossPlatform/test_blitters.py
 
 ### Test Results Summary
 
-| Blitter | Status | Notes |
-|---------|--------|-------|
-| `Blit_RGB555_NBO` | ✅ PASS | Byte swap only |
-| `Blit_RGB565_OBO` | ✅ PASS | Fixed in commit 7211573a |
-| `Blit_RGB888_NBO` | ✅ PASS | 32-bit byte swap |
-| `Blit_BGR555_NBO` | ✅ PASS | Marked "untested" in code |
-| `Blit_BGR555_OBO` | ✅ PASS | Marked "untested" in code |
+| Blitter           | Status  | Notes                             |
+| ----------------- | ------- | --------------------------------- |
+| `Blit_RGB555_NBO` | ✅ PASS | Byte swap only                    |
+| `Blit_RGB565_OBO` | ✅ PASS | Fixed in commit 7211573a          |
+| `Blit_RGB888_NBO` | ✅ PASS | 32-bit byte swap                  |
+| `Blit_BGR555_NBO` | ✅ PASS | Marked "untested" in code         |
+| `Blit_BGR555_OBO` | ✅ PASS | Marked "untested" in code         |
 | `Blit_BGR888_NBO` | ❌ FAIL | Bug in formula (not used on SDL2) |
 | `Blit_BGR888_OBO` | ❌ FAIL | Bug in formula (not used on SDL2) |
 
 ### BGR888 Bug Analysis
 
 The `Blit_BGR888_NBO` formula (LE) is broken:
+
 ```c
 dst = ((src) & 0xff00ff) | (((src) & 0xff00) << 16)
 ```
@@ -320,12 +324,12 @@ BGR blitters are for unusual display configurations (BGR pixel order) not common
 
 The CI workflow builds four variants:
 
-| Variant | JIT | VOSF | SDL2 | Use Case |
-|---------|-----|------|------|----------|
-| `basilisk2-arm32-jit` | ✅ Enabled | ❌ Auto-disabled | System | Main release build |
-| `basilisk2-arm32-jit-vendored-sdl` | ✅ Enabled | ❌ Auto-disabled | From source | Matches original build config |
-| `basilisk2-arm32-nojit` | ❌ Disabled | ❌ | System | Isolate JIT vs video bugs |
-| `basilisk2-arm32-nojit-vosf` | ❌ Disabled | ✅ Enabled | System | Test VOSF path (non-JIT only) |
+| Variant                            | JIT         | VOSF             | SDL2        | Use Case                      |
+| ---------------------------------- | ----------- | ---------------- | ----------- | ----------------------------- |
+| `basilisk2-arm32-jit`              | ✅ Enabled  | ❌ Auto-disabled | System      | Main release build            |
+| `basilisk2-arm32-jit-vendored-sdl` | ✅ Enabled  | ❌ Auto-disabled | From source | Matches original build config |
+| `basilisk2-arm32-nojit`            | ❌ Disabled | ❌               | System      | Isolate JIT vs video bugs     |
+| `basilisk2-arm32-nojit-vosf`       | ❌ Disabled | ✅ Enabled       | System      | Test VOSF path (non-JIT only) |
 
 The Python blitter tests run on every push as a separate job.
 
@@ -339,35 +343,35 @@ The following can be done purely through code analysis and CI builds:
 
 ### Code Analysis & Fixes
 
-| Task | Difficulty | Impact | Status |
-|------|------------|--------|--------|
-| Fix RGB565 OBO blitter formula | Medium | High | ✅ DONE (commit 7211573a) |
-| Fix `native_byte_order` parameter | Easy | High | ✅ DONE (commit 7211573a) |
-| Create Python blitter validation suite | Medium | High | ✅ DONE |
-| Audit BGR555 blitters | Medium | Low | ✅ TESTED (pass) |
-| Fix BGR888 NBO/OBO blitters | Medium | Low | 🔲 BUGS FOUND (not used on SDL2) |
-| Audit `Blit_Expand_*_To_*` functions for endianness | Medium | High | 🔲 Not started |
-| Static analysis with cppcheck/clang-tidy | Easy | Low | 🔲 Not started |
-| Review pitch calculations in update_display_static | Medium | High | 🔲 Not started |
+| Task                                                | Difficulty | Impact | Status                           |
+| --------------------------------------------------- | ---------- | ------ | -------------------------------- |
+| Fix RGB565 OBO blitter formula                      | Medium     | High   | ✅ DONE (commit 7211573a)        |
+| Fix `native_byte_order` parameter                   | Easy       | High   | ✅ DONE (commit 7211573a)        |
+| Create Python blitter validation suite              | Medium     | High   | ✅ DONE                          |
+| Audit BGR555 blitters                               | Medium     | Low    | ✅ TESTED (pass)                 |
+| Fix BGR888 NBO/OBO blitters                         | Medium     | Low    | 🔲 BUGS FOUND (not used on SDL2) |
+| Audit `Blit_Expand_*_To_*` functions for endianness | Medium     | High   | 🔲 Not started                   |
+| Static analysis with cppcheck/clang-tidy            | Easy       | Low    | 🔲 Not started                   |
+| Review pitch calculations in update_display_static  | Medium     | High   | 🔲 Not started                   |
 
 ### Testing Infrastructure
 
-| Task | Difficulty | Impact | Status |
-|------|------------|--------|--------|
-| Unit tests for pixel format conversions | Medium | High | ✅ DONE (`test_blitters.py`) |
-| CI matrix for ARM32 build variants | Easy | Medium | ✅ DONE |
-| CI job for Python blitter tests | Easy | Medium | ✅ DONE |
-| Add build with `--disable-jit` for comparison | Easy | Medium | ✅ DONE (matrix variant) |
-| Add build with vendored SDL2 | Medium | Medium | ✅ DONE (matrix variant) |
-| Headless test mode (no display) | Hard | Low | 🔲 Not started |
+| Task                                          | Difficulty | Impact | Status                       |
+| --------------------------------------------- | ---------- | ------ | ---------------------------- |
+| Unit tests for pixel format conversions       | Medium     | High   | ✅ DONE (`test_blitters.py`) |
+| CI matrix for ARM32 build variants            | Easy       | Medium | ✅ DONE                      |
+| CI job for Python blitter tests               | Easy       | Medium | ✅ DONE                      |
+| Add build with `--disable-jit` for comparison | Easy       | Medium | ✅ DONE (matrix variant)     |
+| Add build with vendored SDL2                  | Medium     | Medium | ✅ DONE (matrix variant)     |
+| Headless test mode (no display)               | Hard       | Low    | 🔲 Not started               |
 
 ### Documentation & Cleanup
 
-| Task | Difficulty | Impact | Status |
-|------|------------|--------|--------|
-| Document all debug env vars | Easy | Medium | 🔲 Not started |
-| Remove dead code from video_sdl2.cpp | Easy | Low | 🔲 Not started |
-| Add architecture diagram for video pipeline | Medium | Medium | 🔲 Not started |
+| Task                                        | Difficulty | Impact | Status         |
+| ------------------------------------------- | ---------- | ------ | -------------- |
+| Document all debug env vars                 | Easy       | Medium | 🔲 Not started |
+| Remove dead code from video_sdl2.cpp        | Easy       | Low    | 🔲 Not started |
+| Add architecture diagram for video pipeline | Medium     | Medium | 🔲 Not started |
 
 ### Next Recommended Actions (No Hardware Needed)
 
@@ -425,11 +429,11 @@ The current ARM JIT only accelerates integer 68k operations. Floating-point inst
 
 The ARAnyM project (source of this JIT) only implemented FPU JIT for x86/x86-64 using x87 stack-based instructions. The ARM architecture requires a completely different approach:
 
-| Aspect | x86 FPU JIT | ARM FPU JIT (needed) |
-|--------|-------------|----------------------|
-| **Register model** | x87 stack (ST0-ST7) | VFP/NEON registers (D0-D31) |
-| **Precision** | 80-bit extended | 64-bit double max |
-| **Rounding modes** | x87 control word | FPSCR register |
+| Aspect             | x86 FPU JIT              | ARM FPU JIT (needed)                 |
+| ------------------ | ------------------------ | ------------------------------------ |
+| **Register model** | x87 stack (ST0-ST7)      | VFP/NEON registers (D0-D31)          |
+| **Precision**      | 80-bit extended          | 64-bit double max                    |
+| **Rounding modes** | x87 control word         | FPSCR register                       |
 | **Code generator** | `compemu_fpp.cpp` exists | Would need new `codegen_arm_fpu.cpp` |
 
 ### Implementation Notes

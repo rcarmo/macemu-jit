@@ -3059,15 +3059,18 @@ void compiler_exit(void)
 bool compiler_use_jit(void)
 {
 	// Check for the "jit" prefs item
-	if (!PrefsFindBool("jit"))
-		return false;
-	
-	// Don't use JIT if translation cache size is less then MIN_CACHE_SIZE KB
-	if (PrefsFindInt32("jitcachesize") < MIN_CACHE_SIZE) {
-		write_log("<JIT compiler> : translation cache size is less than %d KB. Disabling JIT.\n", MIN_CACHE_SIZE);
+	if (!PrefsFindBool("jit")) {
+		write_log("<JIT compiler> : JIT disabled in prefs (jit=false or missing).\n");
 		return false;
 	}
 	
+	// Don't use JIT if translation cache size is less then MIN_CACHE_SIZE KB
+	if (PrefsFindInt32("jitcachesize") < MIN_CACHE_SIZE) {
+		write_log("<JIT compiler> : translation cache size is less than %d KB (got %d). Disabling JIT.\n", MIN_CACHE_SIZE, PrefsFindInt32("jitcachesize"));
+		return false;
+	}
+	
+	write_log("<JIT compiler> : JIT enabled, cache size %d KB\n", PrefsFindInt32("jitcachesize"));
 	return true;
 }
 #endif
