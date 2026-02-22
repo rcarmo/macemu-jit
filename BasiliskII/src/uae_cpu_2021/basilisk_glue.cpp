@@ -54,6 +54,11 @@ uintptr MEMBaseDiff;		// Global offset between a Mac address and its Host equiva
 
 #if USE_JIT
 bool UseJIT = false;
+
+void NotifyJITDisabledFallback(void)
+{
+	printf("JIT: disabled at runtime, switching to interpreter execution\n");
+}
 #endif
 
 // #if defined(ENABLE_EXCLUSIVE_SPCFLAGS) && !defined(HAVE_HARDWARE_LOCKS)
