@@ -7,6 +7,48 @@
 
 ---
 
+## Progress Update (2026-02-22)
+
+This document remains valid for the original 2026-02-08 race/corruption analysis, but debugging since then established additional, concrete crash causes and mitigation status.
+
+### Confirmed Since Initial Report
+
+1. **JIT activation path was initially disabled by prefs defaulting** (fixed).
+2. **ARM icache coherency bug at JIT popall stub generation** caused immediate compiled-entry crashes (fixed by explicit `flush_cpu_icache` after code emission).
+3. **Unformatted JIT logs** made crash sequencing hard to read (fixed by newline-safe `jit_log` behavior).
+4. **Current primary corruption/crash chain** is reproducibly:
+     - opcode handler `op_2068_0_ff` loads A3 from an out-of-range guest source address,
+     - loaded value becomes `0x50f14000` after endian conversion,
+     - later opcode `op_4a28_0_ff` dereferences via A3 and faults.
+
+### GDB-Proven Address Evidence
+
+- RAM bounds at runtime: `RAMBaseMac = 0x00000000`, `RAMSize = 0x08800000`, RAM end `0x08800000`.
+- Fault-seeding source read observed in `op_2068_0_ff`: guest source around `0x088D36EC` (**outside RAM**).
+- Bad loaded longword observed at source: `0x0040f150` (then swapped into `0x50f14000`).
+
+### Mitigations Implemented So Far
+
+- JIT exception trap path for Basilisk builds to convert host faults to exception flow instead of instant hard segfault.
+- Repeated bus-error loop detector with automatic JIT fallback to interpreter execution.
+- Direct-address read-side bounds checks added in memory accessors (`get_long/word/byte`) to catch invalid guest reads earlier.
+
+### Regression Discovered and Corrected
+
+- Throwing from broad write/pointer-conversion paths (`put_*`, `get_real_address*`) broke startup ROM patching (`PatchROM`) via uncaught `m68k_exception`.
+- Corrective adjustment: keep strict read checks; avoid throw behavior in generic pointer conversion and ROM patch write paths.
+
+### Current Status
+
+- Original concurrency findings in this document are still relevant.
+- A distinct, concrete invalid-guest-address read path is now confirmed and must be treated as a first-class root cause for current crashes.
+- Validation on latest build should focus on:
+    1. no uncaught `m68k_exception` during startup,
+    2. no A3 transition to `0x5xxxxxxx` from out-of-range guest reads,
+    3. stable interpreter fallback if repeated exception loops occur.
+
+---
+
 ## Executive Summary
 
 The patterned screen corruption is caused by **unsynchronized concurrent access** to the Mac frame buffer (`the_buffer`) between the JIT CPU emulation thread and the SDL redraw thread. The JIT compiler emits raw ARM `STR` instructions that write directly to host memory with no locking, no memory barriers, and no dirty-region notification. The display refresh thread simultaneously reads the same memory via `memcmp`/`memcpy` on a separate CPU core. This produces torn reads, missed updates, and tile-aligned visual artifacts.
