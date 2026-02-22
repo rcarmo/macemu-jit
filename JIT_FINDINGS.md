@@ -47,6 +47,36 @@ This document remains valid for the original 2026-02-08 race/corruption analysis
     2. no A3 transition to `0x5xxxxxxx` from out-of-range guest reads,
     3. stable interpreter fallback if repeated exception loops occur.
 
+### Targeted Audit (Likely Fault Paths, 2026-02-22)
+
+This is a focused static audit of the code paths most likely to still generate invalid host-memory dereferences under JIT.
+
+1. **Basilisk JIT fast memory path is still effectively "trust guest address"**
+    - `compiler/compemu_support.cpp` has Basilisk-path `#define canbang 1` and direct host accesses in `readmem_real()` / `writemem_real()` / `get_n_addr()`.
+    - These paths emit native loads/stores against `MEMBaseDiff + guest_addr` with no range predicate in the emitted sequence.
+    - If a guest EA is out of mapped Mac ranges but still host-mapped, values can be silently read/written instead of faulting immediately.
+
+2. **Uncompiled opcode fallback runs inside JIT loop and depends on memory accessor semantics**
+    - In block execution, compile failure routes to `cputbl[opcode]` (`compemu_support.cpp`) rather than a compiled handler.
+    - Recent traces (`op_2068_0_ff`, `op_4a28_0_ff`) are consistent with this path being active for at least part of the failing sequence.
+    - This makes `memory.h` `get_*`/`put_*` behavior a first-order correctness dependency even when "JIT enabled" is true.
+
+3. **Exception-frame write path can still hard-fault if A7 is already corrupt**
+    - `Exception()` builds frames via `exc_push_long()` -> `put_long()`.
+    - If bus-error handling is entered with invalid SP, host write faults can occur while constructing the frame.
+    - Current mitigation is JIT-side exception-2 immediate fallback before `Exception()`; this is a containment strategy, not a full invariant restore.
+
+4. **EA calculators (`get_disp_ea_000/020`) are arithmetically correct but unchecked by design**
+    - They propagate register-derived addresses without boundary checks.
+    - Once a register is poisoned, downstream EA users amplify the fault quickly.
+
+#### Prioritized Fix Candidates
+
+1. **Safety-first containment (smallest change):** keep immediate JIT fallback on exception 2 and avoid re-entering `Exception()` from JIT catch path.
+2. **Strengthen write-side safety in direct memory helpers:** reintroduce `put_*` bounds checks, but allow ROM writes needed by ROM patching (to avoid startup regression).
+3. **Longer-term robust fix:** add an explicit Basilisk-side range guard before `canbang` direct memory emission for JIT-generated reads/writes (or force non-`canbang` path for risky regions).
+4. **Diagnostics improvement:** log opcode + EA at first `THROW(2)` in `get_*` to identify first poison site without multi-step watchpoint setup.
+
 ---
 
 ## Executive Summary

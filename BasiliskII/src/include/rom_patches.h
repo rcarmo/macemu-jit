@@ -47,6 +47,9 @@ extern uint32 GetScrapPatch;
 // Flag: print ROM information in PatchROM()
 extern bool PrintROMInfo;
 
+// Allow direct-memory writes to ROM only while PatchROM() is executing
+extern bool AllowROMWritesWhilePatching;
+
 extern bool CheckROM(void);
 extern bool PatchROM(void);
 extern void InstallDrivers(uint32 pb);

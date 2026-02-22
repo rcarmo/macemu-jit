@@ -187,7 +187,10 @@ bool InitAll(const char *vmdir)
 #endif
 
 	// Install ROM patches
-	if (!PatchROM()) {
+	AllowROMWritesWhilePatching = true;
+	const bool patch_rom_ok = PatchROM();
+	AllowROMWritesWhilePatching = false;
+	if (!patch_rom_ok) {
 		ErrorAlert(STR_UNSUPPORTED_ROM_TYPE_ERR);
 		return false;
 	}

@@ -29,6 +29,7 @@ extern uint32 RAMBaseMac;
 extern uint32 RAMSize;
 extern uint32 ROMBaseMac;
 extern uint32 ROMSize;
+extern bool AllowROMWritesWhilePatching;
 #if !REAL_ADDRESSING
 extern uint32 MacFrameSize;
 #endif
@@ -73,8 +74,8 @@ static __inline__ bool is_direct_address_valid(uaecptr addr, int size, bool writ
 
     if (addr >= RAMBaseMac && end < RAMBaseMac + RAMSize)
         return true;
-    if (!write && addr >= ROMBaseMac && end < ROMBaseMac + ROMSize)
-        return true;
+    if (addr >= ROMBaseMac && end < ROMBaseMac + ROMSize)
+        return !write || AllowROMWritesWhilePatching;
 #if !REAL_ADDRESSING
     const uae_u32 frame_base = 0xa0000000;
     if (addr >= frame_base && end < frame_base + MacFrameSize)
@@ -117,18 +118,24 @@ static __inline__ uae_u32 get_byte(uaecptr addr)
 #define phys_get_byte get_byte
 static __inline__ void put_long(uaecptr addr, uae_u32 l)
 {
+	if (!is_direct_address_valid(addr, 4, true))
+		THROW(2);
     uae_u32 * const m = (uae_u32 *)do_get_real_address(addr);
     do_put_mem_long(m, l);
 }
 #define phys_put_long put_long
 static __inline__ void put_word(uaecptr addr, uae_u32 w)
 {
+	if (!is_direct_address_valid(addr, 2, true))
+		THROW(2);
     uae_u16 * const m = (uae_u16 *)do_get_real_address(addr);
     do_put_mem_word(m, w);
 }
 #define phys_put_word put_word
 static __inline__ void put_byte(uaecptr addr, uae_u32 b)
 {
+	if (!is_direct_address_valid(addr, 1, true))
+		THROW(2);
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     do_put_mem_byte(m, b);
 }

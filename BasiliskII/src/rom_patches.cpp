@@ -50,6 +50,7 @@ uint32 GetScrapPatch = 0;	// Mac address of GetScrap() patch
 uint32 ROMBreakpoint = 0;	// ROM offset of breakpoint (0 = disabled, 0x2310 = CritError)
 bool PrintROMInfo = false;	// Flag: print ROM information in PatchROM()
 bool PatchHWBases = true;	// Flag: patch hardware base addresses
+bool AllowROMWritesWhilePatching = false;
 
 static uint32 sony_offset;		// ROM offset of .Sony driver
 static uint32 serd_offset;		// ROM offset of SERD resource (serial drivers)
