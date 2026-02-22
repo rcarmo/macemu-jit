@@ -213,7 +213,7 @@ typedef struct timeval tm_time_t;
 typedef uae_u32 uaecptr;
 
 /* Alignment restrictions */
-#if defined(__i386__) || defined(__powerpc__) || defined(__m68k__) || defined(__x86_64__)
+#if defined(__i386__) || defined(__powerpc__) || defined(__m68k__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 # define CPU_CAN_ACCESS_UNALIGNED
 #endif
 
@@ -435,6 +435,18 @@ static inline void do_put_mem_word(uae_u16 *a, uae_u32 v) {__asm__ ("bswapl %0" 
 static inline uae_u32 do_byteswap_32(uae_u32 v) {__asm__ ("bswap %0" : "=r" (v) : "0" (v)); return v;}
 #define HAVE_OPTIMIZED_BYTESWAP_16
 static inline uae_u32 do_byteswap_16(uae_u32 v) {__asm__ ("bswapl %0" : "=&r" (v) : "0" (v << 16) : "cc"); return v;}
+
+#elif defined(__arm__) || defined(__aarch64__)
+
+/* ARM / AArch64 — __builtin_bswap compiles to REV / REV16 instructions */
+static inline uae_u32 do_get_mem_long(uae_u32 *a) {return __builtin_bswap32(*a);}
+static inline uae_u32 do_get_mem_word(uae_u16 *a) {return __builtin_bswap16(*a);}
+static inline void do_put_mem_long(uae_u32 *a, uae_u32 v) {*a = __builtin_bswap32(v);}
+static inline void do_put_mem_word(uae_u16 *a, uae_u32 v) {*a = __builtin_bswap16(v);}
+#define HAVE_OPTIMIZED_BYTESWAP_32
+static inline uae_u32 do_byteswap_32(uae_u32 v) {return __builtin_bswap32(v);}
+#define HAVE_OPTIMIZED_BYTESWAP_16
+static inline uae_u32 do_byteswap_16(uae_u32 v) {return __builtin_bswap16(v);}
 
 #elif defined(CPU_CAN_ACCESS_UNALIGNED)
 

@@ -54,7 +54,9 @@ COPY BasiliskII /build/BasiliskII
 WORKDIR /build/BasiliskII/src/Unix
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 ENV CPPFLAGS="-I/usr/local/include -I/usr/local/include/SDL2"
-ENV LDFLAGS="-L/usr/local/lib"
+ENV LDFLAGS="-L/usr/local/lib -flto=auto"
+ENV CFLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53 -flto=auto"
+ENV CXXFLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53 -flto=auto"
 RUN NO_CONFIGURE=1 ./autogen.sh \
     && ./configure \
         --prefix=/usr \

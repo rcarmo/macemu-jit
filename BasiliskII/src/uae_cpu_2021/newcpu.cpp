@@ -1443,10 +1443,8 @@ int m68k_do_specialties(void)
 			return 1;
 		}
 #endif
-#if 0
-		// give unused time slices back to OS
+		// give unused time slices back to OS when STOP instruction is executing
 		SleepAndWait();
-#endif
 		if (SPCFLAGS_TEST( SPCFLAG_INT | SPCFLAG_DOINT )){
 			SPCFLAGS_CLEAR( SPCFLAG_INT | SPCFLAG_DOINT );
 			int intr = intlev ();

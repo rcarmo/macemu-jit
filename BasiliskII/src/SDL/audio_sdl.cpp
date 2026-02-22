@@ -37,6 +37,8 @@
 #include "bincue.h"
 #endif
 
+#include <cstring>
+#include <algorithm>
 
 #define MAC_MAX_VOLUME 0x0100
 
@@ -46,13 +48,55 @@ static int audio_sample_size_index = 0;
 static int audio_channel_count_index = 0;
 
 // Global variables
-static SDL_sem *audio_irq_done_sem = NULL;			// Signal from interrupt to streaming thread: data block read
 static uint8 silence_byte;							// Byte value to use to fill sound buffers with silence
-static uint8 *audio_mix_buf = NULL;
 static int main_volume = MAC_MAX_VOLUME;
 static int speaker_volume = MAC_MAX_VOLUME;
 static bool main_mute = false;
 static bool speaker_mute = false;
+
+// --- Lock-free ring buffer ---
+// Written by the emulation thread (AudioInterrupt), read by the SDL callback.
+// Single-producer, single-consumer — no locks needed.
+static uint8 *ring_buffer = NULL;
+static uint32 ring_write_pos = 0;	// Written by emulator, read by callback
+static uint32 ring_read_pos = 0;	// Written by callback, read by emulator
+static uint32 ring_size = 0;				// Total size in bytes (power of 2)
+static uint32 ring_mask = 0;				// ring_size - 1
+static int audio_block_size = 0;			// Size of one audio block in bytes
+
+// How many bytes are available to read from the ring
+static inline uint32 ring_readable() {
+	const uint32 wp = __atomic_load_n(&ring_write_pos, __ATOMIC_ACQUIRE);
+	const uint32 rp = __atomic_load_n(&ring_read_pos, __ATOMIC_ACQUIRE);
+	return (wp - rp) & ring_mask;
+}
+
+// How many bytes of free space in the ring
+static inline uint32 ring_writable() {
+	return ring_size - 1 - ring_readable();
+}
+
+// Write data into the ring buffer
+static inline void ring_write(const uint8 *data, uint32 len) {
+	uint32 wp = __atomic_load_n(&ring_write_pos, __ATOMIC_RELAXED);
+	for (uint32 i = 0; i < len; i++) {
+		ring_buffer[wp] = data[i];
+		wp = (wp + 1) & ring_mask;
+	}
+	// Memory barrier: ensure data is written before advancing write_pos
+	__atomic_store_n(&ring_write_pos, wp, __ATOMIC_RELEASE);
+}
+
+// Read data from the ring buffer
+static inline void ring_read(uint8 *data, uint32 len) {
+	uint32 rp = __atomic_load_n(&ring_read_pos, __ATOMIC_RELAXED);
+	for (uint32 i = 0; i < len; i++) {
+		data[i] = ring_buffer[rp];
+		rp = (rp + 1) & ring_mask;
+	}
+	// Memory barrier: ensure data is read before advancing read_pos
+	__atomic_store_n(&ring_read_pos, rp, __ATOMIC_RELEASE);
+}
 
 // Prototypes
 static void stream_func(void *arg, uint8 *stream, int stream_len);
@@ -95,7 +139,7 @@ static bool open_sdl_audio(void)
 	audio_spec.freq = audio_sample_rates[audio_sample_rate_index] >> 16;
 	audio_spec.format = (audio_sample_sizes[audio_sample_size_index] == 8) ? AUDIO_U8 : AUDIO_S16MSB;
 	audio_spec.channels = audio_channel_counts[audio_channel_count_index];
-	audio_spec.samples = 4096 >> PrefsFindInt32("sound_buffer");
+	audio_spec.samples = 2048 >> PrefsFindInt32("sound_buffer");
 	audio_spec.callback = stream_func;
 	audio_spec.userdata = NULL;
 
@@ -128,9 +172,23 @@ static bool open_sdl_audio(void)
 	silence_byte = audio_spec.silence;
 	SDL_PauseAudio(0);
 
-	// Sound buffer size = 4096 frames
+	// Sound buffer size
 	audio_frames_per_block = audio_spec.samples;
-	audio_mix_buf = (uint8*)malloc(audio_spec.size);
+	audio_block_size = audio_spec.size;
+
+	// Allocate ring buffer: 4× the block size, rounded up to power of 2
+	uint32 desired = audio_block_size * 4;
+	ring_size = 1;
+	while (ring_size < desired) ring_size <<= 1;
+	ring_mask = ring_size - 1;
+	ring_buffer = (uint8 *)calloc(ring_size, 1);
+	ring_write_pos = 0;
+	ring_read_pos = 0;
+
+	printf("Audio: %d Hz, %d-bit, %d ch, %d frames/block, ring %u bytes\n",
+		   audio_spec.freq, audio_sample_sizes[audio_sample_size_index],
+		   audio_spec.channels, audio_frames_per_block, ring_size);
+
 	return true;
 }
 
@@ -164,8 +222,6 @@ void AudioInit(void)
 	if (PrefsFindBool("nosound"))
 		return;
 
-	// Init semaphore
-	audio_irq_done_sem = SDL_CreateSemaphore(0);
 #ifdef BINCUE
 	InitBinCue();
 #endif
@@ -185,8 +241,12 @@ static void close_audio(void)
 	CloseAudio_bincue();
 #endif
 	SDL_CloseAudio();
-	free(audio_mix_buf);
-	audio_mix_buf = NULL;
+	free(ring_buffer);
+	ring_buffer = NULL;
+	ring_size = 0;
+	ring_mask = 0;
+	ring_write_pos = 0;
+	ring_read_pos = 0;
 	audio_open = false;
 }
 
@@ -197,9 +257,6 @@ void AudioExit(void)
 #ifdef BINCUE
 	ExitBinCue();
 #endif
-	// Delete semaphore
-	if (audio_irq_done_sem)
-		SDL_DestroySemaphore(audio_irq_done_sem);
 }
 
 
@@ -222,67 +279,70 @@ void audio_exit_stream()
 
 
 /*
- *  Streaming function
+ *  Streaming function — SDL audio callback (real-time thread)
+ *  Reads pre-filled data from the lock-free ring buffer.
+ *  Never blocks. Signals the emulator to produce more data asynchronously.
  */
 
 static void stream_func(void *arg, uint8 *stream, int stream_len)
 {
-	if (AudioStatus.num_sources) {
-		// Trigger audio interrupt to get new buffer
-		D(bug("stream: triggering irq\n"));
-		SetInterruptFlag(INTFLAG_AUDIO);
-		TriggerInterrupt();
-		D(bug("stream: waiting for ack\n"));
-		SDL_SemWait(audio_irq_done_sem);
-		D(bug("stream: ack received\n"));
-
-		// Get size of audio data
-		uint32 apple_stream_info = ReadMacInt32(audio_data + adatStreamInfo);
-		if (apple_stream_info && !main_mute && !speaker_mute) {
-			int work_size = ReadMacInt32(apple_stream_info + scd_sampleCount) * (AudioStatus.sample_size >> 3) * AudioStatus.channels;
-			D(bug("stream: work_size %d\n", work_size));
-			if (work_size > stream_len)
-				work_size = stream_len;
-			if (work_size == 0)
-				goto silence;
-
-			// Send data to audio device
-			bool dbl = AudioStatus.channels == 2 &&
-				ReadMacInt16(apple_stream_info + scd_numChannels) == 1 &&
-				ReadMacInt16(apple_stream_info + scd_sampleSize) == 8;
-			uint8 *src = Mac2HostAddr(ReadMacInt32(apple_stream_info + scd_buffer));
-			if (dbl)
-				for (int i = 0; i < work_size; i += 2)
-					audio_mix_buf[i] = audio_mix_buf[i + 1] = src[i >> 1];
-			else memcpy(audio_mix_buf, src, work_size);
-			memset((uint8 *)stream, silence_byte, stream_len);
-			SDL_MixAudio(stream, audio_mix_buf, work_size, get_audio_volume());
-
-			D(bug("stream: data written\n"));
-
-		} else
-			goto silence;
-
-	} else {
-
-		// Audio not active, play silence
-		silence: memset(stream, silence_byte, stream_len);
+	if (!AudioStatus.num_sources || main_mute || speaker_mute) {
+		memset(stream, silence_byte, stream_len);
+#if defined(BINCUE)
+		MixAudio_bincue(stream, stream_len);
+#endif
+		return;
 	}
-	
+
+	uint32 available = ring_readable();
+	uint32 to_read = std::min(available, (uint32)stream_len);
+
+	if (to_read > 0) {
+		// Read from ring buffer and apply volume via SDL_MixAudio
+		int vol = get_audio_volume();
+		memset(stream, silence_byte, stream_len);
+		if (vol == SDL_MIX_MAXVOLUME && to_read == (uint32)stream_len) {
+			// Fast path: full volume, full buffer — direct copy
+			ring_read(stream, to_read);
+		} else {
+			// Need volume scaling — read into a fixed stack chunk and mix incrementally
+			uint8 temp_stack[4096];
+			uint32 remaining = to_read;
+			uint32 offset = 0;
+			while (remaining > 0) {
+				uint32 chunk = std::min(remaining, (uint32)sizeof(temp_stack));
+				ring_read(temp_stack, chunk);
+				SDL_MixAudio(stream + offset, temp_stack, chunk, vol);
+				offset += chunk;
+				remaining -= chunk;
+			}
+		}
+	} else {
+		// Ring empty — underrun, play silence
+		memset(stream, silence_byte, stream_len);
+	}
+
+	// Request more audio data from the emulator (non-blocking)
+	SetInterruptFlag(INTFLAG_AUDIO);
+	TriggerInterrupt();
+
 #if defined(BINCUE)
 	MixAudio_bincue(stream, stream_len);
 #endif
-	
 }
 
 
 /*
  *  MacOS audio interrupt, read next data block
+ *  Called on the emulation thread — fills the ring buffer with new audio data
  */
 
 void AudioInterrupt(void)
 {
 	D(bug("AudioInterrupt\n"));
+
+	if (!ring_buffer || !AudioStatus.num_sources)
+		return;
 
 	// Get data from apple mixer
 	if (AudioStatus.mixer) {
@@ -291,12 +351,50 @@ void AudioInterrupt(void)
 		r.a[1] = AudioStatus.mixer;
 		Execute68k(audio_data + adatGetSourceData, &r);
 		D(bug(" GetSourceData() returns %08lx\n", r.d[0]));
-	} else
+	} else {
 		WriteMacInt32(audio_data + adatStreamInfo, 0);
+	}
 
-	// Signal stream function
-	SDL_SemPost(audio_irq_done_sem);
-	D(bug("AudioInterrupt done\n"));
+	// Read the stream info and copy data into the ring buffer
+	uint32 apple_stream_info = ReadMacInt32(audio_data + adatStreamInfo);
+	if (!apple_stream_info)
+		return;
+
+	int work_size = ReadMacInt32(apple_stream_info + scd_sampleCount) * (AudioStatus.sample_size >> 3) * AudioStatus.channels;
+	if (work_size <= 0)
+		return;
+
+	// Cap to available ring space
+	uint32 space = ring_writable();
+	if ((uint32)work_size > space)
+		work_size = space;
+	if (work_size <= 0)
+		return;
+
+	uint8 *src = Mac2HostAddr(ReadMacInt32(apple_stream_info + scd_buffer));
+
+	// Handle mono-to-stereo doubling for 8-bit sources
+	bool dbl = AudioStatus.channels == 2 &&
+		ReadMacInt16(apple_stream_info + scd_numChannels) == 1 &&
+		ReadMacInt16(apple_stream_info + scd_sampleSize) == 8;
+
+	if (dbl) {
+		// Expand mono to stereo inline and write
+		uint8 temp[8192];
+		int src_size = work_size / 2;
+		for (int chunk_start = 0; chunk_start < src_size; ) {
+			int chunk = std::min(src_size - chunk_start, (int)sizeof(temp) / 2);
+			for (int i = 0; i < chunk; i++) {
+				temp[i * 2] = temp[i * 2 + 1] = src[chunk_start + i];
+			}
+			ring_write(temp, chunk * 2);
+			chunk_start += chunk;
+		}
+	} else {
+		ring_write(src, work_size);
+	}
+
+	D(bug("AudioInterrupt: wrote %d bytes to ring (readable=%u)\n", work_size, ring_readable()));
 }
 
 

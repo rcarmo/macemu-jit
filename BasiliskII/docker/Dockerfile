@@ -49,8 +49,18 @@ COPY BasiliskII /build/BasiliskII
 WORKDIR /build/BasiliskII/src/Unix
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
 ENV CPPFLAGS="-I/usr/local/include -I/usr/local/include/SDL2"
-ENV LDFLAGS="-L/usr/local/lib"
+ENV LDFLAGS="-L/usr/local/lib -flto=auto"
+ENV CFLAGS="-flto=auto"
+ENV CXXFLAGS="-flto=auto"
 RUN NO_CONFIGURE=1 ./autogen.sh \
+        && ARCH="$(dpkg --print-architecture)" \
+        && if [ "$ARCH" = "arm64" ]; then \
+                 export CFLAGS="-march=armv8-a -mtune=cortex-a72 -flto=auto"; \
+                 export CXXFLAGS="-march=armv8-a -mtune=cortex-a72 -flto=auto"; \
+             elif [ "$ARCH" = "armhf" ]; then \
+                 export CFLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53 -flto=auto"; \
+                 export CXXFLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53 -flto=auto"; \
+             fi \
     && ./configure \
         --prefix=/usr \
         --enable-sdl-audio \

@@ -74,6 +74,19 @@ enum {
 } while (0)
 
 #include "main.h"
+
+#if defined(__GNUC__) && (defined(__arm__) || defined(__aarch64__) || defined(__i386__) || defined(__x86_64__))
+/* Use GCC/Clang atomic builtins — much cheaper than mutex on ARM (single LDREX/STREX
+   or LDXR/STXR pair) and on x86 (lock or/and). Safe for cross-thread flag signaling. */
+#define SPCFLAGS_SET(m) do { \
+	__atomic_fetch_or(&regs.spcflags, (m), __ATOMIC_SEQ_CST); \
+} while (0)
+
+#define SPCFLAGS_CLEAR(m) do { \
+	__atomic_fetch_and(&regs.spcflags, ~(m), __ATOMIC_SEQ_CST); \
+} while (0)
+#else
+/* Fallback: mutex-based for other platforms */
 extern B2_mutex *spcflags_lock;
 
 #define SPCFLAGS_SET(m) do { 				\
@@ -87,6 +100,7 @@ extern B2_mutex *spcflags_lock;
 	regs.spcflags &= ~(m);					\
 	B2_unlock_mutex(spcflags_lock);         \
 } while (0)
+#endif
 
 #define SleepAndWait() usleep(1000);
 

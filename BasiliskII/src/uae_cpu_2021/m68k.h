@@ -739,6 +739,226 @@ static inline int cctrue(int cc)
 
 #endif
 
+#elif defined(CPU_aarch64) && defined(AARCH64_ASSEMBLY)
+
+/*
+ * AArch64 (ARM 64-bit) optimized flags
+ * Uses adds/subs to set NZCV, then reads condition flags via mrs.
+ * On AArch64, mrs reads NZCV from bits 31:28 of the NZCV system register.
+ * ARM carry sense for SUB is inverted vs 68k, so we XOR bit 29 for SUB/CMP.
+ */
+struct flag_struct {
+	uae_u32 nzcv;
+	uae_u32 x;
+};
+
+#define FLAGBIT_N   31
+#define FLAGBIT_Z   30
+#define FLAGBIT_C   29
+#define FLAGBIT_V   28
+#define FLAGBIT_X   FLAGBIT_C
+
+#define FLAGVAL_N   (1 << FLAGBIT_N)
+#define FLAGVAL_Z   (1 << FLAGBIT_Z)
+#define FLAGVAL_C   (1 << FLAGBIT_C)
+#define FLAGVAL_V   (1 << FLAGBIT_V)
+#define FLAGVAL_X   (1 << FLAGBIT_X)
+
+#define SET_NFLG(y)		(regflags.nzcv = (regflags.nzcv & ~FLAGVAL_N) | (((y) & 1) << FLAGBIT_N))
+#define SET_ZFLG(y)		(regflags.nzcv = (regflags.nzcv & ~FLAGVAL_Z) | (((y) & 1) << FLAGBIT_Z))
+#define SET_CFLG(y)		(regflags.nzcv = (regflags.nzcv & ~FLAGVAL_C) | (((y) & 1) << FLAGBIT_C))
+#define SET_VFLG(y)		(regflags.nzcv = (regflags.nzcv & ~FLAGVAL_V) | (((y) & 1) << FLAGBIT_V))
+#define SET_XFLG(y)		(regflags.x = ((y) & 1) << FLAGBIT_X)
+
+#define GET_NFLG()		((regflags.nzcv >> FLAGBIT_N) & 1)
+#define GET_ZFLG()		((regflags.nzcv >> FLAGBIT_Z) & 1)
+#define GET_CFLG()		((regflags.nzcv >> FLAGBIT_C) & 1)
+#define GET_VFLG()		((regflags.nzcv >> FLAGBIT_V) & 1)
+#define GET_XFLG()		((regflags.x    >> FLAGBIT_X) & 1)
+
+#define CLEAR_CZNV()	(regflags.nzcv = 0)
+#define GET_CZNV()		(regflags.nzcv)
+#define IOR_CZNV(X)		(regflags.nzcv |= (X))
+#define SET_CZNV(X)		(regflags.nzcv = (X))
+
+#define COPY_CARRY()	(regflags.x = regflags.nzcv >> (FLAGBIT_C - FLAGBIT_X))
+
+extern struct flag_struct regflags __asm__ ("regflags");
+
+static inline int cctrue(int cc)
+{
+    unsigned int nzcv = regflags.nzcv;
+    switch(cc){
+     case 0: return 1;                       /* T */
+     case 1: return 0;                       /* F */
+     case 2: return (nzcv & (FLAGVAL_C | FLAGVAL_Z)) == 0; /* HI */
+     case 3: return (nzcv & (FLAGVAL_C | FLAGVAL_Z)) != 0; /* LS */
+     case 4: return (nzcv & FLAGVAL_C) == 0; /* CC */
+     case 5: return (nzcv & FLAGVAL_C) != 0; /* CS */
+     case 6: return (nzcv & FLAGVAL_Z) == 0; /* NE */
+     case 7: return (nzcv & FLAGVAL_Z) != 0; /* EQ */
+     case 8: return (nzcv & FLAGVAL_V) == 0; /* VC */
+     case 9: return (nzcv & FLAGVAL_V) != 0; /* VS */
+     case 10:return (nzcv & FLAGVAL_N) == 0; /* PL */
+     case 11:return (nzcv & FLAGVAL_N) != 0; /* MI */
+     case 12:return (((nzcv << (FLAGBIT_N - FLAGBIT_V)) ^ nzcv) & FLAGVAL_N) == 0; /* GE */
+     case 13:return (((nzcv << (FLAGBIT_N - FLAGBIT_V)) ^ nzcv) & FLAGVAL_N) != 0; /* LT */
+     case 14: nzcv &= (FLAGVAL_N | FLAGVAL_Z | FLAGVAL_V);
+        return (((nzcv << (FLAGBIT_N - FLAGBIT_V)) ^ nzcv) & (FLAGVAL_N | FLAGVAL_Z)) == 0; /* GT */
+     case 15: nzcv &= (FLAGVAL_N | FLAGVAL_Z | FLAGVAL_V);
+        return (((nzcv << (FLAGBIT_N - FLAGBIT_V)) ^ nzcv) & (FLAGVAL_N | FLAGVAL_Z)) != 0; /* LE */
+    }
+    return 0;
+}
+
+/* AArch64: tst sets NZ, clears CV. mrs nzcv reads bits 31:28. */
+#define optflag_testl(v) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("tst %w[rv], %w[rv]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv) \
+                        : [rv] "r" (v) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv & (FLAGVAL_N | FLAGVAL_Z); \
+  } while(0)
+
+#define optflag_testw(v) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("sxth %w[tmp], %w[rv]\n\t" \
+                        "tst %w[tmp], %w[tmp]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [tmp] "=&r" (v) \
+                        : [rv] "0" (v) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv & (FLAGVAL_N | FLAGVAL_Z); \
+  } while(0)
+
+#define optflag_testb(v) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("sxtb %w[tmp], %w[rv]\n\t" \
+                        "tst %w[tmp], %w[tmp]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [tmp] "=&r" (v) \
+                        : [rv] "0" (v) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv & (FLAGVAL_N | FLAGVAL_Z); \
+  } while(0)
+
+#define optflag_addl(v, s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("adds %w[rv], %w[rd], %w[rs]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v) \
+                        : [rs] "r" (s), [rd] "r" (d) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv; \
+  COPY_CARRY(); \
+  } while(0)
+
+#define optflag_addw(v, s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
+                        "sxth %w[b], %w[rs]\n\t" \
+                        "adds %w[a], %w[a], %w[b]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
+                        : [rs] "2" (s), [rd] "3" (d) \
+                        : "cc"); \
+  v = (uae_u16)v; \
+  regflags.nzcv = _nzcv; \
+  COPY_CARRY(); \
+  } while(0)
+
+#define optflag_addb(v, s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
+                        "sxtb %w[b], %w[rs]\n\t" \
+                        "adds %w[a], %w[a], %w[b]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
+                        : [rs] "2" (s), [rd] "3" (d) \
+                        : "cc"); \
+  v = (uae_u8)v; \
+  regflags.nzcv = _nzcv; \
+  COPY_CARRY(); \
+  } while(0)
+
+/* AArch64 SUB/CMP: ARM carry is inverted vs 68k, so XOR bit 29 */
+#define optflag_subl(v, s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("subs %w[rv], %w[rd], %w[rs]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v) \
+                        : [rs] "r" (s), [rd] "r" (d) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv ^ FLAGVAL_C; \
+  COPY_CARRY(); \
+  } while(0)
+
+#define optflag_subw(v, s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
+                        "sxth %w[b], %w[rs]\n\t" \
+                        "subs %w[a], %w[a], %w[b]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
+                        : [rs] "2" (s), [rd] "3" (d) \
+                        : "cc"); \
+  v = (uae_u16)v; \
+  regflags.nzcv = _nzcv ^ FLAGVAL_C; \
+  COPY_CARRY(); \
+  } while(0)
+
+#define optflag_subb(v, s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
+                        "sxtb %w[b], %w[rs]\n\t" \
+                        "subs %w[a], %w[a], %w[b]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
+                        : [rs] "2" (s), [rd] "3" (d) \
+                        : "cc"); \
+  v = (uae_u8)v; \
+  regflags.nzcv = _nzcv ^ FLAGVAL_C; \
+  COPY_CARRY(); \
+  } while(0)
+
+#define optflag_cmpl(s, d) do { \
+  uae_u32 _nzcv; \
+  __asm__ __volatile__ ("cmp %w[rd], %w[rs]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv) \
+                        : [rs] "r" (s), [rd] "r" (d) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv ^ FLAGVAL_C; \
+  } while(0)
+
+#define optflag_cmpw(s, d) do { \
+  uae_u32 _nzcv; \
+  uae_u32 _a, _b; \
+  __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
+                        "sxth %w[b], %w[rs]\n\t" \
+                        "cmp %w[a], %w[b]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [rs] "r" (s), [rd] "r" (d) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv ^ FLAGVAL_C; \
+  } while(0)
+
+#define optflag_cmpb(s, d) do { \
+  uae_u32 _nzcv; \
+  uae_u32 _a, _b; \
+  __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
+                        "sxtb %w[b], %w[rs]\n\t" \
+                        "cmp %w[a], %w[b]\n\t" \
+                        "mrs %[flags], nzcv\n\t" \
+                        : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [rs] "r" (s), [rd] "r" (d) \
+                        : "cc"); \
+  regflags.nzcv = _nzcv ^ FLAGVAL_C; \
+  } while(0)
+
 #elif defined(CPU_sparc) && (defined(SPARC_V8_ASSEMBLY) || defined(SPARC_V9_ASSEMBLY))
 
 /*

@@ -1052,10 +1052,6 @@ static int present_sdl_video()
 {
 	if (SDL_RectEmpty(&sdl_update_video_rect)) {
 		maybe_dump_surface_png(host_surface);
-		if (host_surface != NULL) {
-			SDL_Rect empty_rect = {0, 0, 0, 0};
-			VNCServerUpdate(host_surface, empty_rect);
-		}
 		return 0;
 	}
 	
@@ -1965,8 +1961,10 @@ void VideoVBL(void)
 	if (use_double_buffer && the_buffer_display_a && the_buffer_display_b && the_buffer) {
 		uint8 *read_ptr = display_read_buffer.load(std::memory_order_acquire);
 		uint8 *write_ptr = (read_ptr == the_buffer_display_a) ? the_buffer_display_b : the_buffer_display_a;
-		memcpy(write_ptr, the_buffer, the_buffer_size);
-		display_read_buffer.store(write_ptr, std::memory_order_release);
+		if (memcmp(write_ptr, the_buffer, the_buffer_size) != 0) {
+			memcpy(write_ptr, the_buffer, the_buffer_size);
+			display_read_buffer.store(write_ptr, std::memory_order_release);
+		}
 	}
 
 	// Temporarily give up frame buffer lock (this is the point where
@@ -1997,8 +1995,10 @@ void VideoInterrupt(void)
 	if (use_double_buffer && the_buffer_display_a && the_buffer_display_b && the_buffer) {
 		uint8 *read_ptr = display_read_buffer.load(std::memory_order_acquire);
 		uint8 *write_ptr = (read_ptr == the_buffer_display_a) ? the_buffer_display_b : the_buffer_display_a;
-		memcpy(write_ptr, the_buffer, the_buffer_size);
-		display_read_buffer.store(write_ptr, std::memory_order_release);
+		if (memcmp(write_ptr, the_buffer, the_buffer_size) != 0) {
+			memcpy(write_ptr, the_buffer, the_buffer_size);
+			display_read_buffer.store(write_ptr, std::memory_order_release);
+		}
 	}
 
 	// Temporarily give up frame buffer lock (this is the point where

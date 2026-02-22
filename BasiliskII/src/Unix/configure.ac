@@ -199,12 +199,16 @@ HAVE_M68K=no
 HAVE_SPARC=no
 HAVE_POWERPC=no
 HAVE_X86_64=no
+HAVE_ARM=no
+HAVE_AARCH64=no
 case "$target_cpu" in
   i386* | i486* | i586* | i686* | i786* ) HAVE_I386=yes;;
   m68k* ) HAVE_M68K=yes;;
   sparc* ) HAVE_SPARC=yes;;
   powerpc* ) HAVE_POWERPC=yes;;
   x86_64* | amd64* ) HAVE_X86_64=yes;;
+  arm* ) HAVE_ARM=yes;;
+  aarch64* ) HAVE_AARCH64=yes;;
 esac
 
 dnl Check if we should really be assuming x86_64 even if we detected HAVE_I386 above.
@@ -1596,12 +1600,36 @@ if $CXX -V -v 2>&1 | grep -q "Intel(R) C++ Compiler"; then
 fi
 AC_MSG_RESULT($HAVE_ICC)
 
+dnl Disable C++ RTTI globally — BasiliskII never uses dynamic_cast or typeid.
+dnl This reduces binary size and avoids vtable overhead.
+if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_ICC" = "xno" ]]; then
+  CXXFLAGS="$CXXFLAGS -fno-rtti"
+fi
+
 dnl Set "-fomit-frame-pointer" on i386 GCC 2.7 or higher.
 dnl Also set "-fno-exceptions" for C++ because exception handling requires
 dnl the frame pointer.
 if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_I386" = "xyes" ]]; then
   CFLAGS="$CFLAGS -fomit-frame-pointer"
   CXXFLAGS="$CXXFLAGS -fomit-frame-pointer -fno-exceptions"
+fi
+
+dnl Set optimization flags for ARM targets.
+dnl Use -O3 for aggressive inlining/vectorization, -fomit-frame-pointer,
+dnl -fno-exceptions/-fno-rtti since we don't use C++ exceptions or RTTI.
+if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_AARCH64" = "xyes" ]]; then
+  CFLAGS="`echo $CFLAGS | sed 's/-O2/-O3/'`"
+  CXXFLAGS="`echo $CXXFLAGS | sed 's/-O2/-O3/'`"
+  CFLAGS="$CFLAGS -fomit-frame-pointer -flto=auto"
+  CXXFLAGS="$CXXFLAGS -fomit-frame-pointer -fno-exceptions -fno-rtti -flto=auto"
+  LDFLAGS="$LDFLAGS -flto=auto"
+fi
+if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_ARM" = "xyes" ]]; then
+  CFLAGS="`echo $CFLAGS | sed 's/-O2/-O3/'`"
+  CXXFLAGS="`echo $CXXFLAGS | sed 's/-O2/-O3/'`"
+  CFLAGS="$CFLAGS -fomit-frame-pointer -flto=auto"
+  CXXFLAGS="$CXXFLAGS -fomit-frame-pointer -fno-exceptions -fno-rtti -flto=auto"
+  LDFLAGS="$LDFLAGS -flto=auto"
 fi
 
 dnl (gb) Do not merge constants since it breaks fpu/fpu_x86.cpp.
@@ -1718,6 +1746,20 @@ elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_SPARC" = "xyes" -a "x$HAVE_GAS" = "xy
     esac
     ;;
   esac
+elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_ARM" = "xyes" ]]; then
+  dnl ARM 32-bit CPU
+  DEFINES="$DEFINES -DCPU_arm -DUNALIGNED_PROFITABLE"
+  if [[ "x$HAVE_GAS" = "xyes" ]]; then
+    ASM_OPTIMIZATIONS="ARM"
+    DEFINES="$DEFINES -DARM_ASSEMBLY -DARMV6_ASSEMBLY -DOPTIMIZED_FLAGS"
+  fi
+elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_AARCH64" = "xyes" ]]; then
+  dnl AArch64 (ARM 64-bit) CPU
+  DEFINES="$DEFINES -DCPU_aarch64 -DUNALIGNED_PROFITABLE"
+  if [[ "x$HAVE_GAS" = "xyes" ]]; then
+    ASM_OPTIMIZATIONS="AArch64"
+    DEFINES="$DEFINES -DAARCH64_ASSEMBLY -DOPTIMIZED_FLAGS"
+  fi
 elif [[ "x$WANT_NATIVE_M68K" = "xyes" ]]; then
   dnl Native m68k, no emulation
   CPUINCLUDES="-I../native_cpu"

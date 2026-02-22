@@ -71,6 +71,9 @@ jobs:
           echo "=== Building BasiliskII ==="
           cd BasiliskII/src/Unix
           NO_CONFIGURE=1 ./autogen.sh
+          CFLAGS="-march=armv8-a -mtune=cortex-a72 -flto=auto" \
+          CXXFLAGS="-march=armv8-a -mtune=cortex-a72 -flto=auto" \
+          LDFLAGS="-flto=auto" \
           ./configure \
             --prefix=/usr \
             --enable-sdl-audio \
@@ -286,7 +289,9 @@ jobs:
           NO_CONFIGURE=1 ./autogen.sh
           export PKG_CONFIG_PATH=/usr/local/armhf/lib/pkgconfig
           export CPPFLAGS="-I/usr/local/armhf/include -I/usr/local/armhf/include/SDL2"
-          export LDFLAGS="-L/usr/local/armhf/lib -Wl,-rpath,/usr/local/armhf/lib"
+          export LDFLAGS="-L/usr/local/armhf/lib -Wl,-rpath,/usr/local/armhf/lib -flto=auto"
+          CFLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53 -flto=auto" \
+          CXXFLAGS="-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a53 -flto=auto" \
           ./configure \
             --host=arm-linux-gnueabihf \
             --prefix=/usr \
