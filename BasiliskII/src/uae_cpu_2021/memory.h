@@ -141,23 +141,14 @@ static __inline__ void put_byte(uaecptr addr, uae_u32 b)
 #define phys_put_byte put_byte
 static __inline__ uae_u8 *get_real_address(uaecptr addr)
 {
-    if (!is_direct_address_valid(addr, 1, false))
-        THROW(2);
 	return do_get_real_address(addr);
 }
 static inline uae_u8 *get_real_address(uaecptr addr, int write, int sz)
 {
-    int size = sz;
-    if (size <= 0)
-        size = 1;
-    if (!is_direct_address_valid(addr, size, write != 0))
-        THROW(2);
     return do_get_real_address(addr);
 }
 static inline uae_u8 *phys_get_real_address(uaecptr addr)
 {
-    if (!is_direct_address_valid(addr, 1, false))
-        THROW(2);
     return do_get_real_address(addr);
 }
 static __inline__ uae_u32 get_virtual_address(uae_u8 *addr)
