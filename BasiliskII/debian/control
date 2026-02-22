@@ -7,7 +7,9 @@ Build-Depends: debhelper-compat (= 13),
                automake,
                build-essential,
                libasound2-dev,
-               libsamplerate0-dev
+               libsamplerate0-dev,
+               libvncserver-dev,
+               libpng-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/rcarmo/macemu
 Vcs-Browser: https://github.com/rcarmo/macemu
@@ -16,6 +18,7 @@ Vcs-Git: https://github.com/rcarmo/macemu.git
 Package: basiliskii-sdl
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: libvncserver1, libpng16-16
 Conflicts: basiliskii
 Provides: basiliskii
 Replaces: basiliskii
@@ -38,6 +41,8 @@ Description: 68k Macintosh emulator (SDL build)
   - Ethernet and serial drivers
   - SCSI Manager emulation
   - Extended ADB keyboard and 3-button mouse
+  - VNC server for remote display access
+  - PNG framebuffer dump via SIGUSR2
  .
  Note: You need a Macintosh ROM image and a copy of MacOS to use
  this emulator.

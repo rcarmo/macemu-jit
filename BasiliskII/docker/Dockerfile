@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsamplerate0-dev \
     libmpfr-dev \
     libgmp-dev \
+    libvncserver-dev \
+    libpng-dev \
     wget \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -57,6 +59,7 @@ RUN NO_CONFIGURE=1 ./autogen.sh \
         --without-mon \
         --without-esd \
         --without-gtk \
+        --with-vncserver \
         --disable-jit-compiler \
         --disable-nls \
     && make -j$(nproc)
@@ -72,6 +75,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdbus-1-3 \
     libmpfr6 \
     libgmp10 \
+    libvncserver1 \
+    libpng16-16 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy SDL2 libraries

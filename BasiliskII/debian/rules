@@ -36,6 +36,7 @@ override_dh_auto_configure:
 		--without-mon \
 		--without-esd \
 		--without-gtk \
+		--with-vncserver \
 		--disable-jit-compiler \
 		--disable-nls
 

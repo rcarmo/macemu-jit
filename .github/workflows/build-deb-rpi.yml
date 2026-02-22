@@ -33,6 +33,8 @@ jobs:
             libsamplerate0-dev \
             libmpfr-dev \
             libgmp-dev \
+            libvncserver-dev \
+            libpng-dev \
             wget \
             git \
             debhelper \
@@ -77,6 +79,7 @@ jobs:
             --without-mon \
             --without-esd \
             --without-gtk \
+            --with-vncserver \
             --disable-jit-compiler \
             --disable-nls
           CPATH=$CPATH:/usr/local/include/SDL2 make -j$(nproc)
@@ -137,7 +140,7 @@ jobs:
           Section: otherosfs
           Priority: optional
           Architecture: ${ARCH}
-          Depends: libc6, libasound2, libsamplerate0, libmpfr6, libgmp10, libudev1
+          Depends: libc6, libasound2, libsamplerate0, libmpfr6, libgmp10, libudev1, libvncserver1, libpng16-16
           Conflicts: basiliskii
           Provides: basiliskii
           Replaces: basiliskii
@@ -163,6 +166,8 @@ jobs:
             - Ethernet and serial drivers
             - SCSI Manager emulation
             - Extended ADB keyboard and 3-button mouse
+            - VNC server for remote display access
+            - PNG framebuffer dump via SIGUSR2
            .
            This package is built for Raspberry Pi (ARM64).
           EOF
@@ -241,6 +246,8 @@ jobs:
             libsamplerate0-dev:armhf \
             libmpfr-dev:armhf \
             libgmp-dev:armhf \
+            libvncserver-dev:armhf \
+            libpng-dev:armhf \
             wget \
             git \
             debhelper \
@@ -289,6 +296,7 @@ jobs:
             --without-mon \
             --without-esd \
             --without-gtk \
+            --with-vncserver \
             --disable-jit-compiler \
             --disable-nls
           make -j$(nproc)
@@ -349,7 +357,7 @@ jobs:
           Section: otherosfs
           Priority: optional
           Architecture: ${ARCH}
-          Depends: libc6, libasound2, libsamplerate0, libmpfr6, libgmp10, libudev1
+          Depends: libc6, libasound2, libsamplerate0, libmpfr6, libgmp10, libudev1, libvncserver1, libpng16-16
           Conflicts: basiliskii
           Provides: basiliskii
           Replaces: basiliskii
@@ -375,6 +383,8 @@ jobs:
             - Ethernet and serial drivers
             - SCSI Manager emulation
             - Extended ADB keyboard and 3-button mouse
+            - VNC server for remote display access
+            - PNG framebuffer dump via SIGUSR2
            .
            This package is built for Raspberry Pi (ARMhf/32-bit).
           EOF
