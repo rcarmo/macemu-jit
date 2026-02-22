@@ -5569,9 +5569,6 @@ void m68k_do_compile_execute(void)
 #else
 void m68k_compile_execute (void)
 {
-	int repeated_bus_errors = 0;
-	uae_u32 last_fault_pc = 0;
-	uae_u32 last_fault_addr = 0;
 setjmpagain:
 	TRY(prb) {
 		for (;;) {
@@ -5590,14 +5587,6 @@ setjmpagain:
 	}
 	CATCH(prb) {
 		const int exception_no = int(prb);
-		if (exception_no == 2 && regs.fault_pc == last_fault_pc && regs.mmu_fault_addr == last_fault_addr) {
-			repeated_bus_errors++;
-		} else {
-			repeated_bus_errors = 1;
-			last_fault_pc = regs.fault_pc;
-			last_fault_addr = regs.mmu_fault_addr;
-		}
-
 		jit_log("m68k_compile_execute: exception %d pc=%08x (%08x+%p-%p) fault_pc=%08x addr=%08x -> %08x sp=%08x",
 			exception_no,
 			m68k_getpc(),
@@ -5606,8 +5595,8 @@ setjmpagain:
 			regs.mmu_fault_addr, get_long (regs.vbr + 4*exception_no),
 			regs.regs[15]);
 
-		if (exception_no == 2 && repeated_bus_errors >= 16) {
-			jit_log("JIT: repeated bus errors at fault_pc=%08x addr=%08x; disabling JIT and falling back to interpreter",
+		if (exception_no == 2) {
+			jit_log("JIT: exception 2 at fault_pc=%08x addr=%08x; disabling JIT and falling back to interpreter",
 				regs.fault_pc, regs.mmu_fault_addr);
 			UseJIT = false;
 			NotifyJITDisabledFallback();
