@@ -35,6 +35,9 @@ NO_CONFIGURE=1 ./autogen.sh
             --disable-jit-compiler --disable-nls
 CPATH=$CPATH:/usr/local/include/SDL2 make -j4
 sudo make install
+
+# Optional: enable VNC output (requires libvncserver-dev)
+./configure --with-vncserver
 ```
 
 ### Docker Container
@@ -65,6 +68,44 @@ The container requires privileged mode for access to:
 - `/dev/snd` - Audio
 
 See [BasiliskII/docker/README.md](BasiliskII/docker/README.md) for detailed configuration options.
+
+### Optional VNC framebuffer streaming (SDL2)
+
+Add these preferences to your BasiliskII prefs file:
+
+```text
+vncserver true
+vncport 5900
+```
+
+Then connect with any VNC client to the host IP on the configured port.
+
+You can also control this per run via emulator CLI options:
+
+```bash
+BasiliskII --vnc --vnc-port 5901
+BasiliskII --no-vnc
+```
+
+Supported runtime options:
+
+- `--vnc [true|false]`
+- `--no-vnc`
+- `--vnc-port PORT`
+
+### New configure CLI option
+
+The Unix build now supports:
+
+- `--with-vncserver` - enable libvncserver integration
+- `--without-vncserver` - force-disable VNC integration
+
+Example:
+
+```bash
+cd BasiliskII/src/Unix
+./configure --enable-sdl-video --enable-sdl-audio --with-vncserver
+```
 
 ### GitHub Actions CI
 

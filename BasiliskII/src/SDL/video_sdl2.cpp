@@ -73,6 +73,7 @@
 #include "vm_alloc.h"
 #include "cdrom.h"
 #include "evdev_input.h"
+#include "vnc_server.h"
 
 #define DEBUG 0
 #include "debug.h"
@@ -1082,6 +1083,7 @@ static int present_sdl_video()
 	// modifying it!
 	LOCK_PALETTE;
 	SDL_LockMutex(sdl_update_video_mutex);
+	SDL_Rect updated_rect = sdl_update_video_rect;
     // Convert from the guest OS' pixel format, to the host OS' texture, if necessary.
     if (host_surface != guest_surface &&
 		host_surface != NULL &&
@@ -1125,6 +1127,7 @@ static int present_sdl_video()
 	
     // Update the display
 	SDL_RenderPresent(sdl_renderer);
+	VNCServerUpdate(host_surface, updated_rect);
     
     // Indicate success to the caller!
     return 0;
@@ -1665,6 +1668,7 @@ bool VideoInit(bool classic)
 	mouse_wheel_lines = PrefsFindInt32("mousewheellines");
 	mouse_wheel_reverse = mouse_wheel_lines < 0;
 	if (mouse_wheel_reverse) mouse_wheel_lines = -mouse_wheel_lines;
+	VNCServerInitFromPrefs();
 
 	// Get screen mode from preferences
 	migrate_screen_prefs();
@@ -1881,6 +1885,8 @@ void SDL_monitor_desc::video_close(void)
 
 void VideoExit(void)
 {
+	VNCServerShutdown();
+
 	// Shutdown evdev input
 	evdev_input_shutdown();
 

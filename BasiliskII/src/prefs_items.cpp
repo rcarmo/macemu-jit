@@ -89,6 +89,8 @@ prefs_desc common_prefs_items[] = {
 	{"init_grab", TYPE_BOOLEAN, false,	"initially grabbing mouse"},
 	{"xpram", TYPE_STRING, false, "path of xpram file"},
 	{"doublebuffer", TYPE_BOOLEAN, false, "double-buffer frame buffer for JIT"},
+	{"vncserver", TYPE_BOOLEAN, false, "enable VNC server for SDL video output"},
+	{"vncport", TYPE_INT32, false, "TCP port for VNC server"},
 	{NULL, TYPE_END, false, NULL} // End of list
 };
 
@@ -136,4 +138,6 @@ void AddPrefsDefaults(void)
 	PrefsAddBool("swap_opt_cmd", true);
 #endif
 	PrefsAddBool("ignoresegv", true);
+	PrefsAddBool("vncserver", false);
+	PrefsAddInt32("vncport", 5900);
 }

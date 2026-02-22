@@ -217,6 +217,9 @@ static void usage(const char *prg_name)
 		"\nUnix options:\n"
 		"  --config FILE\n    read/write configuration from/to FILE\n"
 		"  --display STRING\n    X display to use\n"
+		"  --vnc [true|false]\n    enable/disable VNC server for this run\n"
+		"  --no-vnc\n    disable VNC server for this run\n"
+		"  --vnc-port PORT\n    set VNC TCP port (1-65535) and enable VNC for this run\n"
 		"  --break ADDRESS\n    set ROM breakpoint\n"
 		"  --rominfo\n    dump ROM information\n", prg_name
 	);
@@ -230,6 +233,8 @@ int main(int argc, char **argv)
 {
 	char str[256];
 	bool cd_boot = false;
+	int vnc_cli_enabled = -1;
+	int vnc_cli_port = -1;
 
 	// Initialize variables
 	RAMBaseHost = NULL;
@@ -258,6 +263,39 @@ int main(int argc, char **argv)
 				UserPrefsPath = to_tstring(argv[i]);
 				argv[i] = NULL;
 			}
+		} else if (strcmp(argv[i], "--vnc") == 0) {
+			argv[i] = NULL;
+			vnc_cli_enabled = 1;
+			if ((i + 1) < argc && argv[i + 1] != NULL && argv[i + 1][0] != '-') {
+				const char *value = argv[++i];
+				if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "on") == 0)
+					vnc_cli_enabled = 1;
+				else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0 || strcmp(value, "no") == 0 || strcmp(value, "off") == 0)
+					vnc_cli_enabled = 0;
+				else {
+					fprintf(stderr, "Invalid value for --vnc: '%s'\n", value);
+					usage(argv[0]);
+				}
+				argv[i] = NULL;
+			}
+		} else if (strcmp(argv[i], "--no-vnc") == 0) {
+			argv[i] = NULL;
+			vnc_cli_enabled = 0;
+		} else if (strcmp(argv[i], "--vnc-port") == 0) {
+			argv[i] = NULL;
+			if ((i + 1) >= argc || argv[i + 1] == NULL) {
+				fprintf(stderr, "Missing value for --vnc-port\n");
+				usage(argv[0]);
+			}
+			char *end = NULL;
+			long parsed_port = strtol(argv[++i], &end, 10);
+			if (end == argv[i] || *end != '\0' || parsed_port < 1 || parsed_port > 65535) {
+				fprintf(stderr, "Invalid value for --vnc-port: '%s'\n", argv[i]);
+				usage(argv[0]);
+			}
+			vnc_cli_port = static_cast<int>(parsed_port);
+			vnc_cli_enabled = 1;
+			argv[i] = NULL;
 		} else if (strcmp(argv[i], "--rominfo") == 0) {
 			argv[i] = NULL;
 			PrintROMInfo = true;
@@ -283,6 +321,10 @@ int main(int argc, char **argv)
 
 	// Read preferences
 	PrefsInit(NULL, argc, argv);
+	if (vnc_cli_enabled != -1)
+		PrefsReplaceBool("vncserver", vnc_cli_enabled != 0);
+	if (vnc_cli_port != -1)
+		PrefsReplaceInt32("vncport", vnc_cli_port);
 
 	// Boot MacOS from CD-ROM?
 	if (cd_boot)

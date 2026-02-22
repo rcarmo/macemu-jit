@@ -76,6 +76,26 @@ Unix:
     make            [or "gmake" if you have GNU make and "make" fails]
     make install    [optionally]
 
+  Optional configure CLI flags (this fork):
+
+    --with-vncserver
+      Enable VNC framebuffer streaming support through libvncserver.
+      Requires libvncserver development headers/libraries at build time.
+
+    --without-vncserver
+      Disable VNC framebuffer support even if libvncserver is available.
+
+  Runtime emulator CLI options (this fork):
+
+    --vnc [true|false]
+      Enable/disable VNC server for the current run.
+
+    --no-vnc
+      Disable VNC server for the current run.
+
+    --vnc-port PORT
+      Set VNC TCP port (1..65535) and enable VNC for the current run.
+
   To use Ethernet networking under Linux, you either have to configure your
   kernel for ethertap support or make and install the "sheep_net" driver
   (this is explained in the README file, at the description of the "ether"

@@ -89,6 +89,7 @@ jobs:
           apt-get install -y \
             libasound2-dev:armhf \
             libmpfr-dev:armhf \
+            libvncserver-dev:armhf \
             libudev-dev:armhf \
             libevdev-dev:armhf \
             libinput-dev:armhf \
@@ -220,6 +221,7 @@ jobs:
             --build=x86_64-linux-gnu \
             --enable-sdl-video \
             --enable-sdl-audio \
+            --with-vncserver \
             $JIT_OPT \
             $VOSF_OPT \
             --enable-addressing=direct \
@@ -405,6 +407,7 @@ jobs:
             - Runtime libraries:
               ```bash
               sudo apt install libmpfr6 libasound2 libudev1 libevdev2 libinput10 libdrm2 libgbm1
+              sudo apt install libvncserver1
               ```
             - User must be in `input` group for console/KMSDRM input:
               ```bash
