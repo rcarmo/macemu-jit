@@ -2904,7 +2904,7 @@ static void update_display_static(driver_base *drv)
 			}
 
 		} else {
-			const int bytes_per_pixel = VIDEO_MODE_ROW_BYTES / VIDEO_MODE_X;
+			const int bytes_per_pixel = (int)TrivialBytesPerRow(1, VIDEO_MODE_DEPTH);
 			const int dst_bytes_per_row = drv->s->pitch;
 
 			x1 = VIDEO_MODE_X;
@@ -3008,7 +3008,7 @@ static void update_display_static_bbox(driver_base *drv)
 
 	// Update the surface from Mac screen
 	const uint32 bytes_per_row = VIDEO_MODE_ROW_BYTES;
-	const uint32 bytes_per_pixel = bytes_per_row / VIDEO_MODE_X;
+	const uint32 bytes_per_pixel = TrivialBytesPerRow(1, VIDEO_MODE_DEPTH);
 	const uint32 dst_bytes_per_row = drv->s->pitch;
 	
 	// Debug option: use raw memcpy instead of Screen_blit for 16-bit
