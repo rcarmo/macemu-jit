@@ -25,6 +25,14 @@
 
 #ifdef DIRECT_ADDRESSING
 extern uintptr MEMBaseDiff;
+extern uint32 RAMBaseMac;
+extern uint32 RAMSize;
+extern uint32 ROMBaseMac;
+extern uint32 ROMSize;
+#if !REAL_ADDRESSING
+extern const uint32 MacFrameBaseMac;
+extern uint32 MacFrameSize;
+#endif
 #endif
 
 extern void Exception (int, uaecptr);
@@ -56,6 +64,25 @@ extern void Exception (int, uaecptr);
 #endif /* EXCEPTIONS_VIA_LONGJMP */
 
 #ifdef DIRECT_ADDRESSING
+static __inline__ bool is_direct_address_valid(uaecptr addr, int size, bool write)
+{
+    if (size <= 0)
+        return false;
+    uae_u32 end = addr + (uae_u32)size - 1;
+    if (end < addr)
+        return false;
+
+    if (addr >= RAMBaseMac && end < RAMBaseMac + RAMSize)
+        return true;
+    if (!write && addr >= ROMBaseMac && end < ROMBaseMac + ROMSize)
+        return true;
+#if !REAL_ADDRESSING
+    if (addr >= MacFrameBaseMac && end < MacFrameBaseMac + MacFrameSize)
+        return true;
+#endif
+    return false;
+}
+
 static __inline__ uae_u8 *do_get_real_address(uaecptr addr)
 {
 	return (uae_u8 *)MEMBaseDiff + addr;
@@ -66,50 +93,71 @@ static __inline__ uae_u32 do_get_virtual_address(uae_u8 *addr)
 }
 static __inline__ uae_u32 get_long(uaecptr addr)
 {
+	if (!is_direct_address_valid(addr, 4, false))
+		THROW(2);
     uae_u32 * const m = (uae_u32 *)do_get_real_address(addr);
     return do_get_mem_long(m);
 }
 #define phys_get_long get_long
 static __inline__ uae_u32 get_word(uaecptr addr)
 {
+	if (!is_direct_address_valid(addr, 2, false))
+		THROW(2);
     uae_u16 * const m = (uae_u16 *)do_get_real_address(addr);
     return do_get_mem_word(m);
 }
 #define phys_get_word get_word
 static __inline__ uae_u32 get_byte(uaecptr addr)
 {
+	if (!is_direct_address_valid(addr, 1, false))
+		THROW(2);
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     return do_get_mem_byte(m);
 }
 #define phys_get_byte get_byte
 static __inline__ void put_long(uaecptr addr, uae_u32 l)
 {
+	if (!is_direct_address_valid(addr, 4, true))
+		THROW(2);
     uae_u32 * const m = (uae_u32 *)do_get_real_address(addr);
     do_put_mem_long(m, l);
 }
 #define phys_put_long put_long
 static __inline__ void put_word(uaecptr addr, uae_u32 w)
 {
+	if (!is_direct_address_valid(addr, 2, true))
+		THROW(2);
     uae_u16 * const m = (uae_u16 *)do_get_real_address(addr);
     do_put_mem_word(m, w);
 }
 #define phys_put_word put_word
 static __inline__ void put_byte(uaecptr addr, uae_u32 b)
 {
+	if (!is_direct_address_valid(addr, 1, true))
+		THROW(2);
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     do_put_mem_byte(m, b);
 }
 #define phys_put_byte put_byte
 static __inline__ uae_u8 *get_real_address(uaecptr addr)
 {
+    if (!is_direct_address_valid(addr, 1, false))
+        THROW(2);
 	return do_get_real_address(addr);
 }
 static inline uae_u8 *get_real_address(uaecptr addr, int write, int sz)
 {
+    int size = sz;
+    if (size <= 0)
+        size = 1;
+    if (!is_direct_address_valid(addr, size, write != 0))
+        THROW(2);
     return do_get_real_address(addr);
 }
 static inline uae_u8 *phys_get_real_address(uaecptr addr)
 {
+    if (!is_direct_address_valid(addr, 1, false))
+        THROW(2);
     return do_get_real_address(addr);
 }
 static __inline__ uae_u32 get_virtual_address(uae_u8 *addr)
