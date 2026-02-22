@@ -278,6 +278,22 @@ static int untranslated_compfn(const void *e1, const void *e2)
 }
 #endif
 
+/*
+ * Bounds-checked memory access helpers for JIT-generated code (K.1).
+ * When canbang=1, the JIT historically used direct host pointer arithmetic
+ * with no validation. These wrappers route through get_long/put_long etc.
+ * which perform range checks and THROW(2) on invalid accesses, giving us
+ * proper bus-error delivery instead of silent corruption or SIGSEGV.
+ */
+#ifndef UAE
+static uae_u32 __attribute__((noinline)) jit_read_long(uaecptr addr) { return get_long(addr); }
+static uae_u32 __attribute__((noinline)) jit_read_word(uaecptr addr) { return (uae_u32)get_word(addr); }
+static uae_u32 __attribute__((noinline)) jit_read_byte(uaecptr addr) { return (uae_u32)get_byte(addr); }
+static void    __attribute__((noinline)) jit_write_long(uaecptr addr, uae_u32 val) { put_long(addr, val); }
+static void    __attribute__((noinline)) jit_write_word(uaecptr addr, uae_u32 val) { put_word(addr, (uae_u16)val); }
+static void    __attribute__((noinline)) jit_write_byte(uaecptr addr, uae_u32 val) { put_byte(addr, (uae_u8)val); }
+#endif
+
 static compop_func *compfunctbl[65536];
 static compop_func *nfcompfunctbl[65536];
 #ifdef NOFLAGS_SUPPORT
@@ -3470,8 +3486,11 @@ void writebyte(int address, int source, int tmp)
 	if ((special_mem & S_WRITE) || distrust_byte())
 		writemem_special(address, source, 5 * SIZEOF_VOID_P, 1, tmp);
 	else
-#endif
 		writemem_real(address,source,1,tmp,0);
+#else
+	mov_l_ri(tmp, (uintptr)jit_write_byte);
+	call_r_02(tmp, address, source, 4, 1);
+#endif
 }
 
 static inline void writeword_general(int address, int source, int tmp,
@@ -3481,8 +3500,11 @@ static inline void writeword_general(int address, int source, int tmp,
 	if ((special_mem & S_WRITE) || distrust_word())
 		writemem_special(address, source, 4 * SIZEOF_VOID_P, 2, tmp);
 	else
-#endif
 		writemem_real(address,source,2,tmp,clobber);
+#else
+	mov_l_ri(tmp, (uintptr)jit_write_word);
+	call_r_02(tmp, address, source, 4, 2);
+#endif
 }
 
 void writeword_clobber(int address, int source, int tmp)
@@ -3502,8 +3524,11 @@ static inline void writelong_general(int address, int source, int tmp,
 	if ((special_mem & S_WRITE) || distrust_long())
 		writemem_special(address, source, 3 * SIZEOF_VOID_P, 4, tmp);
 	else
-#endif
 		writemem_real(address,source,4,tmp,clobber);
+#else
+	mov_l_ri(tmp, (uintptr)jit_write_long);
+	call_r_02(tmp, address, source, 4, 4);
+#endif
 }
 
 void writelong_clobber(int address, int source, int tmp)
@@ -3581,8 +3606,11 @@ void readbyte(int address, int dest, int tmp)
 	if ((special_mem & S_READ) || distrust_byte())
 		readmem_special(address, dest, 2 * SIZEOF_VOID_P, 1, tmp);
 	else
-#endif
 		readmem_real(address,dest,1,tmp);
+#else
+	mov_l_ri(tmp, (uintptr)jit_read_byte);
+	call_r_11(dest, tmp, address, 1, 4);
+#endif
 }
 
 void readword(int address, int dest, int tmp)
@@ -3591,8 +3619,11 @@ void readword(int address, int dest, int tmp)
 	if ((special_mem & S_READ) || distrust_word())
 		readmem_special(address, dest, 1 * SIZEOF_VOID_P, 2, tmp);
 	else
-#endif
 		readmem_real(address,dest,2,tmp);
+#else
+	mov_l_ri(tmp, (uintptr)jit_read_word);
+	call_r_11(dest, tmp, address, 2, 4);
+#endif
 }
 
 void readlong(int address, int dest, int tmp)
@@ -3601,8 +3632,11 @@ void readlong(int address, int dest, int tmp)
 	if ((special_mem & S_READ) || distrust_long())
 		readmem_special(address, dest, 0 * SIZEOF_VOID_P, 4, tmp);
 	else
-#endif
 		readmem_real(address,dest,4,tmp);
+#else
+	mov_l_ri(tmp, (uintptr)jit_read_long);
+	call_r_11(dest, tmp, address, 4, 4);
+#endif
 }
 
 void get_n_addr(int address, int dest, int tmp)
@@ -5596,13 +5630,22 @@ setjmpagain:
 			regs.regs[15]);
 
 		if (exception_no == 2) {
-			jit_log("JIT: exception 2 at fault_pc=%08x addr=%08x; disabling JIT and falling back to interpreter",
-				regs.fault_pc, regs.mmu_fault_addr);
-			UseJIT = false;
-			NotifyJITDisabledFallback();
+			static int bus_error_count = 0;
+			bus_error_count++;
+			jit_log("JIT: bus error #%d at fault_pc=%08x addr=%08x",
+				bus_error_count, regs.fault_pc, regs.mmu_fault_addr);
+			if (bus_error_count > 50) {
+				jit_log("JIT: too many bus errors (%d); disabling JIT and falling back to interpreter",
+					bus_error_count);
+				UseJIT = false;
+				NotifyJITDisabledFallback();
+				flush_icache();
+				m68k_execute();
+				return;
+			}
 			flush_icache();
-			m68k_execute();
-			return;
+			Exception(2, 0);
+			goto setjmpagain;
 		}
 
 		flush_icache();

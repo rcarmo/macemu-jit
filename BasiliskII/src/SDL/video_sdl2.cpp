@@ -668,6 +668,13 @@ static void set_mac_frame_buffer(SDL_monitor_desc &monitor, int depth, bool nati
 	MacFrameSize = VIDEO_MODE_ROW_BYTES * VIDEO_MODE_Y;
 	InitFrameBufferMapping();
 #else
+	// DIRECT_ADDRESSING: set frame buffer host pointer and size for
+	// bounds checking in is_direct_address_valid() (K.3)
+	MacFrameBaseHost = the_buffer;
+	{
+		const VIDEO_MODE &mode = monitor.get_current_mode();
+		MacFrameSize = VIDEO_MODE_ROW_BYTES * VIDEO_MODE_Y;
+	}
 	monitor.set_mac_frame_base(Host2MacAddr(the_buffer));
 #endif
 	D(bug("monitor.mac_frame_base = %08x\n", monitor.get_mac_frame_base()));

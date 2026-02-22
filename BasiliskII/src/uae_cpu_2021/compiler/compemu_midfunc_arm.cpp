@@ -1709,7 +1709,6 @@ MIDFUNC(2,xor_b,(RW1 d, RR1 s))
 	unlock2(s);
 }
 
-#if defined(UAE)
 MIDFUNC(5,call_r_02,(RR4 r, RR4 in1, RR4 in2, IMM isize1, IMM isize2))
 {
 	clobber_flags();
@@ -1723,9 +1722,7 @@ MIDFUNC(5,call_r_02,(RR4 r, RR4 in1, RR4 in2, IMM isize1, IMM isize2))
 	prepare_for_call_2();
 	compemu_raw_call_r(r);
 }
-#endif
 
-#if defined(UAE)
 MIDFUNC(5,call_r_11,(W4 out1, RR4 r, RR4 in1, IMM osize, IMM isize))
 {
 	clobber_flags();
@@ -1761,7 +1758,6 @@ MIDFUNC(5,call_r_11,(W4 out1, RR4 r, RR4 in1, IMM osize, IMM isize))
 	live.state[out1].dirtysize=osize;
 	set_status(out1,DIRTY);
 }
-#endif
 
 MIDFUNC(0,nop,(void))
 {
@@ -1974,20 +1970,7 @@ MIDFUNC(2,arm_ROR_l_ri8,(RW4 r, IMM i))
 // Other
 static inline void flush_cpu_icache(void *start, void *stop)
 {
-
-	register void *_beg __asm ("a1") = start;
-	register void *_end __asm ("a2") = stop;
-	register void *_flg __asm ("a3") = 0;
-#ifdef __ARM_EABI__
-	register unsigned long _scno __asm ("r7") = 0xf0002;
-	__asm __volatile ("swi 0x0		@ sys_cacheflush"
-			: "=r" (_beg)
-			: "0" (_beg), "r" (_end), "r" (_flg), "r" (_scno));
-#else
-	__asm __volatile ("swi 0x9f0002		@ sys_cacheflush"
-			: "=r" (_beg)
-			: "0" (_beg), "r" (_end), "r" (_flg));
-#endif
+	__builtin___clear_cache((char *)start, (char *)stop);
 }
 
 static inline void write_jmp_target(uae_u32* jmpaddr, cpuop_func* a) {

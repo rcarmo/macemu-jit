@@ -66,6 +66,41 @@
 /* --- ENCODINGS ----------------------------------------------------------- */
 /* ========================================================================= */
 
+/*
+ * IMM32: Encode a 32-bit constant as an ARM rotated-immediate operand.
+ * Returns 0 if the constant cannot be represented, which silently produces
+ * a zero immediate. Callers that embed compile-time constants should verify
+ * representability or use a literal-pool load instead.
+ */
+#ifdef JIT_DEBUG
+/* Debug build: abort on non-representable immediates so we catch them early */
+static inline int _imm32_checked(uae_u32 c, const char *file, int line)
+{
+	int result = (((c) & 0xffffff00) == 0 ? (c) :
+	              ((c) & 0x3fffffc0) == 0 ? (0x100 | (((c) >> 30) & 0x3) | ((((c) & 0x0000003f) << 2))) :
+	              ((c) & 0x0ffffff0) == 0 ? (0x200 | (((c) >> 28) & 0xf) | ((((c) & 0x0000000f) << 4))) :
+	              ((c) & 0x03fffffc) == 0 ? (0x300 | (((c) >> 26) & 0x3f) | ((((c) & 0x00000003) << 6)) ) :
+	              ((c) & 0x00ffffff) == 0 ? (0x400 | (((c) >> 24) & 0xff)) :
+	              ((c) & 0xc03fffff) == 0 ? (0x500 | ((c) >> 22)) :
+	              ((c) & 0xf00fffff) == 0 ? (0x600 | ((c) >> 20)) :
+	              ((c) & 0xfc03ffff) == 0 ? (0x700 | ((c) >> 18)) :
+	              ((c) & 0xff00ffff) == 0 ? (0x800 | ((c) >> 16)) :
+	              ((c) & 0xffc03fff) == 0 ? (0x900 | ((c) >> 14)) :
+	              ((c) & 0xfff00fff) == 0 ? (0xa00 | ((c) >> 12)) :
+	              ((c) & 0xfffc03ff) == 0 ? (0xb00 | ((c) >> 10)) :
+	              ((c) & 0xffff00ff) == 0 ? (0xc00 | ((c) >> 8)) :
+	              ((c) & 0xffffc03f) == 0 ? (0xd00 | ((c) >> 6)) :
+	              ((c) & 0xfffff00f) == 0 ? (0xe00 | ((c) >> 4)) :
+	              ((c) & 0xfffffc03) == 0 ? (0xf00 | ((c) >> 2)) :
+	                    0);
+	if (result == 0 && c != 0) {
+		fprintf(stderr, "IMM32: non-representable constant 0x%08x at %s:%d\n", c, file, line);
+		abort();
+	}
+	return result;
+}
+#define IMM32(c) _imm32_checked((uae_u32)(c), __FILE__, __LINE__)
+#else
 #define IMM32(c) (((c) & 0xffffff00) == 0 ? (c) : \
                   ((c) & 0x3fffffc0) == 0 ? (0x100 | (((c) >> 30) & 0x3) | ((((c) & 0x0000003f) << 2))) : \
                   ((c) & 0x0ffffff0) == 0 ? (0x200 | (((c) >> 28) & 0xf) | ((((c) & 0x0000000f) << 4))) : \
@@ -84,6 +119,7 @@
                   ((c) & 0xfffffc03) == 0 ? (0xf00 | ((c) >> 2)) : \
                         0\
                  )
+#endif
 
 #define SHIFT_IMM(c) (0x02000000 | (IMM32((c))))
 

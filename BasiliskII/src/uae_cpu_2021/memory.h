@@ -31,6 +31,7 @@ extern uint32 ROMBaseMac;
 extern uint32 ROMSize;
 extern bool AllowROMWritesWhilePatching;
 #if !REAL_ADDRESSING
+extern uint8 *MacFrameBaseHost;
 extern uint32 MacFrameSize;
 #endif
 #endif
@@ -77,9 +78,11 @@ static __inline__ bool is_direct_address_valid(uaecptr addr, int size, bool writ
     if (addr >= ROMBaseMac && end < ROMBaseMac + ROMSize)
         return !write || AllowROMWritesWhilePatching;
 #if !REAL_ADDRESSING
-    const uae_u32 frame_base = 0xa0000000;
-    if (addr >= frame_base && end < frame_base + MacFrameSize)
-        return true;
+    if (MacFrameBaseHost != 0 && MacFrameSize > 0) {
+        const uae_u32 frame_base = (uae_u32)((uintptr)MacFrameBaseHost - MEMBaseDiff);
+        if (addr >= frame_base && end < frame_base + MacFrameSize)
+            return true;
+    }
 #endif
     return false;
 }
