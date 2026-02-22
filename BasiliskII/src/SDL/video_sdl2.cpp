@@ -1057,7 +1057,13 @@ void reset_video_debug_flags(void) {
 
 static int present_sdl_video()
 {
-	if (SDL_RectEmpty(&sdl_update_video_rect)) return 0;
+	if (SDL_RectEmpty(&sdl_update_video_rect)) {
+		if (host_surface != NULL) {
+			SDL_Rect empty_rect = {0, 0, 0, 0};
+			VNCServerUpdate(host_surface, empty_rect);
+		}
+		return 0;
+	}
 	
 	if (!sdl_renderer || !sdl_texture || !guest_surface) {
 		printf("WARNING: A video mode does not appear to have been set.\n");
