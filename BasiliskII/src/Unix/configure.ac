@@ -895,10 +895,18 @@ AS_IF([test "x$with_vdeplug" = "xyes"], [
 dnl Is libvncserver available?
 have_vncserver=no
 AS_IF([test "x$with_vncserver" = "xyes"], [
-  AC_CHECK_HEADER([rfb/rfb.h], [
-    AC_CHECK_LIB([vncserver], [rfbGetScreen], [
-      have_vncserver=yes
-      AC_DEFINE([HAVE_LIBVNCSERVER], [1], [Define if libvncserver is available.])
+  PKG_CHECK_MODULES([libvncserver], [libvncserver], [
+    CFLAGS="$CFLAGS $libvncserver_CFLAGS"
+    CXXFLAGS="$CXXFLAGS $libvncserver_CFLAGS"
+    LIBS="$LIBS $libvncserver_LIBS"
+    have_vncserver=yes
+    AC_DEFINE([HAVE_LIBVNCSERVER], [1], [Define if libvncserver is available.])
+  ], [
+    AC_CHECK_HEADER([rfb/rfb.h], [
+      AC_CHECK_LIB([vncserver], [rfbGetScreen], [
+        have_vncserver=yes
+        AC_DEFINE([HAVE_LIBVNCSERVER], [1], [Define if libvncserver is available.])
+      ])
     ])
   ])
 ])
