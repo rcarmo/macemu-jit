@@ -42,6 +42,10 @@ AC_ARG_WITH(sdl3,            [  --with-sdl3             use SDL 3.x, rather than
 dnl JIT compiler options.
 AC_ARG_ENABLE(jit-compiler,  [  --enable-jit-compiler   enable JIT compiler [default=yes]], [WANT_JIT=$enableval], [WANT_JIT=yes])
 AC_ARG_ENABLE(jit-debug,     [  --enable-jit-debug      activate native code disassemblers [default=no]], [WANT_JIT_DEBUG=$enableval], [WANT_JIT_DEBUG=no])
+AC_ARG_ENABLE(threaded-dispatch,
+  [  --enable-threaded-dispatch  enable experimental threaded-dispatch scaffolding [default=no]],
+  [WANT_THREADED_DISPATCH=$enableval],
+  [WANT_THREADED_DISPATCH=no])
 
 dnl FPU emulation core.
 AC_ARG_ENABLE(fpe,
@@ -1770,6 +1774,14 @@ if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
   UAE_PATH="../uae_cpu_2021"
 else
   UAE_PATH="../uae_cpu"
+fi
+
+if [[ "x$WANT_THREADED_DISPATCH" = "xyes" ]]; then
+  if [[ "x$HAVE_GCC27" = "xyes" ]]; then
+    DEFINES="$DEFINES -DENABLE_THREADED_DISPATCH"
+  else
+    AC_MSG_WARN([--enable-threaded-dispatch requires GCC/Clang-style extensions; disabling])
+  fi
 fi
 
 dnl Enable JIT compiler, if possible.

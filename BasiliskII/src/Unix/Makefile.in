@@ -178,7 +178,7 @@ mostlyclean:
 	rm -f $(PROGS) $(OBJ_DIR)/* core* *.core *~ *.bak ui/*~ ui/*.bak
 
 clean: mostlyclean
-	rm -f cpuemu.cpp cpudefs.cpp cputmp*.s cpufast*.s cpustbl.cpp cputbl.h compemu.cpp compstbl.cpp comptbl.h g_resource.cpp
+	rm -f cpuemu.cpp cpudefs.cpp cputmp*.s cpufast*.s cpustbl.cpp cputbl.h cpufunctbl.cpp threaded_dispatch_map.inc compemu.cpp compstbl.cpp comptbl.h g_resource.cpp
 
 distclean: clean
 	rm -rf $(OBJ_DIR)
@@ -230,6 +230,7 @@ compstbl.cpp: compemu.cpp
 cputbl.h: cpuemu.cpp
 comptbl.h: compemu.cpp
 cpufunctbl.cpp: cputbl.h
+threaded_dispatch_map.inc: cputbl.h
 
 cpuemu.cpp: $(OBJ_DIR)/gencpu$(EXEEXT)
 	$(OBJ_DIR)/gencpu$(EXEEXT)

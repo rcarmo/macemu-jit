@@ -41,6 +41,7 @@ extern void Exception (int, uaecptr);
     #define THROW_AGAIN(var) LONGJMP(excep_env, var)
     #define VOLATILE volatile
 #else
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
     struct m68k_exception {
         int prb;
         m68k_exception (int exc) : prb (exc) {}
@@ -53,6 +54,20 @@ extern void Exception (int, uaecptr);
     #define THROW(n) throw m68k_exception(n)
     #define THROW_AGAIN(var) throw
     #define VOLATILE
+#else
+    struct m68k_exception {
+        int prb;
+        m68k_exception (int exc) : prb (exc) {}
+        operator int() { return prb; }
+    };
+    #define SAVE_EXCEPTION
+    #define RESTORE_EXCEPTION
+    #define TRY(var) int var = 0; if (true)
+    #define CATCH(var) else
+    #define THROW(n) do { __builtin_trap(); } while (0)
+    #define THROW_AGAIN(var) do { __builtin_trap(); } while (0)
+    #define VOLATILE
+#endif
 #endif /* EXCEPTIONS_VIA_LONGJMP */
 
 #if DIRECT_ADDRESSING

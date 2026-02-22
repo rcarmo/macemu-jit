@@ -581,14 +581,8 @@ void Exception(int nr, uaecptr oldpc)
 #endif
         // panicbug("Exception Nr. %d CPC: %08x NPC: %08x SP=%08x Addr: %08x", nr, currpc, get_long (regs.vbr + 4*nr), m68k_areg(regs, 7), regs.mmu_fault_addr);
 #ifdef EXCEPTIONS_VIA_LONGJMP
-	if (!building_bus_fault_stack_frame)
-#else
-	try
-#endif
-	{
-#ifdef EXCEPTIONS_VIA_LONGJMP
-            building_bus_fault_stack_frame= 1;
-#endif
+	if (!building_bus_fault_stack_frame) {
+	    building_bus_fault_stack_frame = 1;
 	    /* 68040 */
 	    exc_push_long(0);	/* PD3 */
 	    exc_push_long(0);	/* PD2 */
@@ -607,23 +601,55 @@ void Exception(int nr, uaecptr oldpc)
 	    exc_push_word(regs.mmu_ssw);
 	    exc_push_long(regs.mmu_fault_addr); /* EA */
 	    exc_make_frame(7, regs.sr, regs.fault_pc, 2, 0, 0);
-
-	}
-#ifdef EXCEPTIONS_VIA_LONGJMP
-	else
-#else
-	catch (m68k_exception)
-#endif
-	{
-            report_double_bus_error();
-#ifdef EXCEPTIONS_VIA_LONGJMP
-            building_bus_fault_stack_frame= 0;
-#endif
+	} else {
+	    report_double_bus_error();
+	    building_bus_fault_stack_frame = 0;
 	    return;
-        }
-
-#ifdef EXCEPTIONS_VIA_LONGJMP
-	building_bus_fault_stack_frame= 0;
+	}
+	building_bus_fault_stack_frame = 0;
+#elif defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+	try {
+	    /* 68040 */
+	    exc_push_long(0);	/* PD3 */
+	    exc_push_long(0);	/* PD2 */
+	    exc_push_long(0);	/* PD1 */
+	    exc_push_long(0);	/* PD0/WB1D */
+	    exc_push_long(0);	/* WB1A */
+	    exc_push_long(0);	/* WB2D */
+	    exc_push_long(0);	/* WB2A */
+	    exc_push_long(regs.wb3_data);	/* WB3D */
+	    exc_push_long(regs.mmu_fault_addr);	/* WB3A */
+	    exc_push_long(regs.mmu_fault_addr);
+	    exc_push_word(0);	/* WB1S */
+	    exc_push_word(0);	/* WB2S */
+	    exc_push_word(regs.wb3_status);	/* WB3S */
+	    regs.wb3_status = 0;
+	    exc_push_word(regs.mmu_ssw);
+	    exc_push_long(regs.mmu_fault_addr); /* EA */
+	    exc_make_frame(7, regs.sr, regs.fault_pc, 2, 0, 0);
+	} catch (m68k_exception) {
+	    report_double_bus_error();
+	    return;
+	}
+#else
+	/* 68040 */
+	exc_push_long(0);	/* PD3 */
+	exc_push_long(0);	/* PD2 */
+	exc_push_long(0);	/* PD1 */
+	exc_push_long(0);	/* PD0/WB1D */
+	exc_push_long(0);	/* WB1A */
+	exc_push_long(0);	/* WB2D */
+	exc_push_long(0);	/* WB2A */
+	exc_push_long(regs.wb3_data);	/* WB3D */
+	exc_push_long(regs.mmu_fault_addr);	/* WB3A */
+	exc_push_long(regs.mmu_fault_addr);
+	exc_push_word(0);	/* WB1S */
+	exc_push_word(0);	/* WB2S */
+	exc_push_word(regs.wb3_status);	/* WB3S */
+	regs.wb3_status = 0;
+	exc_push_word(regs.mmu_ssw);
+	exc_push_long(regs.mmu_fault_addr); /* EA */
+	exc_make_frame(7, regs.sr, regs.fault_pc, 2, 0, 0);
 #endif
         /* end of BUS ERROR handler */
     } else if (nr == 3) {
@@ -1500,49 +1526,107 @@ int m68k_do_specialties(void)
 	return 0;
 }
 
+#if defined(ENABLE_THREADED_DISPATCH) && (defined(__GNUC__) || defined(__clang__))
+#define THREADED_CAN_USE_COMPUTED_GOTO 1
+#else
+#define THREADED_CAN_USE_COMPUTED_GOTO 0
+#endif
+
 void m68k_do_execute (void)
 {
-    uae_u32 pc;
-    uae_u32 opcode;
-    for (;;) {
-	regs.fault_pc = pc = m68k_getpc();
+	uae_u32 pc;
+	uae_u32 opcode;
+
+	auto fetch_opcode = [&]() {
+		regs.fault_pc = pc = m68k_getpc();
 #ifdef FULL_HISTORY
 #ifdef NEED_TO_DEBUG_BADLY
-	history[lasthist] = regs;
-	historyf[lasthist] =  regflags;
+		history[lasthist] = regs;
+		historyf[lasthist] =  regflags;
 #else
-	history[lasthist] = m68k_getpc();
+		history[lasthist] = m68k_getpc();
 #endif
-	if (++lasthist == MAX_HIST) lasthist = 0;
-	if (lasthist == firsthist) {
-	    if (++firsthist == MAX_HIST) firsthist = 0;
-	}
+		if (++lasthist == MAX_HIST) lasthist = 0;
+		if (lasthist == firsthist) {
+		    if (++firsthist == MAX_HIST) firsthist = 0;
+		}
 #endif
 
 #ifndef FULLMMU
 #ifdef ARAM_PAGE_CHECK
-	if (((pc ^ pc_page) > ARAM_PAGE_MASK)) {
-	    check_ram_boundary(pc, 2, false);
-	    pc_page = pc;
-	    pc_offset = (uintptr)get_real_address(pc, 0, sz_word) - pc;
-	}
+		if (((pc ^ pc_page) > ARAM_PAGE_MASK)) {
+		    check_ram_boundary(pc, 2, false);
+		    pc_page = pc;
+		    pc_offset = (uintptr)get_real_address(pc, 0, sz_word) - pc;
+		}
 #else
-	check_ram_boundary(pc, 2, false);
+		check_ram_boundary(pc, 2, false);
 #endif
 #endif
-	opcode = GET_OPCODE;
+		opcode = GET_OPCODE;
 #ifdef FLIGHT_RECORDER
-	m68k_record_step(m68k_getpc(), cft_map(opcode));
+		m68k_record_step(m68k_getpc(), cft_map(opcode));
 #endif
+	};
+
+#if THREADED_CAN_USE_COMPUTED_GOTO
+#if defined(__has_include) && __has_include("threaded_dispatch_map.inc")
+    static void *threaded_dispatch_targets[65536];
+    static bool threaded_dispatch_targets_initialized = false;
+    if (!threaded_dispatch_targets_initialized) {
+		for (int i = 0; i < 65536; ++i)
+			threaded_dispatch_targets[i] = &&threaded_fallback;
+
+#define THREADED_DISPATCH_MAP_ENTRY(opcode_value, label_name, handler_name) threaded_dispatch_targets[(opcode_value)] = &&label_name;
+#include "threaded_dispatch_map.inc"
+		threaded_dispatch_targets_initialized = true;
+	}
+
+threaded_dispatch_fetch:
+	fetch_opcode();
+	goto *threaded_dispatch_targets[opcode];
+
+#define THREADED_DISPATCH_MAP_ENTRY(opcode_value, label_name, handler_name) \
+	label_name:                                                       \
+		(*cpufunctbl[(opcode_value)])(opcode);                          \
+		goto threaded_dispatch_epilogue;
+#include "threaded_dispatch_map.inc"
+
+threaded_fallback:
 	(*cpufunctbl[opcode])(opcode);
+
+threaded_dispatch_epilogue:
 	cpu_check_ticks();
 	regs.fault_pc = m68k_getpc();
-
 	if (SPCFLAGS_TEST(SPCFLAG_ALL_BUT_EXEC_RETURN)) {
 		if (m68k_do_specialties())
 			return;
 	}
-    }
+	goto threaded_dispatch_fetch;
+#else
+	for (;;) {
+		fetch_opcode();
+		(*cpufunctbl[opcode])(opcode);
+		cpu_check_ticks();
+		regs.fault_pc = m68k_getpc();
+		if (SPCFLAGS_TEST(SPCFLAG_ALL_BUT_EXEC_RETURN)) {
+			if (m68k_do_specialties())
+				return;
+		}
+	}
+#endif
+#else
+	for (;;) {
+		fetch_opcode();
+		(*cpufunctbl[opcode])(opcode);
+		cpu_check_ticks();
+		regs.fault_pc = m68k_getpc();
+		if (SPCFLAGS_TEST(SPCFLAG_ALL_BUT_EXEC_RETURN)) {
+			if (m68k_do_specialties())
+				return;
+		}
+	}
+#endif
 }
 
 void m68k_execute (void)
