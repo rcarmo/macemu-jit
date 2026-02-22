@@ -30,7 +30,6 @@ extern uint32 RAMSize;
 extern uint32 ROMBaseMac;
 extern uint32 ROMSize;
 #if !REAL_ADDRESSING
-extern const uint32 MacFrameBaseMac;
 extern uint32 MacFrameSize;
 #endif
 #endif
@@ -77,7 +76,8 @@ static __inline__ bool is_direct_address_valid(uaecptr addr, int size, bool writ
     if (!write && addr >= ROMBaseMac && end < ROMBaseMac + ROMSize)
         return true;
 #if !REAL_ADDRESSING
-    if (addr >= MacFrameBaseMac && end < MacFrameBaseMac + MacFrameSize)
+    const uae_u32 frame_base = 0xa0000000;
+    if (addr >= frame_base && end < frame_base + MacFrameSize)
         return true;
 #endif
     return false;
