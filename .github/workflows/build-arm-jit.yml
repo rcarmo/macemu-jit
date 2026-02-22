@@ -235,6 +235,7 @@ jobs:
 
       - name: Build BasiliskII
         run: |
+          set -o pipefail
           cd BasiliskII/src/Unix
           
           export CC=arm-linux-gnueabihf-gcc
@@ -248,16 +249,21 @@ jobs:
           fi
           
           # Build and capture output
-          make -j$(nproc) 2>&1 | tee build.log || {
+          if ! make -j$(nproc) 2>&1 | tee build.log; then
             echo "=== Build failed - showing errors ==="
-            grep -i "error:" build.log | head -50
+            grep -i "error:" build.log | head -50 || true
             exit 1
-          }
+          fi
 
       - name: Verify ARM32 binary
         run: |
           cd BasiliskII/src/Unix
-          file BasiliskII || echo "Binary not found"
+          if [ ! -f BasiliskII ]; then
+            echo "✗ BasiliskII binary not found after build"
+            ls -la
+            exit 1
+          fi
+          file BasiliskII
           
           # Verify it's actually ARM32
           file BasiliskII | grep -q "ARM" && echo "✓ ARM binary confirmed"
