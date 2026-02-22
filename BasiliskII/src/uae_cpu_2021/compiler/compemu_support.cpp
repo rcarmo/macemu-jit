@@ -199,6 +199,10 @@ static inline int distrust_addr(void)
 /* BasiliskII compatibility definitions */
 #ifndef WINUAE_ARANYM
 #define panicbug bug
+/* bug/printf doesn't append newlines, so jit_log output runs together.
+   Redefine jit_log to add a trailing newline for readable console output. */
+#undef jit_log
+#define jit_log(format, ...) printf(format "\n", ##__VA_ARGS__)
 #endif
 
 #ifdef WINUAE_ARANYM
@@ -4111,8 +4115,10 @@ static inline void create_popalls(void)
 #endif
 	// no need to further write into popallspace
 	vm_protect(popallspace, POPALLSPACE_SIZE, VM_PAGE_READ | VM_PAGE_EXECUTE);
-	// No need to flush. Initialized and not modified
-	// flush_cpu_icache((void *)popallspace, (void *)target);
+	// On ARM, the instruction cache is not coherent with the data cache.
+	// After writing JIT code via stores and calling mprotect, we must
+	// explicitly flush the icache or the CPU will execute stale data.
+	flush_cpu_icache((void *)popallspace, (void *)get_target());
 }
 
 static inline void reset_lists(void)
@@ -4283,6 +4289,7 @@ static bool merge_blacklist()
 	const char *blacklist = "";
 #else
 	const char *blacklist = PrefsFindString("jitblacklist");
+	if (!blacklist) blacklist = "";
 #endif
 #ifdef USE_JIT_FPU
 	for (unsigned int i = 0; i < (sizeof(jit_opcodes) / sizeof(jit_opcodes[0])); i++)
