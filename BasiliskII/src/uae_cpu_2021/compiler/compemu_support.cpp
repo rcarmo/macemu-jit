@@ -4050,7 +4050,7 @@ static inline void create_popalls(void)
 	raw_dec_sp(stack_space);
 	r=REG_PC_TMP;
 	compemu_raw_mov_l_rm(r, uae_p32(&regs.pc_p));
-	compemu_raw_and_l_ri(r,TAGMASK);
+	compemu_raw_and_l_ri(r, CACHELINE_MASK);
 	{
 		assert(sizeof(cache_tags[0]) == sizeof(void *));
 		// verify(sizeof(cache_tags[0]) == sizeof(void *));
