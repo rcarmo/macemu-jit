@@ -184,15 +184,18 @@ jobs:
           # Cross-compile for armhf
           export CC=arm-linux-gnueabihf-gcc
           export CXX=arm-linux-gnueabihf-g++
+          export CFLAGS="-O0 -g3 -fno-omit-frame-pointer -fno-inline"
+          export CXXFLAGS="${CFLAGS}"
           
           # Set pkg-config paths (always include armhf system .pc dirs)
           export ARMHF_PKGCONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
           if [ "${{ matrix.sdl_source }}" = "vendored" ]; then
             export PKG_CONFIG_PATH="/opt/sdl2-armhf/lib/pkgconfig:${ARMHF_PKGCONFIG_PATH}"
-            export LDFLAGS="-L/opt/sdl2-armhf/lib -Wl,-rpath,/opt/sdl2-armhf/lib"
+            export LDFLAGS="-L/opt/sdl2-armhf/lib -Wl,-rpath,/opt/sdl2-armhf/lib -Wl,--build-id"
             export CPPFLAGS="-I/opt/sdl2-armhf/include"
           else
             export PKG_CONFIG_PATH="${ARMHF_PKGCONFIG_PATH}"
+            export LDFLAGS="-Wl,--build-id"
           fi
 
           echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
@@ -247,12 +250,15 @@ jobs:
           
           export CC=arm-linux-gnueabihf-gcc
           export CXX=arm-linux-gnueabihf-g++
+          export CFLAGS="-O0 -g3 -fno-omit-frame-pointer -fno-inline"
+          export CXXFLAGS="${CFLAGS}"
           
           if [ "${{ matrix.sdl_source }}" = "vendored" ]; then
             export PKG_CONFIG_PATH="/opt/sdl2-armhf/lib/pkgconfig:/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
-            export LDFLAGS="-L/opt/sdl2-armhf/lib -Wl,-rpath,/opt/sdl2-armhf/lib"
+            export LDFLAGS="-L/opt/sdl2-armhf/lib -Wl,-rpath,/opt/sdl2-armhf/lib -Wl,--build-id"
           else
             export PKG_CONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig"
+            export LDFLAGS="-Wl,--build-id"
           fi
 
           echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
@@ -322,6 +328,8 @@ jobs:
           - JIT Enabled: ${{ matrix.jit_enabled }}
           - VOSF Enabled: ${{ matrix.vosf_enabled }}
           - SDL2 Source: ${{ matrix.sdl_source }}
+          - CFLAGS: -O0 -g3 -fno-omit-frame-pointer -fno-inline
+          - LDFLAGS: --build-id
           
           Target: Raspberry Pi (32-bit armhf)
           EOF

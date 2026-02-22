@@ -97,7 +97,22 @@ static __inline__ uae_u32 get_long(uaecptr addr)
 	if (!is_direct_address_valid(addr, 4, false))
 		THROW(2);
     uae_u32 * const m = (uae_u32 *)do_get_real_address(addr);
-    return do_get_mem_long(m);
+    uae_u32 value = do_get_mem_long(m);
+    if (value >= 0x50000000 && value < 0x51000000) {
+        static bool traced_poison_value = false;
+        if (!traced_poison_value) {
+            traced_poison_value = true;
+            fprintf(stderr,
+                "JIT-TRACE get_long poison-value addr=%08x value=%08x RAM=[%08x..%08x) ROM=[%08x..%08x)\\n",
+                (unsigned int)addr,
+                (unsigned int)value,
+                (unsigned int)RAMBaseMac,
+                (unsigned int)(RAMBaseMac + RAMSize),
+                (unsigned int)ROMBaseMac,
+                (unsigned int)(ROMBaseMac + ROMSize));
+        }
+    }
+    return value;
 }
 #define phys_get_long get_long
 static __inline__ uae_u32 get_word(uaecptr addr)

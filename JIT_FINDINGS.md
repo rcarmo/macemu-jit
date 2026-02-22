@@ -77,6 +77,32 @@ This is a focused static audit of the code paths most likely to still generate i
 3. **Longer-term robust fix:** add an explicit Basilisk-side range guard before `canbang` direct memory emission for JIT-generated reads/writes (or force non-`canbang` path for risky regions).
 4. **Diagnostics improvement:** log opcode + EA at first `THROW(2)` in `get_*` to identify first poison site without multi-step watchpoint setup.
 
+### Latest Probe Update (2026-02-22, headless GDB)
+
+Using `SDL_VIDEODRIVER=dummy` with `gdb -batch` and a conditional hardware watchpoint on `regs.regs[11]`:
+
+- **Watchpoint condition:** `regs.regs[11] in [0x50000000, 0x50ffffff]`
+- **First trigger:** `op_2068_0_ff` at `cpuemu.cpp:13793`
+- **State transition:** `regs.regs[11]` changed from `0x08800000` to `0x50f14000`
+- **Instruction context:** value loaded via `get_long(...)` then stored into A-register slot (`str.w r0, [r5, r4, lsl #2]`)
+
+This reconfirms the previously identified root chain:
+
+1. `op_2068_0_ff` seeds poisoned A3 from out-of-range read source,
+2. later `op_4a28_0_ff` consumes that poisoned EA,
+3. range checks throw exception 2 in memory helpers.
+
+Additional observation from this build: traces may symbolize the throw site as `put_long()` (`memory.h:122`) due to optimization/inlining, but register/disassembly context still points to the same `op_4a28_0_ff` invalid-EA flow.
+
+#### Debug-build policy (temporary)
+
+For ongoing triage, keep ARMhf artifacts built with full symbols (and minimal inlining where practical) to preserve argument visibility in throw/bus-error frames and reduce ambiguity in inline helper attribution.
+
+CI has been updated accordingly (`build-arm-jit.yml`) to use debug-friendly flags during configure/build:
+
+- `-O0 -g3 -fno-omit-frame-pointer -fno-inline`
+- linker build-id enabled (`-Wl,--build-id`)
+
 ---
 
 ## Executive Summary
