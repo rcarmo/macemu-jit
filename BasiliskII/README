@@ -81,6 +81,39 @@ Windows:
 If no preferences file is present, Basilisk II will create one with the
 default settings upon startup.
 
+Runtime command-line overrides (this fork)
+------------------------------------------
+
+The emulator supports command-line options to control VNC for the current run:
+
+  --vnc [true|false]
+    Enable or disable VNC server output for this process.
+    If no value is given, VNC is enabled.
+
+  --no-vnc
+    Disable VNC server output for this process.
+
+  --vnc-port <port>
+    Set VNC TCP port (1..65535) and enable VNC for this process.
+
+These options override the `vncserver` and `vncport` preferences for the
+current process only.
+
+Framebuffer PNG dump (SDL2 Unix build)
+--------------------------------------
+
+For remote graphics debugging, send `SIGUSR2` to the emulator process:
+
+  kill -USR2 <pid>
+
+This requests a PNG dump of the current SDL framebuffer. The file is saved to
+`/tmp` by default and the full output path is printed to the emulator log.
+
+Optional environment variable:
+
+  B2_DUMP_DIR=<path>
+    Directory where PNG dumps are written.
+
 
 Preferences File Format
 -----------------------
@@ -590,6 +623,18 @@ frameskip <frames to skip>
   update mode that cuts the display into rectangles and updates each
   rectangle individually, depending on display changes.
 
+vncserver <"true" or "false">
+
+  Enable or disable the built-in VNC server for SDL2 video output.
+  The default is "false".
+  This option only works when Basilisk II was configured with
+  "--with-vncserver" and built with libvncserver available.
+
+vncport <TCP port>
+
+  TCP port used by the built-in VNC server when "vncserver" is "true".
+  The default is 5900.
+
 modelid <MacOS model ID>
 
   Specifies the Macintosh model ID that Basilisk II should report to MacOS.
@@ -916,7 +961,7 @@ Acknowledgements
 
 Contributions by (in alphabetical order):
  - Orlando Bassotto <future@powercube.mediabit.net>: FreeBSD support
- - Gwenolé Beauchesne <gb@dial.oleane.com>: SPARC assembly optimizations,
+ - Gwenolï¿½ Beauchesne <gb@dial.oleane.com>: SPARC assembly optimizations,
    lots of work on the Unix video code, fixes and improvements to the
    JIT compiler
  - Marc Chabanas <Marc.Chabanas@france.sun.com>: Solaris sound support
@@ -925,7 +970,7 @@ Contributions by (in alphabetical order):
  - Bill Huey <billh@mag.ucsd.edu>: 15/16 bit DGA and 15/16/32 bit X11
    window support
  - Brian J. Johnson <bjohnson@sgi.com>: IRIX support
- - Jürgen Lachmann <juergen_lachmann@t-online.de>: AmigaOS CyberGraphX support
+ - Jï¿½rgen Lachmann <juergen_lachmann@t-online.de>: AmigaOS CyberGraphX support
  - Samuel Lander <blair_sp@hotmail.com>: tile-based window refresh code
  - David Lawrence <davidl@jlab.org>: incremental window refresh code
  - Bernie Meyer <bmeyer@csse.monash.edu.au>: original UAE-JIT code

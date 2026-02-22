@@ -88,6 +88,9 @@ prefs_desc common_prefs_items[] = {
 	{"delay", TYPE_INT32, false,	"additional delay [uS] every 64k instructions"},
 	{"init_grab", TYPE_BOOLEAN, false,	"initially grabbing mouse"},
 	{"xpram", TYPE_STRING, false, "path of xpram file"},
+	{"doublebuffer", TYPE_BOOLEAN, false, "double-buffer frame buffer for JIT"},
+	{"vncserver", TYPE_BOOLEAN, false, "enable VNC server for SDL video output"},
+	{"vncport", TYPE_INT32, false, "TCP port for VNC server"},
 	{NULL, TYPE_END, false, NULL} // End of list
 };
 
@@ -116,12 +119,13 @@ void AddPrefsDefaults(void)
 	
 #if USE_JIT
 	// JIT compiler specific options
-//	PrefsAddBool("jit", true);
+	PrefsAddBool("jit", true);
 	PrefsAddBool("jitfpu", true);
 	PrefsAddBool("jitdebug", false);
 	PrefsAddInt32("jitcachesize", 8192);
 	PrefsAddBool("jitlazyflush", true);
 	PrefsAddBool("jitinline", true);
+	PrefsAddBool("doublebuffer", false);
 #else
 	PrefsAddBool("jit", false);
 #endif
@@ -134,4 +138,6 @@ void AddPrefsDefaults(void)
 	PrefsAddBool("swap_opt_cmd", true);
 #endif
 	PrefsAddBool("ignoresegv", true);
+	PrefsAddBool("vncserver", false);
+	PrefsAddInt32("vncport", 5900);
 }

@@ -207,6 +207,11 @@ static struct sigaction sigint_sa;	// sigaction for SIGINT handler
 static void sigint_handler(...);
 #endif
 
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+static struct sigaction sigdump_sa;	// sigaction for SIGUSR2 framebuffer PNG dump
+static void sigdump_handler(int);
+#endif
+
 #if REAL_ADDRESSING
 static bool lm_area_mapped = false;	// Flag: Low Memory area mmap()ped
 #endif
@@ -412,6 +417,9 @@ static void usage(const char *prg_name)
 		"\nUnix options:\n"
 		"  --config FILE\n    read/write configuration from/to FILE\n"
 		"  --display STRING\n    X display to use\n"
+		"  --vnc [true|false]\n    enable/disable VNC server for this run\n"
+		"  --no-vnc\n    disable VNC server for this run\n"
+		"  --vnc-port PORT\n    set VNC TCP port (1-65535) and enable VNC for this run\n"
 		"  --break ADDRESS\n    set ROM breakpoint in hexadecimal\n"
 		"  --loadbreak FILE\n    load breakpoint from FILE\n"
 		"  --rominfo\n    dump ROM information\n"
@@ -458,6 +466,8 @@ int main(int argc, char **argv)
 	int ret;
 #endif
 	const char *vmdir = NULL;
+	int vnc_cli_enabled = -1;
+	int vnc_cli_port = -1;
 	char str[256];
 
 	// Initialize variables
@@ -507,6 +517,39 @@ int main(int argc, char **argv)
 				UserPrefsPath = argv[i];
 				argv[i] = NULL;
 			}
+		} else if (strcmp(argv[i], "--vnc") == 0) {
+			argv[i] = NULL;
+			vnc_cli_enabled = 1;
+			if ((i + 1) < argc && argv[i + 1] != NULL && argv[i + 1][0] != '-') {
+				const char *value = argv[++i];
+				if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0 || strcmp(value, "yes") == 0 || strcmp(value, "on") == 0)
+					vnc_cli_enabled = 1;
+				else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0 || strcmp(value, "no") == 0 || strcmp(value, "off") == 0)
+					vnc_cli_enabled = 0;
+				else {
+					fprintf(stderr, "Invalid value for --vnc: '%s'\n", value);
+					usage(argv[0]);
+				}
+				argv[i] = NULL;
+			}
+		} else if (strcmp(argv[i], "--no-vnc") == 0) {
+			argv[i] = NULL;
+			vnc_cli_enabled = 0;
+		} else if (strcmp(argv[i], "--vnc-port") == 0) {
+			argv[i] = NULL;
+			if ((i + 1) >= argc || argv[i + 1] == NULL) {
+				fprintf(stderr, "Missing value for --vnc-port\n");
+				usage(argv[0]);
+			}
+			char *end = NULL;
+			long parsed_port = strtol(argv[++i], &end, 10);
+			if (end == argv[i] || *end != '\0' || parsed_port < 1 || parsed_port > 65535) {
+				fprintf(stderr, "Invalid value for --vnc-port: '%s'\n", argv[i]);
+				usage(argv[0]);
+			}
+			vnc_cli_port = static_cast<int>(parsed_port);
+			vnc_cli_enabled = 1;
+			argv[i] = NULL;
 		} else if (strcmp(argv[i], "--rominfo") == 0) {
 			argv[i] = NULL;
 			PrintROMInfo = true;
@@ -578,6 +621,10 @@ int main(int argc, char **argv)
 
 	// Read preferences
 	PrefsInit(vmdir, argc, argv);
+	if (vnc_cli_enabled != -1)
+		PrefsReplaceBool("vncserver", vnc_cli_enabled != 0);
+	if (vnc_cli_port != -1)
+		PrefsReplaceInt32("vncport", vnc_cli_port);
 	// Only use nogui preference if not passed as command line argument
 	if (use_gui == -1)
 		use_gui = !PrefsFindBool("nogui");
@@ -904,6 +951,18 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &sigint_sa, NULL);
 #endif
 
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+	// Setup SIGUSR2 handler to request PNG framebuffer dump
+	sigemptyset(&sigdump_sa.sa_mask);
+	sigdump_sa.sa_handler = sigdump_handler;
+	sigdump_sa.sa_flags = SA_RESTART;
+	if (sigaction(SIGUSR2, &sigdump_sa, NULL) < 0) {
+		sprintf(str, GetString(STR_SIG_INSTALL_ERR), "SIGUSR2", strerror(errno));
+		ErrorAlert(str);
+		QuitEmulator();
+	}
+#endif
+
 #ifndef USE_CPU_EMUL_SERVICES
 #if defined(HAVE_PTHREADS)
 
@@ -1126,6 +1185,13 @@ static void sigint_handler(...)
 	const char *arg[4] = {"mon", "-m", "-r", NULL};
 	mon(3, arg);
 	QuitEmulator();
+}
+#endif
+
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+static void sigdump_handler(int)
+{
+	VideoRequestScreenDumpPNG();
 }
 #endif
 

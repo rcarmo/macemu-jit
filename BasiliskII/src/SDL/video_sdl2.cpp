@@ -49,7 +49,15 @@
 #include <errno.h>
 #include <vector>
 #include <string>
+#include <atomic>
 #include <math.h>
+#include <strings.h>
+#include <signal.h>
+#include <sys/time.h>
+
+#ifdef HAVE_LIBPNG
+#include <png.h>
+#endif
 
 #ifdef __MACOSX__
 #include "utils_macosx.h"
@@ -70,6 +78,8 @@
 #include "video_blit.h"
 #include "vm_alloc.h"
 #include "cdrom.h"
+#include "evdev_input.h"
+#include "vnc_server.h"
 
 #define DEBUG 0
 #include "debug.h"
@@ -112,9 +122,16 @@ static int16 mouse_wheel_mode;
 static int16 mouse_wheel_lines;
 static bool mouse_wheel_reverse;
 
+static volatile sig_atomic_t sdl_png_dump_requested = 0;
+static bool sdl_png_dump_unavailable_warned = false;
+
 static uint8 *the_buffer = NULL;					// Mac frame buffer (where MacOS draws into)
 static uint8 *the_buffer_copy = NULL;				// Copy of Mac frame buffer (for refreshed modes)
+static uint8 *the_buffer_display_a = NULL;			// Double-buffer snapshot A (redraw thread reads from here)
+static uint8 *the_buffer_display_b = NULL;			// Double-buffer snapshot B (redraw thread reads from here)
+static std::atomic<uint8 *> display_read_buffer(nullptr);
 static uint32 the_buffer_size;						// Size of allocated the_buffer
+static bool use_double_buffer = false;				// Flag: double-buffered frame buffer active
 
 static bool redraw_thread_active = false;			// Flag: Redraw thread installed
 #ifndef USE_CPU_EMUL_SERVICES
@@ -129,6 +146,110 @@ static bool use_vosf = false;						// Flag: VOSF enabled
 #else
 static const bool use_vosf = false;					// VOSF not possible
 #endif
+
+void VideoRequestScreenDumpPNG(void)
+{
+	sdl_png_dump_requested = 1;
+}
+
+static std::string build_png_dump_path()
+{
+	const char *dump_dir = getenv("B2_DUMP_DIR");
+	if (!dump_dir || !*dump_dir)
+		dump_dir = "/tmp";
+
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+
+	char path[512];
+	snprintf(path, sizeof(path), "%s/basiliskii-frame-%ld-%06ld.png", dump_dir,
+		(long)tv.tv_sec, (long)tv.tv_usec);
+	return std::string(path);
+}
+
+#ifdef HAVE_LIBPNG
+static bool write_rgba_png(const char *path, const uint8_t *pixels, int width, int height, int pitch)
+{
+	FILE *fp = fopen(path, "wb");
+	if (!fp)
+		return false;
+
+	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (!png) {
+		fclose(fp);
+		return false;
+	}
+
+	png_infop info = png_create_info_struct(png);
+	if (!info) {
+		png_destroy_write_struct(&png, NULL);
+		fclose(fp);
+		return false;
+	}
+
+	if (setjmp(png_jmpbuf(png))) {
+		png_destroy_write_struct(&png, &info);
+		fclose(fp);
+		return false;
+	}
+
+	png_init_io(png, fp);
+	png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGBA,
+		PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+	png_write_info(png, info);
+
+	std::vector<png_bytep> rows(height);
+	for (int y = 0; y < height; ++y)
+		rows[y] = const_cast<png_bytep>(pixels + y * pitch);
+
+	png_write_image(png, rows.data());
+	png_write_end(png, NULL);
+	png_destroy_write_struct(&png, &info);
+	fclose(fp);
+	return true;
+}
+#endif
+
+static void maybe_dump_surface_png(SDL_Surface *surface)
+{
+	if (!sdl_png_dump_requested)
+		return;
+
+	sdl_png_dump_requested = 0;
+
+	if (!surface)
+		return;
+
+#ifndef HAVE_LIBPNG
+	if (!sdl_png_dump_unavailable_warned) {
+		printf("WARNING: PNG framebuffer dump requested but build lacks libpng support\n");
+		sdl_png_dump_unavailable_warned = true;
+	}
+	return;
+#else
+	const bool needs_lock = SDL_MUSTLOCK(surface) != 0;
+	if (needs_lock && SDL_LockSurface(surface) != 0)
+		return;
+
+	SDL_Surface *rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+	if (needs_lock)
+		SDL_UnlockSurface(surface);
+
+	if (!rgba) {
+		printf("WARNING: Failed converting surface for PNG dump: %s\n", SDL_GetError());
+		return;
+	}
+
+	const std::string path = build_png_dump_path();
+	const bool ok = write_rgba_png(path.c_str(), static_cast<const uint8_t *>(rgba->pixels), rgba->w, rgba->h, rgba->pitch);
+	SDL_FreeSurface(rgba);
+
+	if (ok)
+		printf("PNG framebuffer dump saved to %s\n", path.c_str());
+	else
+		printf("WARNING: Failed writing PNG framebuffer dump to %s\n", path.c_str());
+#endif
+}
 
 static bool ctrl_down = false;						// Flag: Ctrl key pressed (for use with hotkeys)
 static bool opt_down = false;						// Flag: Opt/Alt key pressed (for use with hotkeys)
@@ -929,7 +1050,14 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 
 static int present_sdl_video()
 {
-	if (SDL_RectEmpty(&sdl_update_video_rect)) return 0;
+	if (SDL_RectEmpty(&sdl_update_video_rect)) {
+		maybe_dump_surface_png(host_surface);
+		if (host_surface != NULL) {
+			SDL_Rect empty_rect = {0, 0, 0, 0};
+			VNCServerUpdate(host_surface, empty_rect);
+		}
+		return 0;
+	}
 	
 	if (!sdl_renderer || !sdl_texture || !guest_surface) {
 		printf("WARNING: A video mode does not appear to have been set.\n");
@@ -955,6 +1083,7 @@ static int present_sdl_video()
 	// modifying it!
 	LOCK_PALETTE;
 	SDL_LockMutex(sdl_update_video_mutex);
+	SDL_Rect updated_rect = sdl_update_video_rect;
     // Convert from the guest OS' pixel format, to the host OS' texture, if necessary.
     if (host_surface != guest_surface &&
 		host_surface != NULL &&
@@ -971,22 +1100,17 @@ static int present_sdl_video()
 	UNLOCK_PALETTE; // passed potential deadlock, can unlock palette
 	
     // Update the host OS' texture
+	// Use SDL_UpdateTexture instead of SDL_LockTexture for better compatibility
+	// with KMSDRM/OpenGL ES backends where partial texture updates via
+	// SDL_LockTexture can cause visual glitches (diagonal scrolling).
 	uint8_t *srcPixels = (uint8_t *)host_surface->pixels +
 		sdl_update_video_rect.y * host_surface->pitch +
 		sdl_update_video_rect.x * host_surface->format->BytesPerPixel;
 
-	uint8_t *dstPixels;
-	int dstPitch;
-	if (SDL_LockTexture(sdl_texture, &sdl_update_video_rect, (void **)&dstPixels, &dstPitch) < 0) {
+	if (SDL_UpdateTexture(sdl_texture, &sdl_update_video_rect, srcPixels, host_surface->pitch) < 0) {
 		SDL_UnlockMutex(sdl_update_video_mutex);
 		return -1;
 	}
-	for (int y = 0; y < sdl_update_video_rect.h; y++) {
-		memcpy(dstPixels, srcPixels, sdl_update_video_rect.w << 2);
-		srcPixels += host_surface->pitch;
-		dstPixels += dstPitch;
-	}
-	SDL_UnlockTexture(sdl_texture);
 
     // We are done working with pixels in host_surface.  Reset sdl_update_video_rect, then let
     // other threads modify it, as-needed.
@@ -1003,6 +1127,8 @@ static int present_sdl_video()
 	
     // Update the display
 	SDL_RenderPresent(sdl_renderer);
+	maybe_dump_surface_png(host_surface);
+	VNCServerUpdate(host_surface, updated_rect);
     
     // Indicate success to the caller!
     return 0;
@@ -1103,6 +1229,26 @@ void driver_base::init()
 		the_buffer_copy = (uint8 *)calloc(1, the_buffer_size);
 		the_buffer = (uint8 *)vm_acquire_framebuffer(the_buffer_size);
 		memset(the_buffer, 0, the_buffer_size);
+
+		// Allocate double-buffer display snapshot if requested.
+		use_double_buffer = PrefsFindBool("doublebuffer");
+		if (use_double_buffer) {
+			the_buffer_display_a = (uint8 *)calloc(1, the_buffer_size);
+			the_buffer_display_b = (uint8 *)calloc(1, the_buffer_size);
+			if (the_buffer_display_a && the_buffer_display_b) {
+				display_read_buffer.store(the_buffer_display_a, std::memory_order_release);
+				printf("Double-buffered frame buffer enabled (%u bytes)\n", the_buffer_size);
+			} else {
+				free(the_buffer_display_a);
+				free(the_buffer_display_b);
+				the_buffer_display_a = NULL;
+				the_buffer_display_b = NULL;
+				display_read_buffer.store(NULL, std::memory_order_release);
+				use_double_buffer = false;
+				printf("Double-buffered frame buffer disabled (allocation failed)\n");
+			}
+		}
+
 		D(bug("the_buffer = %p, the_buffer_copy = %p\n", the_buffer, the_buffer_copy));
 	}
 
@@ -1197,6 +1343,15 @@ driver_base::~driver_base()
 			free(the_buffer_copy);
 			the_buffer_copy = NULL;
 		}
+		if (the_buffer_display_a) {
+			free(the_buffer_display_a);
+			the_buffer_display_a = NULL;
+		}
+		if (the_buffer_display_b) {
+			free(the_buffer_display_b);
+			the_buffer_display_b = NULL;
+		}
+		display_read_buffer.store(NULL, std::memory_order_relaxed);
 	}
 #ifdef ENABLE_VOSF
 	else {
@@ -1437,6 +1592,9 @@ bool VideoInit(bool classic)
 	if ((frame_buffer_lock = SDL_CreateMutex()) == NULL)
 		return false;
 
+	// Initialize evdev input (for KMSDRM/console fallback)
+	evdev_input_init();
+
 	// Init keycode translation
 	keycode_init();
 
@@ -1446,6 +1604,7 @@ bool VideoInit(bool classic)
 	mouse_wheel_lines = PrefsFindInt32("mousewheellines");
 	mouse_wheel_reverse = mouse_wheel_lines < 0;
 	if (mouse_wheel_reverse) mouse_wheel_lines = -mouse_wheel_lines;
+	VNCServerInitFromPrefs();
 
 	// Get screen mode from preferences
 	migrate_screen_prefs();
@@ -1662,6 +1821,11 @@ void SDL_monitor_desc::video_close(void)
 
 void VideoExit(void)
 {
+	VNCServerShutdown();
+
+	// Shutdown evdev input
+	evdev_input_shutdown();
+
 	// Close displays
 	vector<monitor_desc *>::iterator i, end = VideoMonitors.end();
 	for (i = VideoMonitors.begin(); i != end; ++i)
@@ -1797,6 +1961,14 @@ void VideoVBL(void)
 	
 	present_sdl_video();
 
+	// Snapshot the frame buffer for the redraw thread (double-buffering)
+	if (use_double_buffer && the_buffer_display_a && the_buffer_display_b && the_buffer) {
+		uint8 *read_ptr = display_read_buffer.load(std::memory_order_acquire);
+		uint8 *write_ptr = (read_ptr == the_buffer_display_a) ? the_buffer_display_b : the_buffer_display_a;
+		memcpy(write_ptr, the_buffer, the_buffer_size);
+		display_read_buffer.store(write_ptr, std::memory_order_release);
+	}
+
 	// Temporarily give up frame buffer lock (this is the point where
 	// we are suspended when the user presses Ctrl-Tab)
 	UNLOCK_FRAME_BUFFER;
@@ -1820,6 +1992,14 @@ void VideoInterrupt(void)
 		do_toggle_fullscreen();
 
 	present_sdl_video();
+
+	// Snapshot the frame buffer for the redraw thread (double-buffering)
+	if (use_double_buffer && the_buffer_display_a && the_buffer_display_b && the_buffer) {
+		uint8 *read_ptr = display_read_buffer.load(std::memory_order_acquire);
+		uint8 *write_ptr = (read_ptr == the_buffer_display_a) ? the_buffer_display_b : the_buffer_display_a;
+		memcpy(write_ptr, the_buffer, the_buffer_size);
+		display_read_buffer.store(write_ptr, std::memory_order_release);
+	}
 
 	// Temporarily give up frame buffer lock (this is the point where
 	// we are suspended when the user presses Ctrl-Tab)
@@ -2525,6 +2705,12 @@ static void handle_events(void)
 			}
 		}
 	}
+
+	// Process evdev input as fallback (for KMSDRM/console when SDL events aren't working)
+	if (evdev_input_active()) {
+		const VIDEO_MODE &mode = drv->mode;
+		evdev_process_mouse_to_adb(mouse_grabbed, VIDEO_MODE_X, VIDEO_MODE_Y);
+	}
 }
 
 
@@ -2543,17 +2729,23 @@ static void update_display_static(driver_base *drv)
 	uint8 *p, *p2;
 	uint32 x2_clipped, wide_clipped;
 
+	// When double-buffering, read from the VBI snapshot instead of the_buffer
+	// to avoid contention with the CPU thread.
+	uint8 *read_buffer = use_double_buffer ? display_read_buffer.load(std::memory_order_acquire) : the_buffer;
+	if (!read_buffer)
+		read_buffer = the_buffer;
+
 	// Check for first line from top and first line from bottom that have changed
 	y1 = 0;
 	for (uint32 j = 0; j < VIDEO_MODE_Y; j++) {
-		if (memcmp(&the_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
+		if (memcmp(&read_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
 			y1 = j;
 			break;
 		}
 	}
 	y2 = y1 - 1;
 	for (uint32 j = VIDEO_MODE_Y; j-- > y1; ) {
-		if (memcmp(&the_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
+		if (memcmp(&read_buffer[j * bytes_per_row], &the_buffer_copy[j * bytes_per_row], bytes_per_row)) {
 			y2 = j;
 			break;
 		}
@@ -2571,7 +2763,7 @@ static void update_display_static(driver_base *drv)
 			
 			x1 = line_len;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				for (uint32 i = 0; i < x1; i++) {
 					if (*p != *p2) {
@@ -2583,7 +2775,7 @@ static void update_display_static(driver_base *drv)
 			}
 			x2 = x1;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				p += bytes_per_row;
 				p2 += bytes_per_row;
@@ -2613,8 +2805,8 @@ static void update_display_static(driver_base *drv)
 				int si = y1 * src_bytes_per_row + (x1 / pixels_per_byte);
 				int di = y1 * dst_bytes_per_row + x1;
 				for (uint32 j = y1; j <= y2; j++) {
-					memcpy(the_buffer_copy + si, the_buffer + si, wide / pixels_per_byte);
-					Screen_blit((uint8 *)drv->s->pixels + di, the_buffer + si, wide / pixels_per_byte);
+					memcpy(the_buffer_copy + si, read_buffer + si, wide / pixels_per_byte);
+					Screen_blit((uint8 *)drv->s->pixels + di, read_buffer + si, wide / pixels_per_byte);
 					si += src_bytes_per_row;
 					di += dst_bytes_per_row;
 				}
@@ -2633,7 +2825,7 @@ static void update_display_static(driver_base *drv)
 
 			x1 = VIDEO_MODE_X;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				for (uint32 i = 0; i < x1 * bytes_per_pixel; i++) {
 					if (*p != *p2) {
@@ -2645,7 +2837,7 @@ static void update_display_static(driver_base *drv)
 			}
 			x2 = x1;
 			for (uint32 j = y1; j <= y2; j++) {
-				p = &the_buffer[j * bytes_per_row];
+				p = &read_buffer[j * bytes_per_row];
 				p2 = &the_buffer_copy[j * bytes_per_row];
 				p += bytes_per_row;
 				p2 += bytes_per_row;
@@ -2671,8 +2863,8 @@ static void update_display_static(driver_base *drv)
 				for (uint32 j = y1; j <= y2; j++) {
 					uint32 i = j * bytes_per_row + x1 * bytes_per_pixel;
 					int dst_i = j * dst_bytes_per_row + x1 * bytes_per_pixel;
-					memcpy(the_buffer_copy + i, the_buffer + i, bytes_per_pixel * wide);
-					Screen_blit((uint8 *)drv->s->pixels + dst_i, the_buffer + i, bytes_per_pixel * wide);
+					memcpy(the_buffer_copy + i, read_buffer + i, bytes_per_pixel * wide);
+					Screen_blit((uint8 *)drv->s->pixels + dst_i, read_buffer + i, bytes_per_pixel * wide);
 				}
 
 				// Unlock surface, if required
@@ -2692,6 +2884,11 @@ static void update_display_static_bbox(driver_base *drv)
 {
 	const VIDEO_MODE &mode = drv->mode;
 	bool blit = (int)VIDEO_MODE_DEPTH == VIDEO_DEPTH_16BIT;
+
+	// When double-buffering, read from the VBI snapshot instead of the_buffer
+	uint8 *read_buffer = use_double_buffer ? display_read_buffer.load(std::memory_order_acquire) : the_buffer;
+	if (!read_buffer)
+		read_buffer = the_buffer;
 
 	// Allocate bounding boxes for SDL_UpdateRects()
 	const uint32 N_PIXELS = 64;
@@ -2722,9 +2919,9 @@ static void update_display_static_bbox(driver_base *drv)
 			for (uint32 j = y; j < (y + h); j++) {
 				const uint32 yb = j * bytes_per_row;
 				const uint32 dst_yb = j * dst_bytes_per_row;
-				if (memcmp(&the_buffer[yb + xb], &the_buffer_copy[yb + xb], xs) != 0) {
-					memcpy(&the_buffer_copy[yb + xb], &the_buffer[yb + xb], xs);
-					if (blit) Screen_blit((uint8 *)drv->s->pixels + dst_yb + xb, the_buffer + yb + xb, xs);
+				if (memcmp(&read_buffer[yb + xb], &the_buffer_copy[yb + xb], xs) != 0) {
+					memcpy(&the_buffer_copy[yb + xb], &read_buffer[yb + xb], xs);
+					if (blit) Screen_blit((uint8 *)drv->s->pixels + dst_yb + xb, read_buffer + yb + xb, xs);
 					dirty = true;
 				}
 			}
