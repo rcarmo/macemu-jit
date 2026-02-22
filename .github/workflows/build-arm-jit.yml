@@ -234,6 +234,7 @@ jobs:
             --with-sdl2
 
       - name: Build BasiliskII
+        shell: bash
         run: |
           set -o pipefail
           cd BasiliskII/src/Unix
