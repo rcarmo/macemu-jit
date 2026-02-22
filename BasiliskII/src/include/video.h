@@ -270,6 +270,7 @@ extern bool VideoInit(bool classic);
 extern void VideoExit(void);
 
 extern void VideoQuitFullScreen(void);
+extern void VideoRequestScreenDumpPNG(void);
 
 extern void VideoInterrupt(void);
 extern void VideoRefresh(void);

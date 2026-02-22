@@ -52,6 +52,12 @@
 #include <atomic>
 #include <math.h>
 #include <strings.h>
+#include <signal.h>
+#include <sys/time.h>
+
+#ifdef HAVE_LIBPNG
+#include <png.h>
+#endif
 
 #ifdef __MACOSX__
 #include "utils_macosx.h"
@@ -116,6 +122,9 @@ static int16 mouse_wheel_mode;
 static int16 mouse_wheel_lines;
 static bool mouse_wheel_reverse;
 
+static volatile sig_atomic_t sdl_png_dump_requested = 0;
+static bool sdl_png_dump_unavailable_warned = false;
+
 static uint8 *the_buffer = NULL;					// Mac frame buffer (where MacOS draws into)
 static uint8 *the_buffer_copy = NULL;				// Copy of Mac frame buffer (for refreshed modes)
 static uint8 *the_buffer_display_a = NULL;			// Double-buffer snapshot A (redraw thread reads from here)
@@ -137,6 +146,110 @@ static bool use_vosf = false;						// Flag: VOSF enabled
 #else
 static const bool use_vosf = false;					// VOSF not possible
 #endif
+
+void VideoRequestScreenDumpPNG(void)
+{
+	sdl_png_dump_requested = 1;
+}
+
+static std::string build_png_dump_path()
+{
+	const char *dump_dir = getenv("B2_DUMP_DIR");
+	if (!dump_dir || !*dump_dir)
+		dump_dir = "/tmp";
+
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+
+	char path[512];
+	snprintf(path, sizeof(path), "%s/basiliskii-frame-%ld-%06ld.png", dump_dir,
+		(long)tv.tv_sec, (long)tv.tv_usec);
+	return std::string(path);
+}
+
+#ifdef HAVE_LIBPNG
+static bool write_rgba_png(const char *path, const uint8_t *pixels, int width, int height, int pitch)
+{
+	FILE *fp = fopen(path, "wb");
+	if (!fp)
+		return false;
+
+	png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (!png) {
+		fclose(fp);
+		return false;
+	}
+
+	png_infop info = png_create_info_struct(png);
+	if (!info) {
+		png_destroy_write_struct(&png, NULL);
+		fclose(fp);
+		return false;
+	}
+
+	if (setjmp(png_jmpbuf(png))) {
+		png_destroy_write_struct(&png, &info);
+		fclose(fp);
+		return false;
+	}
+
+	png_init_io(png, fp);
+	png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGBA,
+		PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+	png_write_info(png, info);
+
+	std::vector<png_bytep> rows(height);
+	for (int y = 0; y < height; ++y)
+		rows[y] = const_cast<png_bytep>(pixels + y * pitch);
+
+	png_write_image(png, rows.data());
+	png_write_end(png, NULL);
+	png_destroy_write_struct(&png, &info);
+	fclose(fp);
+	return true;
+}
+#endif
+
+static void maybe_dump_surface_png(SDL_Surface *surface)
+{
+	if (!sdl_png_dump_requested)
+		return;
+
+	sdl_png_dump_requested = 0;
+
+	if (!surface)
+		return;
+
+#ifndef HAVE_LIBPNG
+	if (!sdl_png_dump_unavailable_warned) {
+		printf("WARNING: PNG framebuffer dump requested but build lacks libpng support\n");
+		sdl_png_dump_unavailable_warned = true;
+	}
+	return;
+#else
+	const bool needs_lock = SDL_MUSTLOCK(surface) != 0;
+	if (needs_lock && SDL_LockSurface(surface) != 0)
+		return;
+
+	SDL_Surface *rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+	if (needs_lock)
+		SDL_UnlockSurface(surface);
+
+	if (!rgba) {
+		printf("WARNING: Failed converting surface for PNG dump: %s\n", SDL_GetError());
+		return;
+	}
+
+	const std::string path = build_png_dump_path();
+	const bool ok = write_rgba_png(path.c_str(), static_cast<const uint8_t *>(rgba->pixels), rgba->w, rgba->h, rgba->pitch);
+	SDL_FreeSurface(rgba);
+
+	if (ok)
+		printf("PNG framebuffer dump saved to %s\n", path.c_str());
+	else
+		printf("WARNING: Failed writing PNG framebuffer dump to %s\n", path.c_str());
+#endif
+}
 
 static bool ctrl_down = false;						// Flag: Ctrl key pressed (for use with hotkeys)
 static bool opt_down = false;						// Flag: Opt/Alt key pressed (for use with hotkeys)
@@ -1058,6 +1171,7 @@ void reset_video_debug_flags(void) {
 static int present_sdl_video()
 {
 	if (SDL_RectEmpty(&sdl_update_video_rect)) {
+		maybe_dump_surface_png(host_surface);
 		if (host_surface != NULL) {
 			SDL_Rect empty_rect = {0, 0, 0, 0};
 			VNCServerUpdate(host_surface, empty_rect);
@@ -1133,6 +1247,7 @@ static int present_sdl_video()
 	
     // Update the display
 	SDL_RenderPresent(sdl_renderer);
+	maybe_dump_surface_png(host_surface);
 	VNCServerUpdate(host_surface, updated_rect);
     
     // Indicate success to the caller!

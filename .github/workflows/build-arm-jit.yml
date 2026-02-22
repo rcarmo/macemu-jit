@@ -89,6 +89,7 @@ jobs:
           apt-get install -y \
             libasound2-dev:armhf \
             libmpfr-dev:armhf \
+            libpng-dev:armhf \
             libvncserver-dev:armhf \
             libudev-dev:armhf \
             libevdev-dev:armhf \

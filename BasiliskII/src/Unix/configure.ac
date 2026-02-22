@@ -911,6 +911,24 @@ AS_IF([test "x$with_vncserver" = "xyes"], [
   ])
 ])
 
+dnl Is libpng available?
+have_libpng=no
+PKG_CHECK_MODULES([libpng], [libpng], [
+  CFLAGS="$CFLAGS $libpng_CFLAGS"
+  CXXFLAGS="$CXXFLAGS $libpng_CFLAGS"
+  LIBS="$LIBS $libpng_LIBS"
+  have_libpng=yes
+  AC_DEFINE([HAVE_LIBPNG], [1], [Define if libpng is available.])
+], [
+  AC_CHECK_HEADER([png.h], [
+    AC_CHECK_LIB([png], [png_create_write_struct], [
+      LIBS="$LIBS -lpng"
+      have_libpng=yes
+      AC_DEFINE([HAVE_LIBPNG], [1], [Define if libpng is available.])
+    ])
+  ])
+])
+
 if [[ "x$WANT_MACOSX_GUI" = "xyes" ]]; then
   CPPFLAGS="$CPPFLAGS -I../MacOSX"
   LIBS="$LIBS -framework CoreAudio -framework AudioUnit -framework AudioToolbox"
@@ -2045,6 +2063,7 @@ echo SDL major-version ...................... : $WANT_SDL_VERSION_MAJOR
 echo BINCUE support ......................... : $have_bincue
 echo LIBVHD support ......................... : $have_libvhd
 echo VNC server support ..................... : $have_vncserver
+echo PNG framebuffer dump support ........... : $have_libpng
 echo VDE support ............................ : $have_vdeplug
 echo XFree86 DGA support .................... : $WANT_XF86_DGA
 echo XFree86 VidMode support ................ : $WANT_XF86_VIDMODE

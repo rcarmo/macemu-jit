@@ -93,6 +93,22 @@ Supported runtime options:
 - `--no-vnc`
 - `--vnc-port PORT`
 
+### PNG framebuffer dumps (SDL2, Unix)
+
+For screen corruption debugging, you can trigger a PNG dump of the current SDL framebuffer:
+
+```bash
+kill -USR2 <basiliskii-pid>
+```
+
+The emulator writes a PNG file to `/tmp` by default and logs the path.
+
+Optional environment variable:
+
+- `B2_DUMP_DIR=/path/to/output` - override the output directory for PNG dumps.
+
+This feature requires building with libpng available.
+
 ### New configure CLI option
 
 The Unix build now supports:

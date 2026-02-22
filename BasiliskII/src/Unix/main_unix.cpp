@@ -207,6 +207,11 @@ static struct sigaction sigint_sa;	// sigaction for SIGINT handler
 static void sigint_handler(...);
 #endif
 
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+static struct sigaction sigdump_sa;	// sigaction for SIGUSR2 framebuffer PNG dump
+static void sigdump_handler(int);
+#endif
+
 #if REAL_ADDRESSING
 static bool lm_area_mapped = false;	// Flag: Low Memory area mmap()ped
 #endif
@@ -1004,6 +1009,18 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &sigint_sa, NULL);
 #endif
 
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+	// Setup SIGUSR2 handler to request PNG framebuffer dump
+	sigemptyset(&sigdump_sa.sa_mask);
+	sigdump_sa.sa_handler = sigdump_handler;
+	sigdump_sa.sa_flags = SA_RESTART;
+	if (sigaction(SIGUSR2, &sigdump_sa, NULL) < 0) {
+		sprintf(str, GetString(STR_SIG_INSTALL_ERR), "SIGUSR2", strerror(errno));
+		ErrorAlert(str);
+		QuitEmulator();
+	}
+#endif
+
 #ifndef USE_CPU_EMUL_SERVICES
 #if defined(HAVE_PTHREADS)
 
@@ -1226,6 +1243,13 @@ static void sigint_handler(...)
 	const char *arg[4] = {"mon", "-m", "-r", NULL};
 	mon(3, arg);
 	QuitEmulator();
+}
+#endif
+
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+static void sigdump_handler(int)
+{
+	VideoRequestScreenDumpPNG();
 }
 #endif
 

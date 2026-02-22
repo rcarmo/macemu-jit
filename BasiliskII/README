@@ -99,6 +99,21 @@ The emulator supports command-line options to control VNC for the current run:
 These options override the `vncserver` and `vncport` preferences for the
 current process only.
 
+Framebuffer PNG dump (SDL2 Unix build)
+--------------------------------------
+
+For remote graphics debugging, send `SIGUSR2` to the emulator process:
+
+  kill -USR2 <pid>
+
+This requests a PNG dump of the current SDL framebuffer. The file is saved to
+`/tmp` by default and the full output path is printed to the emulator log.
+
+Optional environment variable:
+
+  B2_DUMP_DIR=<path>
+    Directory where PNG dumps are written.
+
 
 Preferences File Format
 -----------------------
