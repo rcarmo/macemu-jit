@@ -91,6 +91,10 @@
 #include "compiler/compemu.h"
 #include "fpu/fpu.h"
 #include "fpu/flags.h"
+#if defined(__unix__)
+#include <setjmp.h>
+#include <signal.h>
+#endif
 // #include "parameters.h"
 static void build_comp(void);
 #endif
@@ -405,6 +409,59 @@ static int redo_current_block;
 #ifdef UAE
 int segvcount=0;
 #endif
+
+#if !defined(UAE) && defined(__unix__)
+static volatile sig_atomic_t jit_fault_guard_active = 0;
+static volatile sig_atomic_t jit_fault_handler_installed = 0;
+static sigjmp_buf jit_fault_env;
+static struct sigaction old_segv_action;
+#ifdef SIGBUS
+static struct sigaction old_bus_action;
+#endif
+
+static void jit_fault_signal_handler(int sig, siginfo_t *info, void *ucontext)
+{
+	(void)ucontext;
+	if (jit_fault_guard_active) {
+		if (info && info->si_addr)
+			regs.mmu_fault_addr = (uaecptr)(uintptr)info->si_addr;
+		else
+			regs.mmu_fault_addr = regs.pc;
+		regs.fault_pc = regs.pc;
+		siglongjmp(jit_fault_env, sig ? sig : 1);
+	}
+
+	if (sig == SIGSEGV) {
+		sigaction(SIGSEGV, &old_segv_action, NULL);
+	}
+#ifdef SIGBUS
+	else if (sig == SIGBUS) {
+		sigaction(SIGBUS, &old_bus_action, NULL);
+	}
+#endif
+	raise(sig);
+}
+
+static void install_exception_handler(void)
+{
+	if (jit_fault_handler_installed)
+		return;
+
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = jit_fault_signal_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+
+	if (sigaction(SIGSEGV, &sa, &old_segv_action) == 0) {
+		jit_fault_handler_installed = 1;
+	}
+#ifdef SIGBUS
+	sigaction(SIGBUS, &sa, &old_bus_action);
+#endif
+}
+#endif
+
 static uae_u8* current_compile_p=NULL;
 static uae_u8* max_compile_start;
 static uae_u8* compiled_code=NULL;
@@ -4378,6 +4435,8 @@ void build_comp(void)
 #ifdef JIT_EXCEPTION_HANDLER
 	install_exception_handler();
 #endif
+#elif defined(__unix__)
+	install_exception_handler();
 #endif
 #endif
 
@@ -5482,7 +5541,18 @@ typedef void (*compiled_handler)(void);
 void m68k_do_compile_execute(void)
 {
 	for (;;) {
+		#if !defined(UAE) && defined(__unix__)
+		if (sigsetjmp(jit_fault_env, 1)) {
+			jit_fault_guard_active = 0;
+			SPCFLAGS_SET(SPCFLAG_JIT_EXEC_RETURN);
+			THROW(2);
+		}
+		jit_fault_guard_active = 1;
+		#endif
 		((compiled_handler)(pushall_call_handler))();
+		#if !defined(UAE) && defined(__unix__)
+		jit_fault_guard_active = 0;
+		#endif
 		/* Whenever we return from that, we should check spcflags */
 		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
 			if (m68k_do_specialties ())
