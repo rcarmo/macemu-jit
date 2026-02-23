@@ -28,6 +28,13 @@ extern uintptr MEMBaseDiff;
 #endif
 
 extern void Exception (int, uaecptr);
+
+/* Auto-select longjmp-based exceptions when C++ exceptions are disabled
+   (e.g. -fno-exceptions). GCC/Clang undefine __EXCEPTIONS in that case. */
+#if defined(__GNUC__) && !defined(__EXCEPTIONS) && !defined(EXCEPTIONS_VIA_LONGJMP)
+#define EXCEPTIONS_VIA_LONGJMP 1
+#endif
+
 #ifdef EXCEPTIONS_VIA_LONGJMP
     extern JMP_BUF excep_env;
     #define SAVE_EXCEPTION \
