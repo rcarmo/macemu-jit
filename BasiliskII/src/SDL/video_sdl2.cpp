@@ -1825,7 +1825,7 @@ void VideoExit(void)
 	// Close displays
 	vector<monitor_desc *>::iterator i, end = VideoMonitors.end();
 	for (i = VideoMonitors.begin(); i != end; ++i)
-		dynamic_cast<SDL_monitor_desc *>(*i)->video_close();
+		static_cast<SDL_monitor_desc *>(*i)->video_close();
 
 	// Destroy locks
 	if (frame_buffer_lock)
