@@ -36,6 +36,12 @@ extern void Exception (int, uaecptr);
 #endif
 
 #ifdef EXCEPTIONS_VIA_LONGJMP
+    #include <setjmp.h>
+    #ifndef JMP_BUF
+    #define JMP_BUF  sigjmp_buf
+    #define SETJMP(env) sigsetjmp(env, 0)
+    #define LONGJMP  siglongjmp
+    #endif
     extern JMP_BUF excep_env;
     #define SAVE_EXCEPTION \
         JMP_BUF excep_env_old; \
