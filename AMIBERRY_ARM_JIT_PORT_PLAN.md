@@ -18,6 +18,18 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
   - `--enable-aarch64-jit-experimental` summary reports:
     - `Experimental AArch64 JIT toggle: yes`
     - `Use JIT compiler: no` (due to addressing mode gate)
+- AArch64 JIT compile probe (2026-03-17):
+  - Forced direct-addressing probe build (`ac_cv_have_asm_extended_signals=yes`)
+    reaches JIT compilation stage with:
+    - `Use JIT compiler: yes`
+    - `Addressing mode: direct`
+  - Successfully compiled initial JIT units:
+    - `obj/compemu_support.o`
+    - `obj/compemu1.o` through `obj/compemu8.o`
+    - `obj/compstbl.o`
+  - Current environment blockers before full build:
+    - missing SDL headers (`SDL.h`) for video objects
+    - missing MPFR headers (`mpfr.h`) for `compemu_fpp.cpp`
 
 ## Branch
 `feature/amiberry-arm-jit-port`
