@@ -42,6 +42,9 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
       constraints in generated opcode code
     - JIT defines adjusted so `JIT` is explicitly on when `USE_JIT` is enabled
     - AArch64 JIT currently excludes JIT-FPU compilation path
+  - Imported next-step generator/table artifacts from Amiberry to enable
+    integration work toward ARM-compatible codegen path:
+    - `gencomp_arm.c`, `comptbl_arm.h`, `compstbl_arm.cpp`
 
 ## Branch
 `feature/amiberry-arm-jit-port`
@@ -65,6 +68,9 @@ Imported files:
 - `compemu_midfunc_arm64_2.cpp`
 - `flags_arm.h`
 - `aarch64.h`
+- `compstbl_arm.cpp`
+- `comptbl_arm.h`
+- `gencomp_arm.c`
 
 ### Medium-confidence borrow
 - AArch64-specific JIT correctness fixes in Amiberry (`uintptr` cleanliness, pointer-width handling, JIT memory allocation semantics).
