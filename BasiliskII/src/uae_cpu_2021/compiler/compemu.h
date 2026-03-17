@@ -116,7 +116,7 @@ union cacheline {
 #define SCALE 2
 
 #define BYTES_PER_INST 10240  /* paranoid ;-) */
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 #define LONGEST_68K_INST 256 /* The number of bytes the longest possible
 			       68k instruction takes */
 #else
@@ -152,6 +152,8 @@ union cacheline {
 #if defined(CPU_arm)
 #define USE_DATA_BUFFER
 #define N_REGS 13  /* really 16, but 13 to 15 are SP, LR, PC */
+#elif defined(CPU_aarch64) || defined(CPU_AARCH64)
+#define N_REGS 18  /* ARM64 backend uses extended register map */
 #else
 #if defined(CPU_x86_64)
 #define N_REGS 16 /* really only 15, but they are numbered 0-3,5-15 */
@@ -390,7 +392,7 @@ extern int touchcnt;
 /* What we expose to the outside */
 #define DECLARE_MIDFUNC(func) extern void func
 
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 
 #include "compemu_midfunc_arm.h"
 

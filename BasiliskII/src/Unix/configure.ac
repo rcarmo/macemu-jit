@@ -43,6 +43,7 @@ dnl JIT compiler options.
 AC_ARG_ENABLE(jit-compiler,  [  --enable-jit-compiler   enable JIT compiler [default=yes]], [WANT_JIT=$enableval], [WANT_JIT=yes])
 AC_ARG_ENABLE(jit-debug,     [  --enable-jit-debug      activate native code disassemblers [default=no]], [WANT_JIT_DEBUG=$enableval], [WANT_JIT_DEBUG=no])
 AC_ARG_ENABLE(arm-jit-experimental, [  --enable-arm-jit-experimental  enable experimental ARM32 JIT backend (unsupported, default=no)], [WANT_ARM_JIT_EXPERIMENTAL=$enableval], [WANT_ARM_JIT_EXPERIMENTAL=no])
+AC_ARG_ENABLE(aarch64-jit-experimental, [  --enable-aarch64-jit-experimental  enable experimental AArch64 JIT backend (unsupported, default=no)], [WANT_AARCH64_JIT_EXPERIMENTAL=$enableval], [WANT_AARCH64_JIT_EXPERIMENTAL=no])
 
 dnl FPU emulation core.
 AC_ARG_ENABLE(fpe,
@@ -1762,14 +1763,20 @@ elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_ARM" = "xyes" ]]; then
   fi
 elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_AARCH64" = "xyes" ]]; then
   dnl AArch64 (ARM 64-bit) CPU
-  DEFINES="$DEFINES -DCPU_aarch64 -DUNALIGNED_PROFITABLE"
+  DEFINES="$DEFINES -DCPU_aarch64 -DCPU_AARCH64 -DUNALIGNED_PROFITABLE"
   if [[ "x$HAVE_GAS" = "xyes" ]]; then
     ASM_OPTIMIZATIONS="AArch64"
     DEFINES="$DEFINES -DAARCH64_ASSEMBLY -DOPTIMIZED_FLAGS"
+
+    dnl AArch64 JIT is experimental and intentionally opt-in.
+    if [[ "x$WANT_AARCH64_JIT_EXPERIMENTAL" = "xyes" ]]; then
+      JITSRCS="cpuemu1_nf.cpp cpuemu2_nf.cpp cpuemu3_nf.cpp cpuemu4_nf.cpp cpuemu5_nf.cpp cpuemu6_nf.cpp cpuemu7_nf.cpp cpuemu8_nf.cpp $JITSRCS"
+      CAN_JIT=yes
+    fi
   fi
 
   if [[ "x$WANT_ARM_JIT_EXPERIMENTAL" = "xyes" ]]; then
-    AC_MSG_WARN([--enable-arm-jit-experimental currently enables ARM32 JIT only; AArch64 JIT wiring is not complete yet.])
+    AC_MSG_WARN([--enable-arm-jit-experimental currently enables ARM32 JIT only; use --enable-aarch64-jit-experimental on AArch64.])
   fi
 elif [[ "x$WANT_NATIVE_M68K" = "xyes" ]]; then
   dnl Native m68k, no emulation
@@ -2072,6 +2079,7 @@ echo mon debugger support ................... : $WANT_MON
 echo Running m68k code natively ............. : $WANT_NATIVE_M68K
 echo Use JIT compiler ....................... : $WANT_JIT
 echo Experimental ARM JIT toggle ........... : $WANT_ARM_JIT_EXPERIMENTAL
+echo Experimental AArch64 JIT toggle ....... : $WANT_AARCH64_JIT_EXPERIMENTAL
 echo JIT debug mode ......................... : $WANT_JIT_DEBUG
 echo Floating-Point emulation core .......... : $FPE_CORE
 echo Assembly optimizations ................. : $ASM_OPTIMIZATIONS

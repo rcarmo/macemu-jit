@@ -50,8 +50,8 @@
  * code is not 64-bit clean and (ii) it's faster to resolve branches
  * that way.
  */
-#if !defined(CPU_i386) && !defined(CPU_x86_64) && !defined(CPU_arm)
-#error "Only IA-32, X86-64 and ARM v6 targets are supported with the JIT Compiler"
+#if !defined(CPU_i386) && !defined(CPU_x86_64) && !defined(CPU_arm) && !defined(CPU_aarch64) && !defined(CPU_AARCH64)
+#error "Only IA-32, X86-64 and ARM targets are supported with the JIT Compiler"
 #endif
 #endif
 
@@ -530,7 +530,7 @@ static inline blockinfo* get_blockinfo_addr(void* addr)
 #if defined(CPU_x86_64)
 #define TARGET_NATIVE	TARGET_X86_64
 #endif
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 #define TARGET_NATIVE	TARGET_ARM
 #endif
 // #include "disasm-glue.h"
@@ -1164,7 +1164,9 @@ static inline void reset_data_buffer(void)
  * Getting the information about the target CPU                     *
  ********************************************************************/
 
-#if defined(CPU_arm)
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#include "codegen_arm64.cpp"
+#elif defined(CPU_arm)
 #include "codegen_arm.cpp"
 #endif
 #if defined(CPU_i386) || defined(CPU_x86_64)
@@ -2665,7 +2667,10 @@ static void prepare_for_call_2(void)
 }
 #endif
 
-#if defined(CPU_arm)
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#include "compemu_midfunc_arm64.cpp"
+#include "compemu_midfunc_arm64_2.cpp"
+#elif defined(CPU_arm)
 #include "compemu_midfunc_arm.cpp"
 
 #if defined(USE_JIT2)
@@ -2790,7 +2795,7 @@ void compemu_make_sr(int sr, int tmp)
 	shll_l_ri(tmp, 4);
 	or_l(sr, tmp);
 
-#elif defined(CPU_arm) && defined(ARM_ASSEMBLY)
+#elif (defined(CPU_arm) && defined(ARM_ASSEMBLY)) || ((defined(CPU_aarch64) || defined(CPU_AARCH64)) && defined(AARCH64_ASSEMBLY))
 	shrl_l_ri(sr, FLAGBIT_N - 3);                            /* move NZ into position */
 	ror_l_ri(tmp, FLAGBIT_C - 1);                            /* move C into position in tmp; V->31 */
 	and_l_ri(sr, 0xc);
@@ -2861,7 +2866,7 @@ void compemu_enter_super(int sr)
 	compemu_raw_jnz_b_oponly();
 	uae_u8 *branchadd = get_target();
 	skip_byte();
-#elif defined(CPU_arm)
+#elif defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 	compemu_raw_jnz_b_oponly();
 	uae_u8 *branchadd = get_target();
 	skip_byte();
@@ -2871,7 +2876,7 @@ void compemu_enter_super(int sr)
 	mov_b_mi(uae_p32(&regs.s), 1);
 #if defined(CPU_i386) || defined(CPU_x86_64)
 	*branchadd = get_target() - (branchadd + 1);
-#elif defined(CPU_arm)
+#elif defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 	*((uae_u32 *)branchadd - 3) = get_target() - (branchadd + 1);
 #endif
 }
@@ -3109,7 +3114,7 @@ static void init_comp(void)
 	live.state[FLAGX].needflush=NF_TOMEM;
 	set_status(FLAGX,INMEM);
 
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 	live.state[FLAGTMP].mem=(uae_u32*)&(regflags.nzcv);
 #else
 	live.state[FLAGTMP].mem=(uae_u32*)&(regflags.cznv);
@@ -3283,7 +3288,7 @@ static void freescratch(void)
 {
 	int i;
 	for (i=0;i<N_REGS;i++)
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 		if (live.nat[i].locked && i != REG_WORK1 && i != REG_WORK2)
 #else
 		if (live.nat[i].locked && i != ESP_INDEX
