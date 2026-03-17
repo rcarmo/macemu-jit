@@ -7,6 +7,15 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
 - `master` has x86/x86_64 JIT enabled.
 - ARM/AArch64 builds are currently non-JIT by policy/configuration.
 - `uae_cpu_2021/compiler/compemu_support.cpp` already contains ARM code paths, but key ARM backend files were missing from this tree.
+- Experimental configure toggle already exists in-tree:
+  - `--enable-arm-jit-experimental`
+  - current behavior: opt-in for ARM32 path only; AArch64 emits warning and keeps JIT disabled.
+- Toggle validation run (2026-03-17):
+  - `configure --help` shows `--enable-arm-jit-experimental`
+  - AArch64 + `--enable-arm-jit-experimental` summary reports:
+    - `Experimental ARM JIT toggle: yes`
+    - `Use JIT compiler: no`
+    - warning that AArch64 wiring is not complete
 
 ## Branch
 `feature/amiberry-arm-jit-port`
@@ -43,7 +52,7 @@ Imported files:
 ### Phase 1 — Compile baseline on ARM with imported backend files
 1. Wire includes/ifdefs so ARM backend files are actually selectable during JIT builds.
 2. Keep JIT disabled by default on ARM until compile/test passes.
-3. Add an explicit experimental configure flag to enable ARM JIT attempts.
+3. Add an explicit experimental configure flag to enable ARM JIT attempts. ✅ (already present in-tree)
 
 Exit criteria:
 - `configure && make` succeeds for ARM target with experimental ARM JIT toggled on.
