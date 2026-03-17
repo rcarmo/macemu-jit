@@ -824,22 +824,24 @@ static inline int cctrue(int cc)
 
 #define optflag_testw(v) do { \
   uae_u32 _nzcv; \
+  uae_u32 _tmp; \
   __asm__ __volatile__ ("sxth %w[tmp], %w[rv]\n\t" \
                         "tst %w[tmp], %w[tmp]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [tmp] "=&r" (v) \
-                        : [rv] "0" (v) \
+                        : [flags] "=r" (_nzcv), [tmp] "=&r" (_tmp) \
+                        : [rv] "r" (v) \
                         : "cc"); \
   regflags.nzcv = _nzcv & (FLAGVAL_N | FLAGVAL_Z); \
   } while(0)
 
 #define optflag_testb(v) do { \
   uae_u32 _nzcv; \
+  uae_u32 _tmp; \
   __asm__ __volatile__ ("sxtb %w[tmp], %w[rv]\n\t" \
                         "tst %w[tmp], %w[tmp]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [tmp] "=&r" (v) \
-                        : [rv] "0" (v) \
+                        : [flags] "=r" (_nzcv), [tmp] "=&r" (_tmp) \
+                        : [rv] "r" (v) \
                         : "cc"); \
   regflags.nzcv = _nzcv & (FLAGVAL_N | FLAGVAL_Z); \
   } while(0)
@@ -857,12 +859,13 @@ static inline int cctrue(int cc)
 
 #define optflag_addw(v, s, d) do { \
   uae_u32 _nzcv; \
+  uae_u32 _a, _b; \
   __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
                         "sxth %w[b], %w[rs]\n\t" \
                         "adds %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
-                        : [rs] "2" (s), [rd] "3" (d) \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
   v = (uae_u16)v; \
   regflags.nzcv = _nzcv; \
@@ -871,12 +874,13 @@ static inline int cctrue(int cc)
 
 #define optflag_addb(v, s, d) do { \
   uae_u32 _nzcv; \
+  uae_u32 _a, _b; \
   __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
                         "sxtb %w[b], %w[rs]\n\t" \
                         "adds %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
-                        : [rs] "2" (s), [rd] "3" (d) \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
   v = (uae_u8)v; \
   regflags.nzcv = _nzcv; \
@@ -897,12 +901,13 @@ static inline int cctrue(int cc)
 
 #define optflag_subw(v, s, d) do { \
   uae_u32 _nzcv; \
+  uae_u32 _a, _b; \
   __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
                         "sxth %w[b], %w[rs]\n\t" \
                         "subs %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
-                        : [rs] "2" (s), [rd] "3" (d) \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
   v = (uae_u16)v; \
   regflags.nzcv = _nzcv ^ FLAGVAL_C; \
@@ -911,12 +916,13 @@ static inline int cctrue(int cc)
 
 #define optflag_subb(v, s, d) do { \
   uae_u32 _nzcv; \
+  uae_u32 _a, _b; \
   __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
                         "sxtb %w[b], %w[rs]\n\t" \
                         "subs %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (d), [b] "=&r" (s) \
-                        : [rs] "2" (s), [rd] "3" (d) \
+                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
   v = (uae_u8)v; \
   regflags.nzcv = _nzcv ^ FLAGVAL_C; \

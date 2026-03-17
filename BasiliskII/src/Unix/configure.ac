@@ -1792,8 +1792,14 @@ fi
 
 dnl Enable JIT compiler, if possible.
 if [[ "x$WANT_JIT" = "xyes" -a "x$CAN_JIT" = "xyes" ]]; then
-  JITSRCS="$JITSRCS $UAE_PATH/compiler/compemu_support.cpp $UAE_PATH/compiler/compemu_fpp.cpp compstbl.o cpustbl_nf.o"
-  DEFINES="$DEFINES -DUSE_JIT -DUSE_JIT_FPU"
+  JITSRCS="$JITSRCS $UAE_PATH/compiler/compemu_support.cpp compstbl.o cpustbl_nf.o"
+  DEFINES="$DEFINES -DUSE_JIT -DJIT"
+
+  dnl AArch64 JIT FPU path is not fully wired yet.
+  if [[ "x$HAVE_AARCH64" != "xyes" ]]; then
+    JITSRCS="$JITSRCS $UAE_PATH/compiler/compemu_fpp.cpp"
+    DEFINES="$DEFINES -DUSE_JIT_FPU"
+  fi
   
   if [[ "x$WANT_JIT_DEBUG" = "xyes" ]]; then
     if [[ "x$WANT_MON" = "xyes" ]]; then

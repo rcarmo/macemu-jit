@@ -27,9 +27,21 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
     - `obj/compemu_support.o`
     - `obj/compemu1.o` through `obj/compemu8.o`
     - `obj/compstbl.o`
-  - Current environment blockers before full build:
-    - missing SDL headers (`SDL.h`) for video objects
-    - missing MPFR headers (`mpfr.h`) for `compemu_fpp.cpp`
+- Environment setup updates:
+  - Installed build deps: `libsdl2-dev`, `libmpfr-dev`, `libgmp-dev`
+  - SDL/MPFR header blockers cleared
+- New blockers discovered after deeper build:
+  - Generated `compemu.cpp` from current `gencomp.c` calls legacy midfunc API
+    (`start_needflags`, `or_b`, `mov_b_rr`, etc.) not provided by imported
+    Amiberry ARM midfunc layer.
+  - This indicates a **generator/backend API mismatch** (current generator vs
+    imported ARM backend design), now the primary blocker.
+  - Added interim compatibility fixes for earlier build breaks:
+    - `uae_cpu_2021/noflags.h` added (copied/adapted for noflags build path)
+    - AArch64 flag asm macros in `m68k.h` adjusted to avoid non-lvalue asm
+      constraints in generated opcode code
+    - JIT defines adjusted so `JIT` is explicitly on when `USE_JIT` is enabled
+    - AArch64 JIT currently excludes JIT-FPU compilation path
 
 ## Branch
 `feature/amiberry-arm-jit-port`

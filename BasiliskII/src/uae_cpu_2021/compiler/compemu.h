@@ -47,6 +47,10 @@ typedef uae_u32 uintptr;
 
 #ifdef USE_JIT
 
+#ifndef JIT
+#define JIT 1
+#endif
+
 #ifdef JIT_DEBUG
 /* dump some information (m68k block, x86 block addresses) about the compiler state */
 extern void compiler_dumpstate(void);
@@ -165,11 +169,9 @@ union cacheline {
 
 /* Functions exposed to newcpu, or to what was moved from newcpu.c to
  * compemu_support.c */
-#ifdef WINUAE_ARANYM
 extern void compiler_init(void);
 extern void compiler_exit(void);
 extern bool compiler_use_jit(void);
-#endif
 extern void flush(int save_regs);
 void flush_reg(int reg);
 extern void set_target(uae_u8* t);
@@ -180,7 +182,7 @@ extern void build_comp(void);
 extern void set_cache_state(int enabled);
 extern int get_cache_state(void);
 extern uae_u32 get_jitted_size(void);
-#ifdef JIT
+#ifdef USE_JIT
 extern void (*flush_icache)(void);
 #endif
 extern void alloc_cache(void);
@@ -383,6 +385,20 @@ extern int touchcnt;
 #define FW   uae_u32
 #define FR   uae_u32
 #define FRW  uae_u32
+
+/* Amiberry ARM midfunc headers use IM8/IM16/IM32/IMPTR names. */
+#ifndef IM8
+#define IM8  uae_s32
+#endif
+#ifndef IM16
+#define IM16 uae_s32
+#endif
+#ifndef IM32
+#define IM32 uae_s32
+#endif
+#ifndef IMPTR
+#define IMPTR uintptr
+#endif
 
 #define MIDFUNC(nargs,func,args) void func args
 #define COMPCALL(func) func
