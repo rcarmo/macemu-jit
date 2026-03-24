@@ -31,6 +31,95 @@
 
 #ifdef USE_JIT
 
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#define flush_icache arm_flush_icache_impl
+#include "compemu_support_arm.cpp"
+#undef flush_icache
+
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+
+void (*arm_flush_icache_impl)(int) = flush_icache_none;
+
+static void flush_icache_bridge(void)
+{
+	if (arm_flush_icache_impl)
+		arm_flush_icache_impl(3);
+}
+
+void (*flush_icache)(void) = flush_icache_bridge;
+
+void flush_icache_range(uint8 *start, uint32 size)
+{
+	(void)start;
+	(void)size;
+	flush_icache_bridge();
+}
+
+void jit_abort(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vfprintf(stderr, format, args);
+	fputc('\n', stderr);
+	va_end(args);
+	abort();
+}
+
+static const uae_u32 MIN_CACHE_SIZE = 1024;
+
+bool compiler_use_jit(void)
+{
+	if (!PrefsFindBool("jit"))
+		return false;
+	if (PrefsFindInt32("jitcachesize") < MIN_CACHE_SIZE) {
+		write_log("<JIT compiler> : translation cache size is less than %d KB. Disabling JIT.\n", MIN_CACHE_SIZE);
+		return false;
+	}
+	return true;
+}
+
+typedef void (*compiled_handler)(void);
+
+void m68k_do_compile_execute(void)
+{
+	for (;;) {
+		((compiled_handler)(pushall_call_handler))();
+		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
+			if (m68k_do_specialties())
+				return;
+		}
+	}
+}
+
+void m68k_compile_execute(void)
+{
+	for (;;) {
+		if (quit_program > 0) {
+			if (quit_program == 1)
+				break;
+			quit_program = 0;
+			m68k_reset();
+		}
+		m68k_do_compile_execute();
+	}
+}
+
+void readbyte(int address, int dest, int tmp) { (void)tmp; readbyte(address, dest); }
+void readword(int address, int dest, int tmp) { (void)tmp; readword(address, dest); }
+void readlong(int address, int dest, int tmp) { (void)tmp; readlong(address, dest); }
+void writebyte(int address, int source, int tmp) { (void)tmp; writebyte(address, source); }
+void writeword(int address, int source, int tmp) { (void)tmp; writeword(address, source); }
+void writelong(int address, int source, int tmp) { (void)tmp; writelong(address, source); }
+void writeword_clobber(int address, int source, int tmp) { (void)tmp; writeword_clobber(address, source); }
+void writelong_clobber(int address, int source, int tmp) { (void)tmp; writelong_clobber(address, source); }
+void get_n_addr(int address, int dest, int tmp) { (void)tmp; get_n_addr(address, dest); }
+void get_n_addr_jmp(int address, int dest, int tmp) { (void)tmp; get_n_addr_jmp(address, dest); }
+void calc_disp_ea_020(int base, uae_u32 dp, int target, int tmp) { (void)tmp; calc_disp_ea_020(base, dp, target); }
+void register_branch(uae_u32 not_taken, uae_u32 taken, uae_u8 cond) { register_branch((uintptr)not_taken, (uintptr)taken, cond); }
+#else
+
 #ifdef UAE
 
 #define writemem_special writemem
@@ -5492,6 +5581,7 @@ setjmpagain:
 }
 #endif
 
+#endif /* non-AArch64 compemu_support.cpp */
 #endif /* JIT */
 
 #endif
