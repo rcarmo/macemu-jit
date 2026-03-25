@@ -3,8 +3,10 @@
 #ifndef REGISTERS_H
 #define REGISTERS_H
 
+#include <cstdint>
 #include "sysdeps.h"
 #include "spcflags.h"
+#include "fpu/types.h"
 typedef char flagtype;
 
 
@@ -101,6 +103,17 @@ extern struct regstruct
 
     /* Cache reg*/
     uae_u32 cacr,caar;
+
+#if defined(USE_JIT) && (defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64))
+    /* Minimal ARM/AArch64 JIT compatibility surface derived from UAE/Amiberry. */
+    uae_u32 scratchregs[3];
+    fpu_register scratchfregs[2];
+    fpu_register fp_result;
+    uae_u32 jit_exception;
+    uae_u32 *raw_cputbl_count;
+    uintptr_t mem_banks;
+    uintptr_t cache_tags;
+#endif
 } regs;
 
 static inline uaecptr m68k_getpc (void)

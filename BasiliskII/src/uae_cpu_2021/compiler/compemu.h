@@ -47,6 +47,10 @@ typedef uae_u32 uintptr;
 
 #ifdef USE_JIT
 
+#ifndef JIT
+#define JIT 1
+#endif
+
 #ifdef JIT_DEBUG
 /* dump some information (m68k block, x86 block addresses) about the compiler state */
 extern void compiler_dumpstate(void);
@@ -116,7 +120,7 @@ union cacheline {
 #define SCALE 2
 
 #define BYTES_PER_INST 10240  /* paranoid ;-) */
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 #define LONGEST_68K_INST 256 /* The number of bytes the longest possible
 			       68k instruction takes */
 #else
@@ -152,6 +156,8 @@ union cacheline {
 #if defined(CPU_arm)
 #define USE_DATA_BUFFER
 #define N_REGS 13  /* really 16, but 13 to 15 are SP, LR, PC */
+#elif defined(CPU_aarch64) || defined(CPU_AARCH64)
+#define N_REGS 18  /* ARM64 backend uses extended register map */
 #else
 #if defined(CPU_x86_64)
 #define N_REGS 16 /* really only 15, but they are numbered 0-3,5-15 */
@@ -163,11 +169,9 @@ union cacheline {
 
 /* Functions exposed to newcpu, or to what was moved from newcpu.c to
  * compemu_support.c */
-#ifdef WINUAE_ARANYM
 extern void compiler_init(void);
 extern void compiler_exit(void);
 extern bool compiler_use_jit(void);
-#endif
 extern void flush(int save_regs);
 void flush_reg(int reg);
 extern void set_target(uae_u8* t);
@@ -178,7 +182,7 @@ extern void build_comp(void);
 extern void set_cache_state(int enabled);
 extern int get_cache_state(void);
 extern uae_u32 get_jitted_size(void);
-#ifdef JIT
+#ifdef USE_JIT
 extern void (*flush_icache)(void);
 #endif
 extern void alloc_cache(void);
@@ -382,6 +386,20 @@ extern int touchcnt;
 #define FR   uae_u32
 #define FRW  uae_u32
 
+/* Amiberry ARM midfunc headers use IM8/IM16/IM32/IMPTR names. */
+#ifndef IM8
+#define IM8  uae_s32
+#endif
+#ifndef IM16
+#define IM16 uae_s32
+#endif
+#ifndef IM32
+#define IM32 uae_s32
+#endif
+#ifndef IMPTR
+#define IMPTR uintptr
+#endif
+
 #define MIDFUNC(nargs,func,args) void func args
 #define COMPCALL(func) func
 
@@ -390,7 +408,7 @@ extern int touchcnt;
 /* What we expose to the outside */
 #define DECLARE_MIDFUNC(func) extern void func
 
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 
 #include "compemu_midfunc_arm.h"
 
@@ -429,6 +447,93 @@ extern void sync_m68k_pc(void);
 extern uae_u32 get_const(int r);
 extern int  is_const(int r);
 extern void register_branch(uae_u32 not_taken, uae_u32 taken, uae_u8 cond);
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+/* Legacy gencomp helper compatibility for clean ARM64 compemu.cpp rebuilds. */
+extern void start_needflags(void);
+extern void end_needflags(void);
+extern void duplicate_carry(void);
+extern void restore_carry(void);
+extern void add_b(RW1 d, RR1 s);
+extern void add_w(RW2 d, RR2 s);
+extern void add_l(RW4 d, RR4 s);
+extern void add_l_ri(RW4 d, IMM i);
+extern void sub_b(RW1 d, RR1 s);
+extern void sub_w(RW2 d, RR2 s);
+extern void sub_l(RW4 d, RR4 s);
+extern void sub_b_ri(RW1 d, IMM i);
+extern void and_b(RW1 d, RR1 s);
+extern void and_w(RW2 d, RR2 s);
+extern void and_l(RW4 d, RR4 s);
+extern void and_l_ri(RW4 d, IMM i);
+extern void or_b(RW1 d, RR1 s);
+extern void or_w(RW2 d, RR2 s);
+extern void or_l(RW4 d, RR4 s);
+extern void or_l_ri(RW4 d, IMM i);
+extern void xor_b(RW1 d, RR1 s);
+extern void xor_w(RW2 d, RR2 s);
+extern void xor_l(RW4 d, RR4 s);
+extern void cmp_b(RR1 d, RR1 s);
+extern void cmp_w(RR2 d, RR2 s);
+extern void cmp_l(RR4 d, RR4 s);
+extern void test_b_rr(RR1 d, RR1 s);
+extern void test_w_rr(RR2 d, RR2 s);
+extern void test_l_rr(RR4 d, RR4 s);
+extern void test_l_ri(RR4 d, IMM i);
+extern void mov_b_rr(W1 d, RR1 s);
+extern void mov_w_rr(W2 d, RR2 s);
+extern void mov_w_ri(W2 d, IMM i);
+extern void zero_extend_8_rr(W4 d, RR1 s);
+extern void zero_extend_16_rr(W4 d, RR2 s);
+extern void sign_extend_8_rr(W4 d, RR1 s);
+extern void adc_b(RW1 d, RR1 s);
+extern void adc_w(RW2 d, RR2 s);
+extern void adc_l(RW4 d, RR4 s);
+extern void sbb_b(RW1 d, RR1 s);
+extern void sbb_w(RW2 d, RR2 s);
+extern void sbb_l(RW4 d, RR4 s);
+extern void bt_l_ri(RR4 d, IMM i);
+extern void bt_l_rr(RR4 d, RR4 s);
+extern void btc_l_rr(RW4 d, RR4 s);
+extern void btr_l_rr(RW4 d, RR4 s);
+extern void bts_l_rr(RW4 d, RR4 s);
+extern void setcc(W1 d, IMM cc);
+extern void setcc_for_cntzero(RR4 cnt, RR4 data, int size);
+extern void cmov_l_rr(RW4 d, RR4 s, IMM cc);
+extern void mov_l_rR(W4 d, RR4 s, IMM offset);
+extern void mov_w_rR(W2 d, RR4 s, IMM offset);
+extern void mov_l_Rr(RR4 d, RR4 s, IMM offset);
+extern void mov_w_Rr(RR4 d, RR2 s, IMM offset);
+extern void mid_bswap_16(RW2 r);
+extern void mid_bswap_32(RW4 r);
+extern void imul_32_32(RW4 d, RR4 s);
+extern void imul_64_32(RW4 d, RW4 s);
+extern void mul_64_32(RW4 d, RW4 s);
+extern void shra_b_ri(RW1 d, IMM i);
+extern void shra_w_ri(RW2 d, IMM i);
+extern void shra_l_ri(RW4 d, IMM i);
+extern void shra_b_rr(RW1 d, RR1 r);
+extern void shra_w_rr(RW2 d, RR1 r);
+extern void shra_l_rr(RW4 d, RR1 r);
+extern void shrl_b_ri(RW1 d, IMM i);
+extern void shrl_w_ri(RW2 d, IMM i);
+extern void shrl_l_ri(RW4 d, IMM i);
+extern void shrl_b_rr(RW1 d, RR1 r);
+extern void shrl_w_rr(RW2 d, RR1 r);
+extern void shrl_l_rr(RW4 d, RR1 r);
+extern void shll_b_ri(RW1 d, IMM i);
+extern void shll_w_ri(RW2 d, IMM i);
+extern void shll_l_ri(RW4 d, IMM i);
+extern void shll_b_rr(RW1 d, RR1 r);
+extern void shll_w_rr(RW2 d, RR1 r);
+extern void shll_l_rr(RW4 d, RR1 r);
+extern void rol_b_rr(RW1 d, RR1 r);
+extern void rol_w_rr(RW2 d, RR1 r);
+extern void rol_l_rr(RW4 d, RR1 r);
+extern void rol_l_ri(RW4 d, IMM i);
+extern void ror_b_rr(RW1 d, RR1 r);
+extern void ror_w_rr(RW2 d, RR1 r);
+extern void ror_l_rr(RW4 d, RR1 r);
+#endif
 void compemu_make_sr(int sr, int tmp);
 void compemu_enter_super(int sr);
 void compemu_exc_make_frame(int format, int sr, int currpc, int nr, int tmp);

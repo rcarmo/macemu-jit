@@ -31,6 +31,107 @@
 
 #ifdef USE_JIT
 
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#define flush_icache arm_flush_icache_impl
+#include "compemu_support_arm.cpp"
+#undef flush_icache
+
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+
+void (*arm_flush_icache_impl)(int) = flush_icache_none;
+
+static void flush_icache_bridge(void)
+{
+	if (arm_flush_icache_impl)
+		arm_flush_icache_impl(3);
+}
+
+void (*flush_icache)(void) = flush_icache_bridge;
+
+void flush_icache_range(uint8 *start, uint32 size)
+{
+	(void)start;
+	(void)size;
+	flush_icache_bridge();
+}
+
+void jit_abort(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vfprintf(stderr, format, args);
+	fputc('\n', stderr);
+	va_end(args);
+	abort();
+}
+
+static const uae_u32 MIN_CACHE_SIZE = 1024;
+
+bool compiler_use_jit(void)
+{
+	if (!PrefsFindBool("jit"))
+		return false;
+	if (PrefsFindInt32("jitcachesize") < MIN_CACHE_SIZE) {
+		write_log("<JIT compiler> : translation cache size is less than %d KB. Disabling JIT.\n", MIN_CACHE_SIZE);
+		return false;
+	}
+	return true;
+}
+
+typedef void (*compiled_handler)(void);
+
+static bool ensure_aarch64_jit_runtime_ready(void)
+{
+	if (pushall_call_handler)
+		return true;
+	check_prefs_changed_comp(false);
+	build_comp();
+	return pushall_call_handler != nullptr;
+}
+
+void m68k_do_compile_execute(void)
+{
+	if (!ensure_aarch64_jit_runtime_ready())
+		jit_abort("ARM64 JIT dispatcher stubs were not initialized before compiled execution");
+	for (;;) {
+		((compiled_handler)(pushall_call_handler))();
+		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
+			if (m68k_do_specialties())
+				return;
+		}
+	}
+}
+
+void m68k_compile_execute(void)
+{
+	for (;;) {
+		if (quit_program > 0) {
+			if (quit_program == 1)
+				break;
+			quit_program = 0;
+			m68k_reset();
+		}
+		m68k_do_compile_execute();
+	}
+}
+
+void readbyte(int address, int dest, int tmp) { (void)tmp; readbyte(address, dest); }
+void readword(int address, int dest, int tmp) { (void)tmp; readword(address, dest); }
+void readlong(int address, int dest, int tmp) { (void)tmp; readlong(address, dest); }
+void writebyte(int address, int source, int tmp) { (void)tmp; writebyte(address, source); }
+void writeword(int address, int source, int tmp) { (void)tmp; writeword(address, source); }
+void writelong(int address, int source, int tmp) { (void)tmp; writelong(address, source); }
+void writeword_clobber(int address, int source, int tmp) { (void)tmp; writeword_clobber(address, source); }
+void writelong_clobber(int address, int source, int tmp) { (void)tmp; writelong_clobber(address, source); }
+void get_n_addr(int address, int dest, int tmp) { (void)tmp; get_n_addr(address, dest); }
+void get_n_addr_jmp(int address, int dest, int tmp) { (void)tmp; get_n_addr_jmp(address, dest); }
+void calc_disp_ea_020(int base, uae_u32 dp, int target, int tmp) { (void)tmp; calc_disp_ea_020(base, dp, target); }
+void register_branch(uae_u32 not_taken, uae_u32 taken, uae_u8 cond) { register_branch((uintptr)not_taken, (uintptr)taken, cond); }
+#include "compemu_legacy_arm64_compat.cpp"
+#else
+
 #ifdef UAE
 
 #define writemem_special writemem
@@ -50,8 +151,8 @@
  * code is not 64-bit clean and (ii) it's faster to resolve branches
  * that way.
  */
-#if !defined(CPU_i386) && !defined(CPU_x86_64) && !defined(CPU_arm)
-#error "Only IA-32, X86-64 and ARM v6 targets are supported with the JIT Compiler"
+#if !defined(CPU_i386) && !defined(CPU_x86_64) && !defined(CPU_arm) && !defined(CPU_aarch64) && !defined(CPU_AARCH64)
+#error "Only IA-32, X86-64 and ARM targets are supported with the JIT Compiler"
 #endif
 #endif
 
@@ -530,7 +631,7 @@ static inline blockinfo* get_blockinfo_addr(void* addr)
 #if defined(CPU_x86_64)
 #define TARGET_NATIVE	TARGET_X86_64
 #endif
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 #define TARGET_NATIVE	TARGET_ARM
 #endif
 // #include "disasm-glue.h"
@@ -1164,7 +1265,9 @@ static inline void reset_data_buffer(void)
  * Getting the information about the target CPU                     *
  ********************************************************************/
 
-#if defined(CPU_arm)
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#include "codegen_arm64.cpp"
+#elif defined(CPU_arm)
 #include "codegen_arm.cpp"
 #endif
 #if defined(CPU_i386) || defined(CPU_x86_64)
@@ -2665,7 +2768,10 @@ static void prepare_for_call_2(void)
 }
 #endif
 
-#if defined(CPU_arm)
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#include "compemu_midfunc_arm64.cpp"
+#include "compemu_midfunc_arm64_2.cpp"
+#elif defined(CPU_arm)
 #include "compemu_midfunc_arm.cpp"
 
 #if defined(USE_JIT2)
@@ -2790,7 +2896,7 @@ void compemu_make_sr(int sr, int tmp)
 	shll_l_ri(tmp, 4);
 	or_l(sr, tmp);
 
-#elif defined(CPU_arm) && defined(ARM_ASSEMBLY)
+#elif (defined(CPU_arm) && defined(ARM_ASSEMBLY)) || ((defined(CPU_aarch64) || defined(CPU_AARCH64)) && defined(AARCH64_ASSEMBLY))
 	shrl_l_ri(sr, FLAGBIT_N - 3);                            /* move NZ into position */
 	ror_l_ri(tmp, FLAGBIT_C - 1);                            /* move C into position in tmp; V->31 */
 	and_l_ri(sr, 0xc);
@@ -2861,7 +2967,7 @@ void compemu_enter_super(int sr)
 	compemu_raw_jnz_b_oponly();
 	uae_u8 *branchadd = get_target();
 	skip_byte();
-#elif defined(CPU_arm)
+#elif defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 	compemu_raw_jnz_b_oponly();
 	uae_u8 *branchadd = get_target();
 	skip_byte();
@@ -2871,7 +2977,7 @@ void compemu_enter_super(int sr)
 	mov_b_mi(uae_p32(&regs.s), 1);
 #if defined(CPU_i386) || defined(CPU_x86_64)
 	*branchadd = get_target() - (branchadd + 1);
-#elif defined(CPU_arm)
+#elif defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 	*((uae_u32 *)branchadd - 3) = get_target() - (branchadd + 1);
 #endif
 }
@@ -3109,7 +3215,7 @@ static void init_comp(void)
 	live.state[FLAGX].needflush=NF_TOMEM;
 	set_status(FLAGX,INMEM);
 
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 	live.state[FLAGTMP].mem=(uae_u32*)&(regflags.nzcv);
 #else
 	live.state[FLAGTMP].mem=(uae_u32*)&(regflags.cznv);
@@ -3283,7 +3389,7 @@ static void freescratch(void)
 {
 	int i;
 	for (i=0;i<N_REGS;i++)
-#if defined(CPU_arm)
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
 		if (live.nat[i].locked && i != REG_WORK1 && i != REG_WORK2)
 #else
 		if (live.nat[i].locked && i != ESP_INDEX
@@ -5487,6 +5593,7 @@ setjmpagain:
 }
 #endif
 
+#endif /* non-AArch64 compemu_support.cpp */
 #endif /* JIT */
 
 #endif

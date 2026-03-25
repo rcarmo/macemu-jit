@@ -255,10 +255,16 @@ char *strdup(const char *s)
  *  Helpers to map memory that can be accessed from the Mac side
  */
 
-// NOTE: VM_MAP_32BIT is only used when compiling a 64-bit JIT on specific platforms
+// NOTE: VM_MAP_32BIT is only needed for legacy 32-bit-clean assumptions.
+// Experimental AArch64 JIT uses 64-bit host pointers, so forcing low-4GB
+// RAM/ROM mappings can fail unnecessarily on aarch64 hosts.
 void *vm_acquire_mac(size_t size)
 {
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	return vm_acquire(size, VM_MAP_DEFAULT);
+#else
 	return vm_acquire(size, VM_MAP_DEFAULT | VM_MAP_32BIT);
+#endif
 }
 
 #if REAL_ADDRESSING
