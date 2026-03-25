@@ -186,6 +186,15 @@ run_mode() {
   if kill -0 "$emu_pid" 2>/dev/null; then
     survived=1
     kill "$emu_pid" 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      if ! kill -0 "$emu_pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    if kill -0 "$emu_pid" 2>/dev/null; then
+      kill -KILL "$emu_pid" 2>/dev/null || true
+    fi
     set +e
     wait "$emu_pid" 2>/dev/null
     exit_code=$?

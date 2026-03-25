@@ -166,8 +166,17 @@ void LoadPrefs(const char* vmdir)
 	{
 		prefs_name = UserPrefsPath;
 		xpram_name = get_dir(&prefs_name) + XPRAM_FILE_NAME;
-		if (load_prefs_file(prefs_name, true))
+		if (load_prefs_file(prefs_name, false))
 			return;
+		if (errno != ENOENT)
+		{
+			fprintf(stderr, "ERROR: Could not load prefs file from %s (%s)\n",
+			        prefs_name.c_str(), strerror(errno));
+			exit(1);
+		}
+		printf("Prefs file %s not found, creating new one there\n", prefs_name.c_str());
+		SavePrefs();
+		return;
 	}
 
 	// Load .basilisk_ii_prefs from $HOME if it exists
