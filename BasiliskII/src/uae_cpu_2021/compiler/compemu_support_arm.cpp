@@ -2644,7 +2644,11 @@ uae_u32 get_jitted_size(void)
 static uint8 *do_alloc_code(uint32 size, int depth)
 {
 	UNUSED(depth);
-    uint8*code = (uint8 *)vm_acquire_code(size, VM_MAP_DEFAULT | VM_MAP_32BIT);
+#if defined(CPU_AARCH64)
+	uint8* code = (uint8 *)vm_acquire_code(size, VM_MAP_DEFAULT);
+#else
+	uint8* code = (uint8 *)vm_acquire_code(size, VM_MAP_DEFAULT | VM_MAP_32BIT);
+#endif
 	return code == VM_MAP_FAILED ? NULL : code;
 }
 

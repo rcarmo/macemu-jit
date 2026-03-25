@@ -82,8 +82,19 @@ bool compiler_use_jit(void)
 
 typedef void (*compiled_handler)(void);
 
+static bool ensure_aarch64_jit_runtime_ready(void)
+{
+	if (pushall_call_handler)
+		return true;
+	check_prefs_changed_comp(false);
+	build_comp();
+	return pushall_call_handler != nullptr;
+}
+
 void m68k_do_compile_execute(void)
 {
+	if (!ensure_aarch64_jit_runtime_ready())
+		jit_abort("ARM64 JIT dispatcher stubs were not initialized before compiled execution");
 	for (;;) {
 		((compiled_handler)(pushall_call_handler))();
 		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
@@ -118,6 +129,7 @@ void get_n_addr(int address, int dest, int tmp) { (void)tmp; get_n_addr(address,
 void get_n_addr_jmp(int address, int dest, int tmp) { (void)tmp; get_n_addr_jmp(address, dest); }
 void calc_disp_ea_020(int base, uae_u32 dp, int target, int tmp) { (void)tmp; calc_disp_ea_020(base, dp, target); }
 void register_branch(uae_u32 not_taken, uae_u32 taken, uae_u8 cond) { register_branch((uintptr)not_taken, (uintptr)taken, cond); }
+#include "compemu_legacy_arm64_compat.cpp"
 #else
 
 #ifdef UAE
