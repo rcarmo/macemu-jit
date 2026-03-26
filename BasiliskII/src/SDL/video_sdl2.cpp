@@ -81,7 +81,7 @@
 #include "evdev_input.h"
 #include "vnc_server.h"
 
-#define DEBUG 0
+#define DEBUG 1
 #include "debug.h"
 
 #define CODE_INVALID -1
@@ -124,6 +124,7 @@ static bool mouse_wheel_reverse;
 
 static volatile sig_atomic_t sdl_png_dump_requested = 0;
 static bool sdl_png_dump_unavailable_warned = false;
+static bool sdl_startup_dump_done = false;
 
 static uint8 *the_buffer = NULL;					// Mac frame buffer (where MacOS draws into)
 static uint8 *the_buffer_copy = NULL;				// Copy of Mac frame buffer (for refreshed modes)
@@ -210,34 +211,34 @@ static bool write_rgba_png(const char *path, const uint8_t *pixels, int width, i
 }
 #endif
 
-static void maybe_dump_surface_png(SDL_Surface *surface)
+static bool dump_surface_png_now(SDL_Surface *surface, const char *reason)
 {
-	if (!sdl_png_dump_requested)
-		return;
-
-	sdl_png_dump_requested = 0;
-
 	if (!surface)
-		return;
+		return false;
 
 #ifndef HAVE_LIBPNG
 	if (!sdl_png_dump_unavailable_warned) {
-		printf("WARNING: PNG framebuffer dump requested but build lacks libpng support\n");
+		fprintf(stderr, "WARNING: PNG framebuffer dump requested (%s) but build lacks libpng support\n", reason ? reason : "unknown");
+		fflush(stderr);
 		sdl_png_dump_unavailable_warned = true;
 	}
-	return;
+	return false;
 #else
 	const bool needs_lock = SDL_MUSTLOCK(surface) != 0;
-	if (needs_lock && SDL_LockSurface(surface) != 0)
-		return;
+	if (needs_lock && SDL_LockSurface(surface) != 0) {
+		fprintf(stderr, "WARNING: Failed locking surface for PNG dump (%s): %s\n", reason ? reason : "unknown", SDL_GetError());
+		fflush(stderr);
+		return false;
+	}
 
 	SDL_Surface *rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
 	if (needs_lock)
 		SDL_UnlockSurface(surface);
 
 	if (!rgba) {
-		printf("WARNING: Failed converting surface for PNG dump: %s\n", SDL_GetError());
-		return;
+		fprintf(stderr, "WARNING: Failed converting surface for PNG dump (%s): %s\n", reason ? reason : "unknown", SDL_GetError());
+		fflush(stderr);
+		return false;
 	}
 
 	const std::string path = build_png_dump_path();
@@ -245,10 +246,21 @@ static void maybe_dump_surface_png(SDL_Surface *surface)
 	SDL_FreeSurface(rgba);
 
 	if (ok)
-		printf("PNG framebuffer dump saved to %s\n", path.c_str());
+		fprintf(stderr, "PNG framebuffer dump saved (%s) to %s\n", reason ? reason : "unknown", path.c_str());
 	else
-		printf("WARNING: Failed writing PNG framebuffer dump to %s\n", path.c_str());
+		fprintf(stderr, "WARNING: Failed writing PNG framebuffer dump (%s) to %s\n", reason ? reason : "unknown", path.c_str());
+	fflush(stderr);
+	return ok;
 #endif
+}
+
+static void maybe_dump_surface_png(SDL_Surface *surface)
+{
+	if (!sdl_png_dump_requested)
+		return;
+
+	sdl_png_dump_requested = 0;
+	dump_surface_png_now(surface, "signal");
 }
 
 static bool ctrl_down = false;						// Flag: Ctrl key pressed (for use with hotkeys)
@@ -1044,6 +1056,12 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 	}
 
 	SDL_RenderSetIntegerScale(sdl_renderer, PrefsFindBool("scale_integer") ? SDL_TRUE : SDL_FALSE);
+
+	const char *dump_on_video_init = getenv("B2_DUMP_ON_VIDEO_INIT");
+	if (!sdl_startup_dump_done && dump_on_video_init && strcmp(dump_on_video_init, "0") != 0) {
+		if (dump_surface_png_now(host_surface ? host_surface : guest_surface, "video-init"))
+			sdl_startup_dump_done = true;
+	}
 
     return guest_surface;
 }

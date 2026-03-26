@@ -1,66 +1,85 @@
-# Autoresearch: BasiliskII AArch64 experimental JIT smoke bring-up
+# Autoresearch: BasiliskII non-JIT SDL control boot baseline
 
 ## Objective
-Get the JIT-enabled BasiliskII build working with both runtime modes:
-- `--jit false` must survive for at least 20 seconds and render a non-solid window.
-- `--jit true` must survive for at least 20 seconds and render a non-solid window.
+Re-establish a trustworthy **pre-JIT control path** for BasiliskII on this host.
 
-This is for the opt-in AArch64 JIT path only (`--enable-aarch64-jit-experimental`).
-Display correctness is prioritized first.
+The experiment is **not** trying to optimize AArch64 JIT right now. It should instead maximize the chance that the emulator boots far enough to provide useful evidence about:
+- boot progress,
+- disk activity,
+- video initialization,
+- framebuffer/window behavior,
+- and internal framebuffer dumps.
+
+## Fixed starting points
+Keep these fixed unless there is a very strong reason to change them:
+- **ROM:** `/workspace/fixtures/basilisk/images/Quadra800.ROM`
+- **Disk:** `/workspace/fixtures/basilisk/images/HD200MB`
+- **Runtime mode:** `jit false`
+- **Rendering path:** SDL only, software renderer requested
+- **Disable other acceleration paths:** no JIT, no VOSF, no XF86 DGA, no XF86 VidMode, no fbdev DGA
+- **Video mode:** `screen win/640/480`, `displaycolordepth 8`
+- **Machine profile:** `modelid 14`, `cpu 4`, `fpu true`
 
 ## Metrics
-- **Primary**: `jit_smoke_score` (points, **higher is better**)
-  - `+30` if JIT-enabled configure+make succeeds (`build_ok=1`)
-  - `+20` if `jit=false` survives >=20s with window (`off_alive=1`)
-  - `+20` if `jit=false` capture is non-solid (`off_nonsolid=1`)
-  - `+20` if `jit=true` survives >=20s with window (`on_alive=1`)
-  - `+10` if `jit=true` capture is non-solid (`on_nonsolid=1`)
-  - `-15 * crash_count` crash penalty (`SIGSEGV`/`SIGABRT`/abort/segfault indications)
-- **Secondary**:
+- **Primary:** `control_boot_score` (**higher is better**)
+  - `+40` if configure+make succeeds (`build_ok=1`)
+  - `+20` if the emulator survives for 20 seconds (`boot_alive=1`)
+  - `+10` if a BasiliskII window is found (`window_found=1`)
+  - `+10` if enough explicit boot milestones are logged (`boot_progress=1`)
+  - `+10` if disk/storage activity is visible in logs (`disk_activity=1`)
+  - `+5` if at least one internal PNG dump is captured (`dump_activity=1`)
+  - `+5` if the final window capture is non-solid (`window_nonsolid=1`)
+  - `-20 * crash_count`
+- **Secondary:**
   - `build_ok`
-  - `off_alive`
-  - `off_nonsolid`
-  - `on_alive`
-  - `on_nonsolid`
+  - `boot_alive`
+  - `window_found`
+  - `boot_progress`
+  - `disk_activity`
+  - `dump_activity`
+  - `window_nonsolid`
+  - `boot_steps_seen`
+  - `png_dump_count`
   - `crash_count`
+  - `dump_signal_seen`
+  - `dump_attempt_seen`
+  - `dump_save_seen`
 
-## How to Run
+## How to run
 `./autoresearch.sh`
 
-The script emits structured lines:
-- `METRIC jit_smoke_score=<number>`
-- `METRIC build_ok=<0|1>`
-- `METRIC off_alive=<0|1>`
-- `METRIC off_nonsolid=<0|1>`
-- `METRIC on_alive=<0|1>`
-- `METRIC on_nonsolid=<0|1>`
-- `METRIC crash_count=<integer>`
+Artifacts are written under `/workspace/tmp/autoresearch-control-<timestamp>`.
 
-Artifacts are written under `/workspace/tmp/autoresearch-jit-<timestamp>`.
-
-## Files in Scope
-- `BasiliskII/src/Unix/configure.ac` — configure-time enablement guards and feature flags.
-- `BasiliskII/src/Unix/Makefile.in` — JIT source wiring for AArch64 experimental build.
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_support.cpp` — allocator/protection/lifecycle for JIT code cache and block pools.
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu.h` — shared JIT invariants and pointer-width checks.
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_midfunc_arm64.cpp` — AArch64 emitter/patching behavior.
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_midfunc_arm64_2.cpp` — AArch64 helper emission path.
-- `BasiliskII/src/uae_cpu_2021/compiler/gencomp_arm.c` — generated ARM/AArch64 backend glue.
-- `BasiliskII/src/uae_cpu_2021/registers.h` — register model layout used by JIT backend assumptions.
-
-## Off Limits
-- Do not remove or auto-enable JIT globally; keep AArch64 JIT **opt-in only** behind `--enable-aarch64-jit-experimental`.
-- Do not regress x86/x86_64 JIT paths.
-- Do not modify external ROM/disk assets in `/workspace/projects/rpi-basilisk2-sdl2-nox`.
+## Files in scope
+- `autoresearch.sh` — conservative control harness
+- `BasiliskII/src/main.cpp` — core boot-step logging
+- `BasiliskII/src/Unix/main_unix.cpp` — process/bootstrap logging and line buffering
+- `BasiliskII/src/video.cpp` — video init/debug traces
+- `BasiliskII/src/SDL/video_sdl2.cpp` — SDL renderer/video traces and internal PNG dumps
+- `BasiliskII/src/disk.cpp` — disk activity traces
+- `BasiliskII/src/scsi.cpp` — storage probing traces
+- `BasiliskII/src/sony.cpp` — floppy/disk driver traces
 
 ## Constraints
-- Build must continue to work for existing non-AArch64 configurations.
-- Prefer architecture-guarded changes over broad behavioral changes.
-- Prioritize display correctness and survival in the smoke harness before deeper performance work.
-- Keep diagnostic artifacts for each run in `/workspace/tmp/autoresearch-jit-<ts>`.
+- Do **not** turn JIT back on in this experiment.
+- Keep ROM and disk images fixed to the local fixture copies.
+- Prefer observability and reproducibility over performance.
+- Minimize build/runtime feature surface so the emulator has the best chance to boot.
+- Keep internal framebuffer PNG dumps and boot logs for every run.
+- Treat the SIGUSR2-triggered PNG dump path itself as a hypothesis that may require validation; do not assume missing PNGs means missing framebuffer updates until the signal/handler/dump pipeline is verified end-to-end.
 
 ## What's Been Tried
-- Existing branch state contains initial experimental AArch64 JIT wiring and generator imports.
-- Known blocker from user report: JIT-enabled binaries may crash early; recent GDB traces hit `vm_release` while in `vm_alloc`, even with runtime `jit=false`.
-- Known symptom in prior diagnostics: repeated `JIT: Branch to target too long.` messages and eventual abort with runtime `jit=true`.
-- First step in this session validated autoresearch tools and METRIC parsing path.
+- Baseline on commit `cf71555d`: the direct non-JIT SDL software-rendered control lane builds, survives 20s, opens a window, and logs core boot milestones with score 90.
+- That baseline produced `png_dump_count=0`, but the absence of PNGs is not yet trustworthy evidence of missing framebuffer activity because the signal/request/write path itself has not been validated end-to-end.
+- Instrumentation run after the baseline showed that all four scheduled SIGUSR2 signals reached the process, but the dump path never advanced to request handling or file output.
+- Next step: keep the conservative SDL path unchanged but route SIGUSR2 to the main thread only, so helper threads cannot consume the signal while the presentation thread misses the request latch.
+
+## Definition of success for this phase
+A good run is one where we can clearly answer:
+1. Did BasiliskII build and stay alive?
+2. Did it open a window?
+3. Did the storage path show activity?
+4. Which boot milestones were reached?
+5. Did internal dumps/captures show any non-solid progression?
+
+Only after this control path is trustworthy should JIT be reintroduced.

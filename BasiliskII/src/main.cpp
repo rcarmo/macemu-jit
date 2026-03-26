@@ -39,7 +39,7 @@
 #include "prefs.h"
 #include "main.h"
 
-#define DEBUG 0
+#define DEBUG 1
 #include "debug.h"
 
 #if ENABLE_MON
@@ -63,11 +63,18 @@ static void mon_write_byte_b2(uintptr adr, uint32 b)
 
 bool InitAll(const char *vmdir)
 {
+	fprintf(stderr, "BOOT InitAll: begin\n");
+	fflush(stderr);
+
 	// Check ROM version
 	if (!CheckROM()) {
+		fprintf(stderr, "BOOT InitAll: CheckROM failed\n");
+		fflush(stderr);
 		ErrorAlert(STR_UNSUPPORTED_ROM_TYPE_ERR);
 		return false;
 	}
+	fprintf(stderr, "BOOT InitAll: ROM ok version=%u\n", (unsigned)ROMVersion);
+	fflush(stderr);
 
 #if EMULATED_68K
 	// Set CPU and FPU type (UAE emulation)
@@ -101,6 +108,8 @@ bool InitAll(const char *vmdir)
 
 	// Load XPRAM
 	XPRAMInit(vmdir);
+	fprintf(stderr, "BOOT InitAll: XPRAM loaded\n");
+	fflush(stderr);
 
 	// Load XPRAM default values if signature not found
 	if (XPRAM[0x0c] != 0x4e || XPRAM[0x0d] != 0x75
@@ -145,6 +154,8 @@ bool InitAll(const char *vmdir)
 	DiskInit();
 	CDROMInit();
 	SCSIInit();
+	fprintf(stderr, "BOOT InitAll: storage drivers initialized\n");
+	fflush(stderr);
 
 #if SUPPORTS_EXTFS
 	// Init external file system
@@ -170,8 +181,13 @@ bool InitAll(const char *vmdir)
 	AudioInit();
 
 	// Init video
-	if (!VideoInit(ROMVersion == ROM_VERSION_64K || ROMVersion == ROM_VERSION_PLUS || ROMVersion == ROM_VERSION_CLASSIC))
+	if (!VideoInit(ROMVersion == ROM_VERSION_64K || ROMVersion == ROM_VERSION_PLUS || ROMVersion == ROM_VERSION_CLASSIC)) {
+		fprintf(stderr, "BOOT InitAll: VideoInit failed\n");
+		fflush(stderr);
 		return false;
+	}
+	fprintf(stderr, "BOOT InitAll: VideoInit ok\n");
+	fflush(stderr);
 
 	// Set default video mode in XPRAM
 	XPRAM[0x56] = 0x42;	// 'B'
@@ -182,15 +198,24 @@ bool InitAll(const char *vmdir)
 
 #if EMULATED_68K
 	// Init 680x0 emulation (this also activates the memory system which is needed for PatchROM())
-	if (!Init680x0())
+	if (!Init680x0()) {
+		fprintf(stderr, "BOOT InitAll: Init680x0 failed\n");
+		fflush(stderr);
 		return false;
+	}
+	fprintf(stderr, "BOOT InitAll: Init680x0 ok\n");
+	fflush(stderr);
 #endif
 
 	// Install ROM patches
 	if (!PatchROM()) {
+		fprintf(stderr, "BOOT InitAll: PatchROM failed\n");
+		fflush(stderr);
 		ErrorAlert(STR_UNSUPPORTED_ROM_TYPE_ERR);
 		return false;
 	}
+	fprintf(stderr, "BOOT InitAll: PatchROM ok\n");
+	fflush(stderr);
 
 #if ENABLE_MON
 	// Initialize mon
@@ -199,6 +224,8 @@ bool InitAll(const char *vmdir)
 	mon_write_byte = mon_write_byte_b2;
 #endif
 
+	fprintf(stderr, "BOOT InitAll: complete\n");
+	fflush(stderr);
 	return true;
 }
 

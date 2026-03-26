@@ -45,7 +45,7 @@ using std::vector;
 #include "prefs.h"
 #include "sony.h"
 
-#define DEBUG 0
+#define DEBUG 1
 #include "debug.h"
 
 

@@ -113,7 +113,7 @@ extern void flush_icache_range(uint8 *start, uint32 size); // from compemu_suppo
 # include "mon.h"
 #endif
 
-#define DEBUG 0
+#define DEBUG 1
 #include "debug.h"
 
 
@@ -475,6 +475,22 @@ int main(int argc, char **argv)
 	int vnc_cli_enabled = -1;
 	int vnc_cli_port = -1;
 	char str[256];
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+	sigset_t sigdump_set;
+	bool sigdump_masked = false;
+#endif
+
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	setvbuf(stderr, NULL, _IOLBF, 0);
+	fprintf(stderr, "BOOT main: start argc=%d\n", argc);
+	fflush(stderr);
+
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+	sigemptyset(&sigdump_set);
+	sigaddset(&sigdump_set, SIGUSR2);
+	if (sigprocmask(SIG_BLOCK, &sigdump_set, NULL) == 0)
+		sigdump_masked = true;
+#endif
 
 	// Initialize variables
 	RAMBaseHost = NULL;
@@ -627,6 +643,8 @@ int main(int argc, char **argv)
 
 	// Read preferences
 	PrefsInit(vmdir, argc, argv);
+	fprintf(stderr, "BOOT main: preferences loaded\n");
+	fflush(stderr);
 	if (vnc_cli_enabled != -1)
 		PrefsReplaceBool("vncserver", vnc_cli_enabled != 0);
 	if (vnc_cli_port != -1)
@@ -891,8 +909,12 @@ int main(int argc, char **argv)
 #endif
 
 	// Initialize everything
+	fprintf(stderr, "BOOT main: InitAll starting\n");
+	fflush(stderr);
 	if (!InitAll(vmdir))
 		QuitEmulator();
+	fprintf(stderr, "BOOT main: InitAll complete\n");
+	fflush(stderr);
 	D(bug("Initialization complete\n"));
 
 	D(bug("Mac RAM starts at %p (%08x)\n", RAMBaseHost, RAMBaseMac));
@@ -1040,6 +1062,11 @@ int main(int argc, char **argv)
 	memcpy(last_xpram, XPRAM, XPRAM_SIZE);
 	xpram_thread_active = (pthread_create(&xpram_thread, NULL, xpram_func, NULL) == 0);
 	D(bug("XPRAM thread started\n"));
+#endif
+
+#if defined(USE_SDL_VIDEO) && defined(USE_SDL2)
+	if (sigdump_masked)
+		sigprocmask(SIG_UNBLOCK, &sigdump_set, NULL);
 #endif
 
 	// Start 68k and jump to ROM boot routine
