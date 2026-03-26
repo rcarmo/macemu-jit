@@ -44,6 +44,10 @@ AC_ARG_ENABLE(jit-compiler,  [  --enable-jit-compiler   enable JIT compiler [def
 AC_ARG_ENABLE(jit-debug,     [  --enable-jit-debug      activate native code disassemblers [default=no]], [WANT_JIT_DEBUG=$enableval], [WANT_JIT_DEBUG=no])
 AC_ARG_ENABLE(arm-jit-experimental, [  --enable-arm-jit-experimental  enable experimental ARM32 JIT backend (unsupported, default=no)], [WANT_ARM_JIT_EXPERIMENTAL=$enableval], [WANT_ARM_JIT_EXPERIMENTAL=no])
 AC_ARG_ENABLE(aarch64-jit-experimental, [  --enable-aarch64-jit-experimental  enable experimental AArch64 JIT backend (unsupported, default=no)], [WANT_AARCH64_JIT_EXPERIMENTAL=$enableval], [WANT_AARCH64_JIT_EXPERIMENTAL=no])
+AC_ARG_WITH(uae-core,
+  AS_HELP_STRING([--with-uae-core=CORE], [select UAE CPU core: auto|legacy|2021 [default=auto]]),
+  [WANT_UAE_CORE=$withval],
+  [WANT_UAE_CORE=auto])
 
 dnl FPU emulation core.
 AC_ARG_ENABLE(fpe,
@@ -1766,7 +1770,10 @@ elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_AARCH64" = "xyes" ]]; then
   DEFINES="$DEFINES -DCPU_aarch64 -DCPU_AARCH64 -DUNALIGNED_PROFITABLE"
   if [[ "x$HAVE_GAS" = "xyes" ]]; then
     ASM_OPTIMIZATIONS="AArch64"
-    DEFINES="$DEFINES -DAARCH64_ASSEMBLY -DOPTIMIZED_FLAGS"
+    DEFINES="$DEFINES -DAARCH64_ASSEMBLY"
+
+    dnl NOTE: avoid OPTIMIZED_FLAGS on AArch64 for now; the legacy flag-macro
+    dnl assumptions diverge from the 2021 core behavior and can break early boot.
 
     dnl AArch64 JIT is experimental and intentionally opt-in.
     if [[ "x$WANT_AARCH64_JIT_EXPERIMENTAL" = "xyes" ]]; then
@@ -1784,11 +1791,24 @@ elif [[ "x$WANT_NATIVE_M68K" = "xyes" ]]; then
   CPUSRCS="asm_support.s"
 fi
 
-if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
-  UAE_PATH="../uae_cpu_2021"
-else
-  UAE_PATH="../uae_cpu"
-fi
+case "$WANT_UAE_CORE" in
+  auto)
+    if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
+      UAE_PATH="../uae_cpu_2021"
+    else
+      UAE_PATH="../uae_cpu"
+    fi
+    ;;
+  legacy)
+    UAE_PATH="../uae_cpu"
+    ;;
+  2021)
+    UAE_PATH="../uae_cpu_2021"
+    ;;
+  *)
+    AC_MSG_ERROR([--with-uae-core takes one of: auto, legacy, 2021])
+    ;;
+esac
 
 dnl Enable JIT compiler, if possible.
 if [[ "x$WANT_JIT" = "xyes" -a "x$CAN_JIT" = "xyes" ]]; then
@@ -1980,16 +2000,22 @@ for fpe in $FPE_CORE_TEST_ORDER; do
   ieee)
     case $ac_cv_c_float_format in
     IEEE*)
-      if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
-        FPE_CORE="IEEE fpu core (MPFR)"
-        DEFINES="$DEFINES -DFPU_MPFR"
-        FPUSRCS="$UAE_PATH/fpu/fpu_mpfr.cpp"
-	    LIBS="$LIBS -lmpfr -lgmp"
+      if [[ "$UAE_PATH" = "../uae_cpu_2021" ]]; then
+        if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
+          FPE_CORE="IEEE fpu core (MPFR)"
+          DEFINES="$DEFINES -DFPU_MPFR"
+          FPUSRCS="$UAE_PATH/fpu/fpu_mpfr.cpp"
+	      LIBS="$LIBS -lmpfr -lgmp"
+	    else
+          FPE_CORE="IEEE fpu core"
+          DEFINES="$DEFINES -DFPU_IEEE"
+          FPUSRCS="$UAE_PATH/fpu/fpu_ieee.cpp"
+	    fi
 	  else
         FPE_CORE="IEEE fpu core"
         DEFINES="$DEFINES -DFPU_IEEE"
         FPUSRCS="$UAE_PATH/fpu/fpu_ieee.cpp"
-	  fi
+      fi
       dnl Math functions not mandated by C99 standard
       AC_CHECK_FUNCS(isnanl isinfl)
       dnl Math functions required by C99 standard, but probably not
@@ -2034,9 +2060,11 @@ dnl UAE CPU sources for all non-m68k-native architectures.
 if [[ "x$WANT_NATIVE_M68K" = "xno" ]]; then
   CPUINCLUDES="-I$UAE_PATH"
   CPUSRCS="$UAE_PATH/basilisk_glue.cpp $UAE_PATH/memory.cpp $UAE_PATH/newcpu.cpp $UAE_PATH/readcpu.cpp $FPUSRCS cpustbl.cpp cpudefs.cpp $CPUSRCS $JITSRCS"
-  if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
-    CPUSRCS="$CPUSRCS cpufunctbl.cpp"
-	DEFINES="$DEFINES -DUPDATE_UAE"
+  if [[ "$UAE_PATH" = "../uae_cpu_2021" ]]; then
+    if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
+      CPUSRCS="$CPUSRCS cpufunctbl.cpp"
+	  DEFINES="$DEFINES -DUPDATE_UAE"
+    fi
   fi
 fi
 
@@ -2086,6 +2114,7 @@ echo Running m68k code natively ............. : $WANT_NATIVE_M68K
 echo Use JIT compiler ....................... : $WANT_JIT
 echo Experimental ARM JIT toggle ........... : $WANT_ARM_JIT_EXPERIMENTAL
 echo Experimental AArch64 JIT toggle ....... : $WANT_AARCH64_JIT_EXPERIMENTAL
+echo Selected UAE CPU core ................. : $WANT_UAE_CORE ($UAE_PATH)
 echo JIT debug mode ......................... : $WANT_JIT_DEBUG
 echo Floating-Point emulation core .......... : $FPE_CORE
 echo Assembly optimizations ................. : $ASM_OPTIMIZATIONS

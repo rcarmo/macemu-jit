@@ -1,85 +1,105 @@
-# Autoresearch: BasiliskII non-JIT SDL control boot baseline
+# Autoresearch: BasiliskII ARM boot divergence (uae_cpu vs uae_cpu_2021)
 
 ## Objective
-Re-establish a trustworthy **pre-JIT control path** for BasiliskII on this host.
+The emulator is not reaching real boot; framebuffer stays zero because ROM startup appears stuck early.
 
-The experiment is **not** trying to optimize AArch64 JIT right now. It should instead maximize the chance that the emulator boots far enough to provide useful evidence about:
-- boot progress,
-- disk activity,
-- video initialization,
-- framebuffer/window behavior,
-- and internal framebuffer dumps.
-
-## Fixed starting points
-Keep these fixed unless there is a very strong reason to change them:
-- **ROM:** `/workspace/fixtures/basilisk/images/Quadra800.ROM`
-- **Disk:** `/workspace/fixtures/basilisk/images/HD200MB`
-- **Runtime mode:** `jit false`
-- **Rendering path:** SDL only, software renderer requested
-- **Disable other acceleration paths:** no JIT, no VOSF, no XF86 DGA, no XF86 VidMode, no fbdev DGA
-- **Video mode:** `screen win/640/480`, `displaycolordepth 8`
-- **Machine profile:** `modelid 14`, `cpu 4`, `fpu true`
+This session pivots from capture-pipeline tuning to **CPU-core divergence diagnosis**:
+1. Validate a trusted reference build using the **original `uae_cpu`** core with known configure flags.
+2. Compare behavior against `uae_cpu_2021` on identical ROM/disk/runtime conditions.
+3. Apply minimal fixes so `uae_cpu_2021` reaches the same boot milestones.
 
 ## Metrics
-- **Primary:** `control_boot_score` (**higher is better**)
-  - `+40` if configure+make succeeds (`build_ok=1`)
-  - `+20` if the emulator survives for 20 seconds (`boot_alive=1`)
-  - `+10` if a BasiliskII window is found (`window_found=1`)
-  - `+10` if enough explicit boot milestones are logged (`boot_progress=1`)
-  - `+10` if disk/storage activity is visible in logs (`disk_activity=1`)
-  - `+5` if at least one internal PNG dump is captured (`dump_activity=1`)
-  - `+5` if the final window capture is non-solid (`window_nonsolid=1`)
-  - `-20 * crash_count`
-- **Secondary:**
+- **Primary**: `stage_coverage_score` (higher is better)
+  - +15 reset reached
+  - +15 saw CLKNOMEM activity
+  - +15 saw any intmask transition
+  - +15 reached PATCH_BOOT_GLOBS
+  - +15 reached CheckLoad
+  - +15 reached first VideoInterrupt
+  - +10 reached first framebuffer write
+- **Secondary**:
   - `build_ok`
   - `boot_alive`
-  - `window_found`
-  - `boot_progress`
-  - `disk_activity`
-  - `dump_activity`
-  - `window_nonsolid`
-  - `boot_steps_seen`
-  - `png_dump_count`
-  - `crash_count`
-  - `dump_signal_seen`
-  - `dump_attempt_seen`
-  - `dump_save_seen`
+  - `reset_seen`
+  - `clknomem_calls`
+  - `intmask_transition_count`
+  - `patch_boot_globs_seen`
+  - `checkload_seen`
+  - `video_interrupt_seen`
+  - `framebuffer_write_seen`
+  - `screenshot_count`
+  - `core_is_original`
+  - `core_is_2021`
 
-## How to run
+## How to Run
 `./autoresearch.sh`
 
-Artifacts are written under `/workspace/tmp/autoresearch-control-<timestamp>`.
+Notes:
+- Use env `B2_CPU_CORE_MODE=uae_cpu` for original core runs.
+- Use env `B2_CPU_CORE_MODE=uae_cpu_2021` for 2021 core runs.
+- The script emits `METRIC ...` lines and writes artifacts under `/workspace/tmp/autoresearch-boot-divergence-<timestamp>`.
 
-## Files in scope
-- `autoresearch.sh` — conservative control harness
-- `BasiliskII/src/main.cpp` — core boot-step logging
-- `BasiliskII/src/Unix/main_unix.cpp` — process/bootstrap logging and line buffering
-- `BasiliskII/src/video.cpp` — video init/debug traces
-- `BasiliskII/src/SDL/video_sdl2.cpp` — SDL renderer/video traces and internal PNG dumps
-- `BasiliskII/src/disk.cpp` — disk activity traces
-- `BasiliskII/src/scsi.cpp` — storage probing traces
-- `BasiliskII/src/sony.cpp` — floppy/disk driver traces
+## Files in Scope
+- `autoresearch.sh` — build/run harness and metrics extraction
+- `BasiliskII/src/emul_op.cpp` — ROM emul-op milestone logs (RESET/CLKNOMEM/PATCH_BOOT_GLOBS/CheckLoad/IRQ)
+- `BasiliskII/src/SDL/video_sdl2.cpp` — first framebuffer write milestone log
+- `BasiliskII/src/Unix/configure.ac` — only if needed for robust per-core selection
+- `autoresearch.md` — session state and learned context
+- `autoresearch.ideas.md` — deferred ideas backlog
+
+## Off Limits
+- ROM asset: `/workspace/fixtures/basilisk/images/Quadra800.ROM`
+- Disk asset: `/workspace/fixtures/basilisk/images/HD200MB`
+- No ROM/disk modifications.
 
 ## Constraints
-- Do **not** turn JIT back on in this experiment.
-- Keep ROM and disk images fixed to the local fixture copies.
-- Prefer observability and reproducibility over performance.
-- Minimize build/runtime feature surface so the emulator has the best chance to boot.
-- Keep internal framebuffer PNG dumps and boot logs for every run.
-- Treat the SIGUSR2-triggered PNG dump path itself as a hypothesis that may require validation; do not assume missing PNGs means missing framebuffer updates until the signal/handler/dump pipeline is verified end-to-end.
+- Every experiment run must use `./autoresearch.sh`.
+- Hard 120s timeout on diagnostic runs.
+- Robust teardown (TERM then KILL).
+- Keep runtime non-JIT (`jit false`) for this phase.
+- Do not overfit by faking milestones; all metrics must come from real logs/events.
+
+## Phase Plan
+1. **Phase 1 (runs 1-2):** build/run original `uae_cpu` with reference configure flags (plus Linux fallback `--disable-sdl-framework` when Objective-C frontend is unavailable):
+   - `--enable-sdl-audio --enable-sdl-framework --enable-sdl-video --disable-vosf --without-mon --without-esd --without-gtk --disable-jit-compiler --with-uae-core=legacy`
+2. **Phase 2 (runs 3-10):** compare original vs `uae_cpu_2021` milestone coverage and logs; focus on:
+   - CLKNOMEM behavior
+   - interrupt/intmask transitions
+   - reset/bootstrap path
+   - register state presented to emulops
+3. **Phase 3 (runs 11+):** apply minimal targeted fixes informed by phase-2 evidence.
 
 ## What's Been Tried
-- Baseline on commit `cf71555d`: the direct non-JIT SDL software-rendered control lane builds, survives 20s, opens a window, and logs core boot milestones with score 90.
-- That baseline produced `png_dump_count=0`, but the absence of PNGs is not yet trustworthy evidence of missing framebuffer activity because the signal/request/write path itself has not been validated end-to-end.
-- Instrumentation run after the baseline showed that all four scheduled SIGUSR2 signals reached the process, but the dump path never advanced to request handling or file output.
-- Next step: keep the conservative SDL path unchanged but route SIGUSR2 to the main thread only, so helper threads cannot consume the signal while the presentation thread misses the request latch.
-
-## Definition of success for this phase
-A good run is one where we can clearly answer:
-1. Did BasiliskII build and stay alive?
-2. Did it open a window?
-3. Did the storage path show activity?
-4. Which boot milestones were reached?
-5. Did internal dumps/captures show any non-solid progression?
-
-Only after this control path is trustworthy should JIT be reintroduced.
+- Added explicit boot-stage instrumentation:
+  - `BOOT_STAGE RESET fired`
+  - CLKNOMEM counter snapshots + register payload
+  - intmask transition tracing from EMUL_OP entry
+  - PATCH_BOOT_GLOBS and CHECKLOAD first-hit markers
+  - first VideoInterrupt marker
+  - first framebuffer write marker in SDL2 update path
+- Phase 1 complete:
+  - Original `uae_cpu` now builds/runs in this environment using reference flags plus an automatic Linux-only fallback from `--enable-sdl-framework` to `--disable-sdl-framework` when Objective-C toolchain support is missing (`cc1obj`).
+  - Reference runs are stable at `stage_coverage_score=100` with high intmask-transition activity and both CheckLoad+VideoInterrupt reached.
+- Phase 2 complete:
+  - `uae_cpu_2021` initially reproduced the historical divergence at `stage_coverage_score=70`:
+    - `checkload_seen=0`
+    - `video_interrupt_seen=0`
+    - `intmask_transition_count=1` (stuck at initial 7)
+- Root-cause direction validated:
+  - The AArch64 `-DOPTIMIZED_FLAGS` path is implicated in the divergence.
+  - Disabling that path for 2021 recovers full milestones.
+- Durable fix applied:
+  - `BasiliskII/src/Unix/configure.ac` no longer injects `-DOPTIMIZED_FLAGS` in the AArch64 define set.
+  - Harness now regenerates `configure` when `configure.ac` is newer, ensuring config changes actually take effect.
+  - Added first-class `--with-uae-core=auto|legacy|2021` configure support so core selection is reproducible without ad-hoc Makefile rewriting.
+  - MPFR FPU and `cpufunctbl.cpp` are now gated to the 2021 core path on ARM/AArch64.
+  - After these fixes, both cores reach full stage coverage (`100`) via clean configure-time selection.
+- Additional harness hardening/simplification after fix:
+  - configure invocation paths were deduplicated through a shared helper in `autoresearch.sh`.
+  - process teardown is centralized via `terminate_pid()` to keep TERM/KILL behavior consistent.
+  - stale precheck/config noise was removed (unused `python3` prerequisite and obsolete `--disable-nls` configure flag).
+  - crash-side artifact handling was simplified to lightweight metadata + tail logs (no heavy debugger/core-processing path in normal workflow), and is now gated to actual crash-like exits (`SIGABRT`/`SIGSEGV`) to avoid false crash artifacts from intentional harness shutdown.
+  - ideas backlog was pruned after trying crash-capture instrumentation in a no-crash run; remaining high-value path is dual-run comparative mode.
+  - dual-run mode is still deferred because a full two-core build+run sequence appears likely to exceed the session's 120s per-command diagnostic budget; keep it as optional/off-path tooling.
+- Current state:
+  - Both cores (`uae_cpu`, `uae_cpu_2021`) now reach full observed milestones under identical ROM/disk/non-JIT/Xvfb workload.

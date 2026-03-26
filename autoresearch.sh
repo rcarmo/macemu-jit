@@ -1,53 +1,87 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="/workspace/projects/macemu"
-UNIX_DIR="$PROJECT_ROOT/BasiliskII/src/Unix"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$ROOT_DIR/BasiliskII"
+UNIX_DIR="$PROJECT_ROOT/src/Unix"
 ROM_PATH="/workspace/fixtures/basilisk/images/Quadra800.ROM"
 DISK_PATH="/workspace/fixtures/basilisk/images/HD200MB"
+CORE_MODE="${B2_CPU_CORE_MODE:-uae_cpu}"
+CORE_CONFIG_ARG=""
 
 TS="$(date +%Y%m%d-%H%M%S)"
-OUTDIR="/workspace/tmp/autoresearch-control-$TS"
-mkdir -p "$OUTDIR"
+OUTDIR="/workspace/tmp/autoresearch-boot-divergence-$TS"
+RUN_DIR="$OUTDIR/run"
+mkdir -p "$RUN_DIR/home" "$RUN_DIR/xdg"
 
 build_ok=0
 boot_alive=0
-window_found=0
-boot_progress=0
-disk_activity=0
-dump_activity=0
-window_nonsolid=0
-boot_steps_seen=0
-png_dump_count=0
-dump_signal_seen=0
-dump_attempt_seen=0
-dump_save_seen=0
-crash_count=0
-CRASH_PENALTY=20
+reset_seen=0
+clknomem_calls=0
+intmask_transition_count=0
+patch_boot_globs_seen=0
+checkload_seen=0
+video_interrupt_seen=0
+framebuffer_write_seen=0
+screenshot_count=0
+core_is_original=0
+core_is_2021=0
+
+xvfb_pid=""
+emu_pid=""
+
+terminate_pid() {
+  local pid="$1"
+  [[ -z "$pid" ]] && return 0
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
+}
+
+cleanup() {
+  terminate_pid "$emu_pid"
+  terminate_pid "$xvfb_pid"
+}
+trap cleanup EXIT
 
 emit_metrics() {
-  local score
-  score=$(( build_ok * 40 + boot_alive * 20 + window_found * 10 + boot_progress * 10 + disk_activity * 10 + dump_activity * 5 + window_nonsolid * 5 - crash_count * CRASH_PENALTY ))
-  echo "METRIC control_boot_score=$score"
+  local stage_coverage_score=0
+  (( stage_coverage_score += reset_seen * 15 ))
+  (( stage_coverage_score += (clknomem_calls > 0 ? 15 : 0) ))
+  (( stage_coverage_score += (intmask_transition_count > 0 ? 15 : 0) ))
+  (( stage_coverage_score += patch_boot_globs_seen * 15 ))
+  (( stage_coverage_score += checkload_seen * 15 ))
+  (( stage_coverage_score += video_interrupt_seen * 15 ))
+  (( stage_coverage_score += framebuffer_write_seen * 10 ))
+
+  echo "METRIC stage_coverage_score=$stage_coverage_score"
   echo "METRIC build_ok=$build_ok"
   echo "METRIC boot_alive=$boot_alive"
-  echo "METRIC window_found=$window_found"
-  echo "METRIC boot_progress=$boot_progress"
-  echo "METRIC disk_activity=$disk_activity"
-  echo "METRIC dump_activity=$dump_activity"
-  echo "METRIC window_nonsolid=$window_nonsolid"
-  echo "METRIC boot_steps_seen=$boot_steps_seen"
-  echo "METRIC png_dump_count=$png_dump_count"
-  echo "METRIC dump_signal_seen=$dump_signal_seen"
-  echo "METRIC dump_attempt_seen=$dump_attempt_seen"
-  echo "METRIC dump_save_seen=$dump_save_seen"
-  echo "METRIC crash_count=$crash_count"
+  echo "METRIC reset_seen=$reset_seen"
+  echo "METRIC clknomem_calls=$clknomem_calls"
+  echo "METRIC intmask_transition_count=$intmask_transition_count"
+  echo "METRIC patch_boot_globs_seen=$patch_boot_globs_seen"
+  echo "METRIC checkload_seen=$checkload_seen"
+  echo "METRIC video_interrupt_seen=$video_interrupt_seen"
+  echo "METRIC framebuffer_write_seen=$framebuffer_write_seen"
+  echo "METRIC screenshot_count=$screenshot_count"
+  echo "METRIC core_is_original=$core_is_original"
+  echo "METRIC core_is_2021=$core_is_2021"
   echo "ARTIFACT_DIR $OUTDIR"
 }
 
 pick_display() {
   local n
-  for n in $(seq 99 180); do
+  for n in $(seq 99 199); do
     if [[ ! -e "/tmp/.X${n}-lock" && ! -S "/tmp/.X11-unix/X${n}" ]]; then
       echo ":$n"
       return 0
@@ -56,149 +90,56 @@ pick_display() {
   echo ":199"
 }
 
-is_nonsolid_xwd() {
-  local xwd_file="$1"
-  local stats_file="$2"
+build_reference_configure() {
+  (
+    cd "$UNIX_DIR"
+    make distclean >"$OUTDIR/make-distclean.log" 2>&1 || make clean >"$OUTDIR/make-clean.log" 2>&1 || true
 
-  python3 - "$xwd_file" "$stats_file" <<'PY'
-import struct
-import sys
-from pathlib import Path
-
-xwd_path = Path(sys.argv[1])
-stats_path = Path(sys.argv[2])
-
-if not xwd_path.exists() or xwd_path.stat().st_size < 100:
-    stats_path.write_text("error=missing_or_too_small\n")
-    print(0)
-    raise SystemExit
-
-data = xwd_path.read_bytes()
-hdr = struct.unpack('>25I', data[:100])
-header_size = hdr[0]
-width = hdr[4]
-height = hdr[5]
-byte_order = hdr[7]
-bits_per_pixel = hdr[11]
-bytes_per_line = hdr[12]
-red_mask = hdr[14]
-green_mask = hdr[15]
-blue_mask = hdr[16]
-ncolors = hdr[19]
-bytes_per_pixel = max(1, (bits_per_pixel + 7) // 8)
-pixels = data[header_size + ncolors * 12:]
-
-if width <= 0 or height <= 0 or len(pixels) < bytes_per_line * height:
-    stats_path.write_text(
-        f"width={width}\nheight={height}\nerror=invalid_geometry_or_pixel_data\n"
-    )
-    print(0)
-    raise SystemExit
-
-x0 = width // 10
-x1 = max(x0 + 1, width - width // 10)
-y0 = height // 10
-y1 = max(y0 + 1, height - height // 10)
-step_x = max(1, (x1 - x0) // 80)
-step_y = max(1, (y1 - y0) // 80)
-
-def extract_component(pixel, mask):
-    if mask == 0:
-        return 0
-    shift = (mask & -mask).bit_length() - 1
-    value = (pixel & mask) >> shift
-    maxv = mask >> shift
-    if maxv <= 0:
-        return 0
-    return int(round(value * 255 / maxv))
-
-unique = set()
-y_min = 255
-max_y = 0
-nonblack = 0
-sampled = 0
-endian = 'little' if byte_order == 0 else 'big'
-
-for y in range(y0, y1, step_y):
-    row = pixels[y * bytes_per_line:(y + 1) * bytes_per_line]
-    for x in range(x0, x1, step_x):
-        off = x * bytes_per_pixel
-        chunk = row[off:off + bytes_per_pixel]
-        if len(chunk) < bytes_per_pixel:
-            continue
-        pixel = int.from_bytes(chunk[:min(4, len(chunk))], endian)
-        r = extract_component(pixel, red_mask)
-        g = extract_component(pixel, green_mask)
-        b = extract_component(pixel, blue_mask)
-        unique.add((r, g, b))
-        lum = int(round((r + g + b) / 3))
-        y_min = min(y_min, lum)
-        max_y = max(max_y, lum)
-        if lum > 3:
-            nonblack += 1
-        sampled += 1
-
-if sampled == 0:
-    stats_path.write_text("error=no_samples\n")
-    print(0)
-    raise SystemExit
-
-y_range = max_y - y_min
-nonblack_frac = nonblack / sampled
-unique_colors = len(unique)
-nonsolid = int(unique_colors >= 2 and (y_range >= 4 or nonblack_frac >= 0.02))
-
-stats_path.write_text(
-    f"width={width}\n"
-    f"height={height}\n"
-    f"bits_per_pixel={bits_per_pixel}\n"
-    f"bytes_per_pixel={bytes_per_pixel}\n"
-    f"sampled={sampled}\n"
-    f"y_min={y_min}\n"
-    f"y_max={max_y}\n"
-    f"y_range={y_range}\n"
-    f"nonblack_frac={nonblack_frac:.6f}\n"
-    f"unique_colors={unique_colors}\n"
-    f"nonsolid={nonsolid}\n"
-)
-print(nonsolid)
-PY
-}
-
-is_crash() {
-  local exit_code="$1"
-  local log_file="$2"
-
-  if [[ "$exit_code" -eq 134 || "$exit_code" -eq 139 ]]; then
-    return 0
-  fi
-
-  if [[ "$exit_code" -ge 128 ]]; then
-    local sig=$((exit_code - 128))
-    if [[ "$sig" -eq 6 || "$sig" -eq 11 ]]; then
-      return 0
+    if [[ ! -x "./configure" || "./configure.ac" -nt "./configure" ]]; then
+      NO_CONFIGURE=1 ./autogen.sh >"$OUTDIR/autogen.log" 2>&1
     fi
-  fi
 
-  if [[ -f "$log_file" ]] && rg -q "Segmentation fault|SIGSEGV|Aborted|SIGABRT|Assertion .* failed|core dumped" "$log_file"; then
-    return 0
-  fi
+    configure_basilisk() {
+      local framework_flag="$1"
+      local log_file="$2"
+      ./configure \
+        --enable-sdl-audio \
+        "$framework_flag" \
+        --enable-sdl-video \
+        --disable-vosf \
+        --without-mon \
+        --without-esd \
+        --without-gtk \
+        --disable-jit-compiler \
+        "$CORE_CONFIG_ARG" \
+        >"$log_file" 2>&1
+    }
 
-  return 1
+    configure_basilisk --enable-sdl-framework "$OUTDIR/configure.log"
+
+    if ! make -j"$(nproc)" >"$OUTDIR/make.log" 2>&1; then
+      if rg -q 'cc1obj|SDLMain\.m' "$OUTDIR/make.log"; then
+        echo "fallback_disable_sdl_framework=1" >"$OUTDIR/build_fallback.env"
+        make distclean >"$OUTDIR/make-distclean-fallback.log" 2>&1 || make clean >"$OUTDIR/make-clean-fallback.log" 2>&1 || true
+        configure_basilisk --disable-sdl-framework "$OUTDIR/configure-fallback.log"
+        make -j"$(nproc)" >"$OUTDIR/make-fallback.log" 2>&1
+      else
+        return 1
+      fi
+    fi
+  )
 }
 
-run_control() {
-  local run_dir="$OUTDIR/control"
-  mkdir -p "$run_dir/home" "$run_dir/xdg"
-
-  local display xvfb_pid emu_pid win_id="" survived=0 exit_code=0
+run_under_xvfb() {
+  local display
+  local emu_wait_rc=0
   display="$(pick_display)"
 
-  Xvfb "$display" -screen 0 1152x870x24 >"$run_dir/xvfb.log" 2>&1 &
+  Xvfb "$display" -screen 0 1152x870x24 >"$RUN_DIR/xvfb.log" 2>&1 &
   xvfb_pid=$!
   sleep 1
 
-  cat >"$run_dir/prefs" <<EOF
+  cat >"$RUN_DIR/prefs" <<EOF
 rom $ROM_PATH
 disk $DISK_PATH
 bootdrive 0
@@ -218,154 +159,106 @@ nocdrom true
 nogui false
 EOF
 
-  HOME="$run_dir/home" \
-  XDG_CONFIG_HOME="$run_dir/xdg" \
+  HOME="$RUN_DIR/home" \
+  XDG_CONFIG_HOME="$RUN_DIR/xdg" \
   DISPLAY="$display" \
-  B2_DUMP_DIR="$run_dir" \
-  B2_DUMP_ON_VIDEO_INIT=1 \
-  stdbuf -oL -eL "$UNIX_DIR/BasiliskII" --config "$run_dir/prefs" \
-    >"$run_dir/basilisk.log" 2>&1 &
+  stdbuf -oL -eL "$UNIX_DIR/BasiliskII" --config "$RUN_DIR/prefs" \
+    >"$RUN_DIR/basilisk.log" 2>&1 &
   emu_pid=$!
 
-  local start_epoch now i
-  local -a dump_times=(5 10 15 19)
-  local next_dump_index=0
-  : >"$run_dir/dump_signal_events.log"
-  start_epoch="$(date +%s)"
-
-  for i in $(seq 1 20); do
-    if ! kill -0 "$emu_pid" 2>/dev/null; then
-      break
-    fi
-    DISPLAY="$display" xwininfo -root -tree >"$run_dir/xwin_tree.txt" 2>"$run_dir/xwininfo.err" || true
-    win_id="$(awk '/BasiliskII/ {print $1; exit}' "$run_dir/xwin_tree.txt")"
-    if [[ -n "$win_id" ]]; then
-      window_found=1
-      break
-    fi
-    sleep 0.5
-  done
-
+  local start now
+  start="$(date +%s)"
   while true; do
     now="$(date +%s)"
-    if (( now - start_epoch >= 20 )); then
+    if (( now - start >= 20 )); then
+      boot_alive=1
       break
     fi
     if ! kill -0 "$emu_pid" 2>/dev/null; then
       break
-    fi
-
-    local elapsed=$(( now - start_epoch ))
-    if (( next_dump_index < ${#dump_times[@]} )) && (( elapsed >= dump_times[next_dump_index] )); then
-      if kill -USR2 "$emu_pid" 2>/dev/null; then
-        printf 'elapsed=%s signal=USR2 status=sent\n' "$elapsed" >>"$run_dir/dump_signal_events.log"
-      else
-        printf 'elapsed=%s signal=USR2 status=failed\n' "$elapsed" >>"$run_dir/dump_signal_events.log"
-      fi
-      next_dump_index=$((next_dump_index + 1))
     fi
     sleep 1
   done
 
-  DISPLAY="$display" xwininfo -root -tree >"$run_dir/xwin_tree_final.txt" 2>"$run_dir/xwininfo_final.err" || true
-  if [[ -z "$win_id" ]]; then
-    win_id="$(awk '/BasiliskII/ {print $1; exit}' "$run_dir/xwin_tree_final.txt")"
-    if [[ -n "$win_id" ]]; then
-      window_found=1
-    fi
-  fi
-
-  DISPLAY="$display" xwd -silent -root -out "$run_dir/root.xwd" >"$run_dir/xwd_root.log" 2>&1 || true
-  if (( window_found == 1 )); then
-    echo "$win_id" >"$run_dir/window.id"
-    DISPLAY="$display" xwd -silent -id "$win_id" -out "$run_dir/window.xwd" >"$run_dir/xwd_window.log" 2>&1 || true
-  fi
-
+  # Dismiss any startup dialog (e.g. "improper shutdown") by sending Return.
   if kill -0 "$emu_pid" 2>/dev/null; then
-    survived=1
-    kill "$emu_pid" 2>/dev/null || true
-    for _ in $(seq 1 30); do
-      if ! kill -0 "$emu_pid" 2>/dev/null; then
-        break
-      fi
-      sleep 0.1
-    done
-    if kill -0 "$emu_pid" 2>/dev/null; then
-      kill -KILL "$emu_pid" 2>/dev/null || true
-    fi
+    DISPLAY="$display" xdotool key Return 2>/dev/null || true
+    sleep 3
+    DISPLAY="$display" xdotool key Return 2>/dev/null || true
+    sleep 5
   fi
+
+  DISPLAY="$display" xwininfo -root -tree >"$RUN_DIR/xwin_tree.txt" 2>"$RUN_DIR/xwin_tree.err" || true
+  DISPLAY="$display" xwd -silent -root -out "$RUN_DIR/root.xwd" >"$RUN_DIR/root_xwd.log" 2>&1 || true
+
+  local win_id=""
+  win_id="$(awk '/BasiliskII/ {print $1; exit}' "$RUN_DIR/xwin_tree.txt" || true)"
+  if [[ -n "$win_id" ]]; then
+    DISPLAY="$display" xwd -silent -id "$win_id" -out "$RUN_DIR/window.xwd" >"$RUN_DIR/window_xwd.log" 2>&1 || true
+  fi
+
+  screenshot_count="$(find "$RUN_DIR" -maxdepth 1 -name '*.xwd' | wc -l | awk '{print $1}')"
+
+  terminate_pid "$emu_pid"
 
   set +e
   wait "$emu_pid" 2>/dev/null
-  exit_code=$?
+  emu_wait_rc=$?
   set -e
+  emu_pid=""
 
-  kill "$xvfb_pid" 2>/dev/null || true
+  local term_sig=$((emu_wait_rc - 128))
+  if (( term_sig == 6 || term_sig == 11 )); then
+    {
+      echo "wait_rc=$emu_wait_rc"
+      echo "signal=$term_sig"
+      date -u '+utc=%Y-%m-%dT%H:%M:%SZ'
+    } >"$RUN_DIR/crash.meta"
+    tail -n 200 "$RUN_DIR/basilisk.log" >"$RUN_DIR/crash.log.tail" || true
+  fi
+
+  terminate_pid "$xvfb_pid"
   wait "$xvfb_pid" 2>/dev/null || true
-
-  if (( survived == 1 )); then
-    boot_alive=1
-  fi
-
-  boot_steps_seen="$(rg -c '^BOOT ' "$run_dir/basilisk.log" || true)"
-  if [[ -z "$boot_steps_seen" ]]; then
-    boot_steps_seen=0
-  fi
-  if (( boot_steps_seen >= 6 )); then
-    boot_progress=1
-  fi
-
-  if rg -q 'DiskOpen|disk inserted|mounting drive|HFS partition found|SCSI' "$run_dir/basilisk.log"; then
-    disk_activity=1
-  fi
-
-  png_dump_count="$(find "$run_dir" -maxdepth 1 -name 'basiliskii-frame-*.png' | wc -l | awk '{print $1}')"
-  if [[ -z "$png_dump_count" ]]; then
-    png_dump_count=0
-  fi
-  if (( png_dump_count > 0 )); then
-    dump_activity=1
-  fi
-
-  if rg -q 'BOOT dump: SIGUSR2 received' "$run_dir/basilisk.log"; then
-    dump_signal_seen=1
-  fi
-  if rg -q 'BOOT dump: handling request' "$run_dir/basilisk.log"; then
-    dump_attempt_seen=1
-  fi
-  if rg -q 'BOOT dump: saved ' "$run_dir/basilisk.log"; then
-    dump_save_seen=1
-  fi
-
-  if [[ -f "$run_dir/window.xwd" ]]; then
-    window_nonsolid="$(is_nonsolid_xwd "$run_dir/window.xwd" "$run_dir/window.analysis.txt")"
-  fi
-  if [[ -f "$run_dir/root.xwd" ]]; then
-    is_nonsolid_xwd "$run_dir/root.xwd" "$run_dir/root.analysis.txt" >"$run_dir/root.nonsolid" || true
-  fi
-
-  if is_crash "$exit_code" "$run_dir/basilisk.log"; then
-    crash_count=$((crash_count + 1))
-  fi
-
-  {
-    echo "display=$display"
-    echo "window_found=$window_found"
-    echo "boot_alive=$boot_alive"
-    echo "boot_progress=$boot_progress"
-    echo "disk_activity=$disk_activity"
-    echo "dump_activity=$dump_activity"
-    echo "window_nonsolid=$window_nonsolid"
-    echo "boot_steps_seen=$boot_steps_seen"
-    echo "png_dump_count=$png_dump_count"
-    echo "dump_signal_seen=$dump_signal_seen"
-    echo "dump_attempt_seen=$dump_attempt_seen"
-    echo "dump_save_seen=$dump_save_seen"
-    echo "exit_code=$exit_code"
-  } >"$run_dir/result.env"
+  xvfb_pid=""
 }
 
-for cmd in make Xvfb xwininfo xwd rg awk python3 stdbuf; do
+extract_milestones() {
+  local log="$RUN_DIR/basilisk.log"
+
+  if rg -q 'BOOT_STAGE RESET fired' "$log"; then
+    reset_seen=1
+  fi
+
+  local last_clk
+  last_clk="$(rg -o 'BOOT_STAGE CLKNOMEM count=[0-9]+' "$log" | awk -F= 'END{print $2}' || true)"
+  if [[ -n "$last_clk" ]]; then
+    clknomem_calls="$last_clk"
+  else
+    clknomem_calls="$(rg -c 'BOOT_STAGE CLKNOMEM' "$log" || true)"
+    clknomem_calls="${clknomem_calls:-0}"
+  fi
+
+  intmask_transition_count="$(rg -c 'BOOT_STAGE INTMASK transition' "$log" || true)"
+  intmask_transition_count="${intmask_transition_count:-0}"
+
+  if rg -q 'BOOT_STAGE PATCH_BOOT_GLOBS reached' "$log"; then
+    patch_boot_globs_seen=1
+  fi
+
+  if rg -q 'BOOT_STAGE CHECKLOAD reached' "$log"; then
+    checkload_seen=1
+  fi
+
+  if rg -q 'BOOT_STAGE VIDEOINT first' "$log"; then
+    video_interrupt_seen=1
+  fi
+
+  if rg -q 'BOOT_STAGE FRAMEBUFFER first_write' "$log"; then
+    framebuffer_write_seen=1
+  fi
+}
+
+for cmd in make Xvfb xwininfo xwd awk rg stdbuf; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "missing_command=$cmd" >"$OUTDIR/precheck.log"
     emit_metrics
@@ -385,24 +278,23 @@ if [[ ! -f "$ROM_PATH" || ! -f "$DISK_PATH" ]]; then
   exit 0
 fi
 
-if (
-  cd "$UNIX_DIR"
-  make distclean >"$OUTDIR/make-distclean.log" 2>&1 || make clean >"$OUTDIR/make-clean.log" 2>&1 || true
-  ac_cv_have_asm_extended_signals=yes ./configure \
-    --enable-sdl-video \
-    --disable-sdl-audio \
-    --disable-vosf \
-    --disable-jit-compiler \
-    --disable-xf86-dga \
-    --disable-xf86-vidmode \
-    --disable-fbdev-dga \
-    --without-mon \
-    --without-esd \
-    --without-gtk \
-    --disable-nls \
-    >"$OUTDIR/configure.log" 2>&1
-  make -j"$(nproc)" >"$OUTDIR/make.log" 2>&1
-); then
+case "$CORE_MODE" in
+  uae_cpu)
+    core_is_original=1
+    CORE_CONFIG_ARG="--with-uae-core=legacy"
+    ;;
+  uae_cpu_2021)
+    core_is_2021=1
+    CORE_CONFIG_ARG="--with-uae-core=2021"
+    ;;
+  *)
+    echo "invalid_core_mode=$CORE_MODE" >"$OUTDIR/invalid_core_mode.log"
+    emit_metrics
+    exit 0
+    ;;
+esac
+
+if build_reference_configure; then
   build_ok=1
 else
   build_ok=0
@@ -410,5 +302,6 @@ else
   exit 0
 fi
 
-run_control
+run_under_xvfb
+extract_milestones
 emit_metrics
