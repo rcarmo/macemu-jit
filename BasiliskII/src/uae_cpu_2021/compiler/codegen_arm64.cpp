@@ -514,7 +514,7 @@ STATIC_INLINE void compemu_raw_jmp_pc_tag(void)
 	LDRH_wXi(REG_WORK1, R_REGSTRUCT, idx);
 	idx = (uintptr)&regs.cache_tags - (uintptr)&regs;
 	LDR_xXi(REG_WORK2, R_REGSTRUCT, idx);
-	LDR_xXxLSLi(REG_WORK1, REG_WORK2, REG_WORK1, 1);
+	LDR_xXxLSLi(REG_WORK1, REG_WORK2, REG_WORK1, 3); // cacheline is 8 bytes (pointer) on AArch64
 	BR_x(REG_WORK1);
 }
 
