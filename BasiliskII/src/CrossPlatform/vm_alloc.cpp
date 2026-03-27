@@ -89,10 +89,10 @@ typedef unsigned long vm_uintptr_t;
 #define MAP_EXTRA_FLAGS (MAP_32BIT)
 #endif
 #ifdef HAVE_MMAP_VM
-#if (defined(__linux__) && defined(__i386__)) || defined(__sun__) || defined(__FreeBSD__) || defined(__NetBSD__) || HAVE_LINKER_SCRIPT
-/* Force a reasonnable address below 0x80000000 on x86 so that we
-   don't get addresses above when the program is run on AMD64.
-   NOTE: this is empirically determined on Linux/x86.  */
+#if (defined(__linux__) && (defined(__i386__) || defined(__aarch64__))) || defined(__sun__) || defined(__FreeBSD__) || defined(__NetBSD__) || HAVE_LINKER_SCRIPT
+/* Force a reasonable low hint address so first mappings preferentially land
+   below 4GB. This is required on AArch64 where JIT still has some 32-bit
+   pointer assumptions in hot paths. */
 #define MAP_BASE	0x10000000
 #else
 #define MAP_BASE	0x00000000

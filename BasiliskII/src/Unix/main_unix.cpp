@@ -256,22 +256,11 @@ char *strdup(const char *s)
  */
 
 // NOTE: VM_MAP_32BIT is only needed for legacy 32-bit-clean assumptions.
-// Experimental AArch64 JIT uses 64-bit host pointers, so forcing low-4GB
-// RAM/ROM mappings can fail unnecessarily on aarch64 hosts.
+// On AArch64, MAP_32BIT is not available and forcing MAP_FIXED here breaks
+// the allocator's reserved-pool setup used by vm_acquire_reserved().
 void *vm_acquire_mac(size_t size)
 {
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	// AArch64: MAP_32BIT is x86-only. Use MAP_FIXED at a low address
-	// to keep host pointers within 32 bits (required for JIT which uses
-	// 32-bit register operations on pc_p).
-	static uintptr next_fixed_addr = 0x10000000; // 256MB, well within 32-bit range
-	void *hint = (void *)next_fixed_addr;
-	int rc = vm_acquire_fixed(hint, size);
-	if (rc == 0) {
-		next_fixed_addr += (size + 0xfff) & ~0xfffUL; // advance for next allocation
-		return hint;
-	}
-	fprintf(stderr, "vm_acquire_mac: fixed low mapping at %p failed for %zu bytes, trying default\n", hint, size);
 	return vm_acquire(size, VM_MAP_DEFAULT);
 #else
 	return vm_acquire(size, VM_MAP_DEFAULT | VM_MAP_32BIT);

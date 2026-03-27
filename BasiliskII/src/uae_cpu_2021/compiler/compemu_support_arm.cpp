@@ -1057,7 +1057,11 @@ T* LazyBlockAllocator<T>::acquire()
     if (!mChunks) {
         // There is no chunk left, allocate a new pool and link the
         // chunks into the free list
+#if defined(CPU_AARCH64)
+		Pool * newPool = (Pool *)vm_acquire(sizeof(Pool), VM_MAP_DEFAULT);
+#else
 		Pool * newPool = (Pool *)vm_acquire(sizeof(Pool), VM_MAP_DEFAULT | VM_MAP_32BIT);
+#endif
 		if (newPool == VM_MAP_FAILED) {
 			jit_abort("Could not allocate block pool!\n");
         }
