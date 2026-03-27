@@ -10,6 +10,7 @@ CORE_MODE="${B2_CPU_CORE_MODE:-uae_cpu}"
 CORE_CONFIG_ARG=""
 JIT_PREF="${B2_JIT_PREF:-false}"
 AARCH64_JIT_EXPERIMENTAL="${B2_ENABLE_AARCH64_JIT_EXPERIMENTAL:-false}"
+RUN_SECONDS="${B2_RUN_SECONDS:-20}"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 OUTDIR="/workspace/tmp/autoresearch-boot-divergence-$TS"
@@ -71,7 +72,7 @@ emit_metrics() {
   stage_coverage_score=$((stage_coverage_score + video_interrupt_seen * 15))
   stage_coverage_score=$((stage_coverage_score + framebuffer_write_seen * 10))
 
-  local jit_alive_sec=$((boot_alive * 20))
+  local jit_alive_sec=$((boot_alive * RUN_SECONDS))
   local lowaddr_score=$((boot_alive * 40 + mac_ram_low32 * 30 + jit_code_low32 * 30))
 
   echo "METRIC jit_alive_sec=$jit_alive_sec"
@@ -193,7 +194,7 @@ EOF
   start="$(date +%s)"
   while true; do
     now="$(date +%s)"
-    if (( now - start >= 20 )); then
+    if (( now - start >= RUN_SECONDS )); then
       boot_alive=1
       break
     fi
