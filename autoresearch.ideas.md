@@ -1,8 +1,4 @@
-- Be careful about incremental-build false positives: when experiments touch the imported ARM support path, `make` may not rebuild generated JIT objects that include it transitively. Before trusting a `jit=true` bring-up result, force regeneration/recompilation of `compemu.cpp`-based objects or reconcile the broader missing helper API that appears on a real rebuild.
-- The next honest build blocker is the clean ARM64 `compemu.cpp` helper surface. Attack it in layers:
-  - Layer 1 (attempted once; reapply if needed): straightforward legacy wrappers for `start/end_needflags`, `add/sub/and/or/xor`, `cmp_*`, `test_*`, `mov_[bw]_rr`, and `zero/sign_extend_*`.
-  - Layer 2 (current frontier): the more x86-shaped helpers `bt*`, `sbb_*`, `adc_*`, `setcc`, `cmov_l_rr`, `mov_[lw]_[rR|Rr]`, `mid_bswap_*`, rotate/shift wrappers, and `imul_32_32` / `imul_64_32` / `mul_64_32`.
-- Once the clean-build helper layer is in place, retry `build_comp()` with real Prefs synchronization at the actual first-use point as well as `compiler_init()`. The late path is now useful because it exposed a concrete next blocker.
-- The latest concrete runtime blocker after lazy first-use bring-up is ARM64 code allocation for popallspace: `jit_on` now aborts with `Could not allocate popallspace!`, which points at the forced `VM_MAP_32BIT` path in `do_alloc_code()`/popall allocation rather than the earlier opaque null dispatcher crash.
-- If `jit=true` still crashes after the popall/code allocation fix, capture a fresh backtrace and re-check whether `pushall_call_handler` / popall stubs are built before `m68k_do_compile_execute()` enters compiled execution.
-- After `on_alive` improves, revisit capture/render validation for `off_nonsolid` / `on_nonsolid` using a real XWD parser path rather than the broken `ffmpeg -f xwd` fallback.
+- If low-hint mmap is not reliably honored on this kernel, try a bounded low-address probe loop using `MAP_FIXED_NOREPLACE` (never `MAP_FIXED`) and fall back cleanly.
+- Add a lightweight startup log (ARM64-only) that prints RAM/ROM host addresses once, then remove after allocator behavior is stable.
+- If `pc_p` still truncates even with low mappings, audit remaining 32-bit ALU paths in `compemu_midfunc_arm64.cpp` for mixed-width updates not yet guarded by `pc_p/pc_oldp` checks.
+- If block pool alloc still fails intermittently, gate `VM_MAP_32BIT` usage out of ARM64-only JIT allocators (pool/cache helper paths) and rely on low reservation + address-range checks.

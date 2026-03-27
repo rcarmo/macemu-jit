@@ -8,6 +8,8 @@ ROM_PATH="/workspace/fixtures/basilisk/images/Quadra800.ROM"
 DISK_PATH="/workspace/fixtures/basilisk/images/HD200MB"
 CORE_MODE="${B2_CPU_CORE_MODE:-uae_cpu}"
 CORE_CONFIG_ARG=""
+JIT_PREF="${B2_JIT_PREF:-false}"
+AARCH64_JIT_EXPERIMENTAL="${B2_ENABLE_AARCH64_JIT_EXPERIMENTAL:-false}"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 OUTDIR="/workspace/tmp/autoresearch-boot-divergence-$TS"
@@ -26,6 +28,10 @@ framebuffer_write_seen=0
 screenshot_count=0
 core_is_original=0
 core_is_2021=0
+reserved_assert=0
+popall_alloc_fail=0
+block_pool_fail=0
+jit_high_addr_warn=0
 
 xvfb_pid=""
 emu_pid=""
@@ -55,14 +61,17 @@ trap cleanup EXIT
 
 emit_metrics() {
   local stage_coverage_score=0
-  (( stage_coverage_score += reset_seen * 15 ))
-  (( stage_coverage_score += (clknomem_calls > 0 ? 15 : 0) ))
-  (( stage_coverage_score += (intmask_transition_count > 0 ? 15 : 0) ))
-  (( stage_coverage_score += patch_boot_globs_seen * 15 ))
-  (( stage_coverage_score += checkload_seen * 15 ))
-  (( stage_coverage_score += video_interrupt_seen * 15 ))
-  (( stage_coverage_score += framebuffer_write_seen * 10 ))
+  stage_coverage_score=$((stage_coverage_score + reset_seen * 15))
+  stage_coverage_score=$((stage_coverage_score + (clknomem_calls > 0 ? 15 : 0)))
+  stage_coverage_score=$((stage_coverage_score + (intmask_transition_count > 0 ? 15 : 0)))
+  stage_coverage_score=$((stage_coverage_score + patch_boot_globs_seen * 15))
+  stage_coverage_score=$((stage_coverage_score + checkload_seen * 15))
+  stage_coverage_score=$((stage_coverage_score + video_interrupt_seen * 15))
+  stage_coverage_score=$((stage_coverage_score + framebuffer_write_seen * 10))
 
+  local jit_alive_sec=$((boot_alive * 20))
+
+  echo "METRIC jit_alive_sec=$jit_alive_sec"
   echo "METRIC stage_coverage_score=$stage_coverage_score"
   echo "METRIC build_ok=$build_ok"
   echo "METRIC boot_alive=$boot_alive"
@@ -76,6 +85,10 @@ emit_metrics() {
   echo "METRIC screenshot_count=$screenshot_count"
   echo "METRIC core_is_original=$core_is_original"
   echo "METRIC core_is_2021=$core_is_2021"
+  echo "METRIC reserved_assert=$reserved_assert"
+  echo "METRIC popall_alloc_fail=$popall_alloc_fail"
+  echo "METRIC block_pool_fail=$block_pool_fail"
+  echo "METRIC jit_high_addr_warn=$jit_high_addr_warn"
   echo "ARTIFACT_DIR $OUTDIR"
 }
 
@@ -102,6 +115,10 @@ build_reference_configure() {
     configure_basilisk() {
       local framework_flag="$1"
       local log_file="$2"
+      local jit_flag="--disable-jit-compiler"
+      if [[ "$AARCH64_JIT_EXPERIMENTAL" == "true" ]]; then
+        jit_flag="--enable-aarch64-jit-experimental"
+      fi
       ./configure \
         --enable-sdl-audio \
         "$framework_flag" \
@@ -110,7 +127,7 @@ build_reference_configure() {
         --without-mon \
         --without-esd \
         --without-gtk \
-        --disable-jit-compiler \
+        "$jit_flag" \
         "$CORE_CONFIG_ARG" \
         >"$log_file" 2>&1
     }
@@ -149,7 +166,7 @@ frameskip 0
 modelid 14
 cpu 4
 fpu true
-jit false
+jit $JIT_PREF
 jitfpu false
 screen win/640/480
 displaycolordepth 8
@@ -256,6 +273,15 @@ extract_milestones() {
   if rg -q 'BOOT_STAGE FRAMEBUFFER first_write' "$log"; then
     framebuffer_write_seen=1
   fi
+
+  reserved_assert="$(rg -c 'reserved_buf && size <= RESERVED_SIZE' "$log" || true)"
+  reserved_assert="${reserved_assert:-0}"
+  popall_alloc_fail="$(rg -c 'Could not allocate popallspace' "$log" || true)"
+  popall_alloc_fail="${popall_alloc_fail:-0}"
+  block_pool_fail="$(rg -c 'Could not allocate block pool' "$log" || true)"
+  block_pool_fail="${block_pool_fail:-0}"
+  jit_high_addr_warn="$(rg -c 'allocated above 32-bit boundary' "$log" || true)"
+  jit_high_addr_warn="${jit_high_addr_warn:-0}"
 }
 
 for cmd in make Xvfb xwininfo xwd awk rg stdbuf; do
