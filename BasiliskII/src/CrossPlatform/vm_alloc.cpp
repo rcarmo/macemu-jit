@@ -306,17 +306,7 @@ static void *vm_acquire_internal(size_t size, int options)
 #ifdef __aarch64__
 	const bool had_reserved_buf = reserved_buf != NULL;
 	const size_t alloc_size = had_reserved_buf ? size : size + RESERVED_SIZE;
-#if defined(__linux__) && defined(MAP_FIXED_NOREPLACE)
-	if (!had_reserved_buf) {
-		addr = mmap_low_4gb_noreplace(alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd);
-		if (addr == (void *)MAP_FAILED)
-			addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
-	} else {
-		addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
-	}
-#else
 	addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
-#endif
 	if (addr == (void *)MAP_FAILED)
 		return VM_MAP_FAILED;
 	if (!had_reserved_buf)
