@@ -260,11 +260,14 @@ char *strdup(const char *s)
 // RAM/ROM mappings can fail unnecessarily on aarch64 hosts.
 void *vm_acquire_mac(size_t size)
 {
-#if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	return vm_acquire(size, VM_MAP_DEFAULT);
-#else
-	return vm_acquire(size, VM_MAP_DEFAULT | VM_MAP_32BIT);
-#endif
+	// Try low-4GB mapping first (required for JIT which uses 32-bit pointers).
+	// Fall back to default if MAP_32BIT isn't available or fails.
+	void *addr = vm_acquire(size, VM_MAP_DEFAULT | VM_MAP_32BIT);
+	if (addr == VM_MAP_FAILED) {
+		fprintf(stderr, "vm_acquire_mac: 32-bit mapping failed for %zu bytes, trying default\n", size);
+		addr = vm_acquire(size, VM_MAP_DEFAULT);
+	}
+	return addr;
 }
 
 #if REAL_ADDRESSING
