@@ -51,9 +51,10 @@ Goal: preserve allocator invariants while biasing the initial reservation into l
 - `MAP_FIXED` low-address RAM mapping in `vm_acquire_mac()`: caused `vm_acquire_reserved` assertion (confirmed).
 - **Kept fix set:**
   - `main_unix.cpp`: AArch64 `vm_acquire_mac()` now uses normal `vm_acquire()` (no fixed mapping bypass).
-  - `vm_alloc.cpp`: AArch64 path uses low `MAP_BASE`, probes low-4GB first reservation with `MAP_FIXED_NOREPLACE` (fallback to normal hint), and advances `next_address` by full allocated span (`size + RESERVED_SIZE` on first reservation) so JIT allocations do not collide with reserved framebuffer slice.
+  - `vm_alloc.cpp`: AArch64 path uses low `MAP_BASE` and advances `next_address` by full allocated span (`size + RESERVED_SIZE` on first reservation) so JIT allocations do not collide with reserved framebuffer slice.
   - `compemu_support_arm.cpp`: ARM64 block pool allocation avoids `VM_MAP_32BIT` option bit to prevent allocator sanity-check failures.
 - **Validation signal:** repeated JIT=true runs hit `lowaddr_score=100`, `reserved_assert=0`, `mac_ram_low32=1`, `jit_code_low32=1`.
+- `MAP_FIXED_NOREPLACE` reservation probing was trialed as a hardening step; later removed for simplicity after consecutive stable low-address runs with the hint+ordering fix.
 - **Rejected simplifications:**
   - Removing ARM64 block-pool `VM_MAP_32BIT` gate rollback test failed with `block_pool_fail=1` and `jit_alive_sec=0`.
   - Reverting `next_address` advancement to `+size` regressed `jit_code_low32` to `0`.
