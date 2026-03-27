@@ -72,8 +72,10 @@ emit_metrics() {
   stage_coverage_score=$((stage_coverage_score + framebuffer_write_seen * 10))
 
   local jit_alive_sec=$((boot_alive * 20))
+  local lowaddr_score=$((boot_alive * 40 + mac_ram_low32 * 30 + jit_code_low32 * 30))
 
   echo "METRIC jit_alive_sec=$jit_alive_sec"
+  echo "METRIC lowaddr_score=$lowaddr_score"
   echo "METRIC stage_coverage_score=$stage_coverage_score"
   echo "METRIC build_ok=$build_ok"
   echo "METRIC boot_alive=$boot_alive"

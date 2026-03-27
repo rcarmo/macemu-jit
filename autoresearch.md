@@ -10,9 +10,11 @@ Current failure signature is an allocator mismatch:
 Goal: preserve allocator invariants while biasing the initial reservation into low address space.
 
 ## Metrics
-- **Primary**: `jit_alive_sec` (s, higher is better)
-  - `20` means process stayed alive for the full 20s run window.
+- **Primary**: `lowaddr_score` (higher is better)
+  - `40 * boot_alive + 30 * mac_ram_low32 + 30 * jit_code_low32`
+  - 100 means alive run with both RAM and JIT code mapped below 4GB.
 - **Secondary**:
+  - `jit_alive_sec`
   - `build_ok`
   - `boot_alive`
   - `reserved_assert`
