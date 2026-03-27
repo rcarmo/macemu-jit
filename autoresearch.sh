@@ -33,6 +33,7 @@ popall_alloc_fail=0
 block_pool_fail=0
 jit_high_addr_warn=0
 mac_ram_low32=0
+jit_code_low32=0
 
 xvfb_pid=""
 emu_pid=""
@@ -91,6 +92,7 @@ emit_metrics() {
   echo "METRIC block_pool_fail=$block_pool_fail"
   echo "METRIC jit_high_addr_warn=$jit_high_addr_warn"
   echo "METRIC mac_ram_low32=$mac_ram_low32"
+  echo "METRIC jit_code_low32=$jit_code_low32"
   echo "ARTIFACT_DIR $OUTDIR"
 }
 
@@ -290,6 +292,13 @@ extract_milestones() {
   ram_addr_hex="${ram_addr_hex#0x}"
   if [[ -n "$ram_addr_hex" && ${#ram_addr_hex} -le 8 ]]; then
     mac_ram_low32=1
+  fi
+
+  local jit_code_addr_hex=""
+  jit_code_addr_hex="$(rg -o 'allocation at 0x[0-9a-fA-F]+' "$log" | awk 'NR==1 {print $3; exit}' || true)"
+  jit_code_addr_hex="${jit_code_addr_hex#0x}"
+  if [[ -n "$jit_code_addr_hex" && ${#jit_code_addr_hex} -le 8 ]]; then
+    jit_code_low32=1
   fi
 }
 

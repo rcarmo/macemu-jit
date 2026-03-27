@@ -20,6 +20,7 @@ Goal: preserve allocator invariants while biasing the initial reservation into l
   - `block_pool_fail`
   - `jit_high_addr_warn`
   - `mac_ram_low32`
+  - `jit_code_low32`
   - `stage_coverage_score`
 
 ## How to Run
