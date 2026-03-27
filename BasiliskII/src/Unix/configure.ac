@@ -1772,11 +1772,13 @@ elif [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_AARCH64" = "xyes" ]]; then
     ASM_OPTIMIZATIONS="AArch64"
     DEFINES="$DEFINES -DAARCH64_ASSEMBLY"
 
-    dnl NOTE: avoid OPTIMIZED_FLAGS on AArch64 for now; the legacy flag-macro
-    dnl assumptions diverge from the 2021 core behavior and can break early boot.
+    dnl NOTE: OPTIMIZED_FLAGS is needed by the AArch64 JIT backend
+    dnl (codegen_arm64.cpp / compemu_support_arm.cpp reference regflags.nzcv).
+    dnl Only enable it when the JIT is explicitly requested.
 
     dnl AArch64 JIT is experimental and intentionally opt-in.
     if [[ "x$WANT_AARCH64_JIT_EXPERIMENTAL" = "xyes" ]]; then
+      DEFINES="$DEFINES -DOPTIMIZED_FLAGS"
       JITSRCS="cpuemu1_nf.cpp cpuemu2_nf.cpp cpuemu3_nf.cpp cpuemu4_nf.cpp cpuemu5_nf.cpp cpuemu6_nf.cpp cpuemu7_nf.cpp cpuemu8_nf.cpp $JITSRCS"
       CAN_JIT=yes
     fi
@@ -2114,7 +2116,7 @@ echo Running m68k code natively ............. : $WANT_NATIVE_M68K
 echo Use JIT compiler ....................... : $WANT_JIT
 echo Experimental ARM JIT toggle ........... : $WANT_ARM_JIT_EXPERIMENTAL
 echo Experimental AArch64 JIT toggle ....... : $WANT_AARCH64_JIT_EXPERIMENTAL
-echo Selected UAE CPU core ................. : $WANT_UAE_CORE ($UAE_PATH)
+echo "Selected UAE CPU core ................. : $WANT_UAE_CORE ($UAE_PATH)"
 echo JIT debug mode ......................... : $WANT_JIT_DEBUG
 echo Floating-Point emulation core .......... : $FPE_CORE
 echo Assembly optimizations ................. : $ASM_OPTIMIZATIONS
