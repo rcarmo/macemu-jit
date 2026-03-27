@@ -32,6 +32,7 @@ reserved_assert=0
 popall_alloc_fail=0
 block_pool_fail=0
 jit_high_addr_warn=0
+mac_ram_low32=0
 
 xvfb_pid=""
 emu_pid=""
@@ -89,6 +90,7 @@ emit_metrics() {
   echo "METRIC popall_alloc_fail=$popall_alloc_fail"
   echo "METRIC block_pool_fail=$block_pool_fail"
   echo "METRIC jit_high_addr_warn=$jit_high_addr_warn"
+  echo "METRIC mac_ram_low32=$mac_ram_low32"
   echo "ARTIFACT_DIR $OUTDIR"
 }
 
@@ -282,6 +284,13 @@ extract_milestones() {
   block_pool_fail="${block_pool_fail:-0}"
   jit_high_addr_warn="$(rg -c 'allocated above 32-bit boundary' "$log" || true)"
   jit_high_addr_warn="${jit_high_addr_warn:-0}"
+
+  local ram_addr_hex=""
+  ram_addr_hex="$(rg -o 'Mac RAM starts at 0x[0-9a-fA-F]+' "$log" | awk 'NR==1 {print $5; exit}' || true)"
+  ram_addr_hex="${ram_addr_hex#0x}"
+  if [[ -n "$ram_addr_hex" && ${#ram_addr_hex} -le 8 ]]; then
+    mac_ram_low32=1
+  fi
 }
 
 for cmd in make Xvfb xwininfo xwd awk rg stdbuf; do

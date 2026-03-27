@@ -240,6 +240,26 @@ void vm_exit(void)
 static void *reserved_buf;
 static const size_t RESERVED_SIZE = 80 * 1024 * 1024; // for 6K Retina
 
+#if defined(HAVE_MMAP_VM) && defined(__linux__) && defined(__aarch64__) && defined(MAP_FIXED_NOREPLACE)
+static void *mmap_low_4gb_noreplace(size_t size, int prot, int flags, int fd)
+{
+	const vm_uintptr_t low_base = (vm_uintptr_t)0x10000000;
+	const vm_uintptr_t low_limit = (vm_uintptr_t)0x100000000ULL;
+	const vm_uintptr_t probe_step = (vm_uintptr_t)0x04000000; // 64 MB
+
+	for (vm_uintptr_t addr = low_base; addr + size <= low_limit; addr += probe_step) {
+		void *p = mmap((void *)addr, size, prot, flags | MAP_FIXED_NOREPLACE, fd, 0);
+		if (p != (void *)MAP_FAILED)
+			return p;
+		if (errno == EEXIST || errno == EAGAIN || errno == ENOMEM)
+			continue;
+		if (errno == EINVAL)
+			break; // unsupported flag/kernel behavior, fall back to hinted mmap
+	}
+	return (void *)MAP_FAILED;
+}
+#endif
+
 void *vm_acquire_reserved(size_t size) {
 	assert(reserved_buf && size <= RESERVED_SIZE);
 	return reserved_buf;
@@ -284,20 +304,35 @@ static void *vm_acquire_internal(size_t size, int options)
 	int fd = zero_fd;
 	int the_map_flags = translate_map_flags(options) | map_flags;
 #ifdef __aarch64__
-	if ((addr = mmap((caddr_t)next_address, reserved_buf ? size : size + RESERVED_SIZE, VM_PAGE_DEFAULT, the_map_flags, fd, 0)) == (void *)MAP_FAILED)
+	const bool had_reserved_buf = reserved_buf != NULL;
+	const size_t alloc_size = had_reserved_buf ? size : size + RESERVED_SIZE;
+#if defined(__linux__) && defined(MAP_FIXED_NOREPLACE)
+	if (!had_reserved_buf) {
+		addr = mmap_low_4gb_noreplace(alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd);
+		if (addr == (void *)MAP_FAILED) {
+			addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
+		}
+	} else {
+		addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
+	}
+#else
+	addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
+#endif
+	if (addr == (void *)MAP_FAILED)
 		return VM_MAP_FAILED;
-	if (!reserved_buf)
+	if (!had_reserved_buf)
 		reserved_buf = (char *)addr + size;
+	next_address = (char *)addr + alloc_size;
 #else
 	if ((addr = mmap((caddr_t)next_address, size, VM_PAGE_DEFAULT, the_map_flags, fd, 0)) == (void *)MAP_FAILED)
 		return VM_MAP_FAILED;
+	next_address = (char *)addr + size;
 #endif
 #if USE_JIT
 	// Sanity checks for 64-bit platforms
 	if (sizeof(void *) == 8 && (options & VM_MAP_32BIT) && !((char *)addr <= (char *)0xffffffff))
 		return VM_MAP_FAILED;
 #endif
-	next_address = (char *)addr + size;
 #elif defined(HAVE_WIN32_VM)
 	int alloc_type = MEM_RESERVE | MEM_COMMIT;
 	if (options & VM_MAP_WRITE_WATCH)
