@@ -1,4 +1,3 @@
-- If low-hint mmap is not reliably honored on this kernel, try a bounded low-address probe loop using `MAP_FIXED_NOREPLACE` (never `MAP_FIXED`) and fall back cleanly.
-- Add a lightweight startup log (ARM64-only) that prints RAM/ROM host addresses once, then remove after allocator behavior is stable.
-- If `pc_p` still truncates even with low mappings, audit remaining 32-bit ALU paths in `compemu_midfunc_arm64.cpp` for mixed-width updates not yet guarded by `pc_p/pc_oldp` checks.
-- If block pool alloc still fails intermittently, gate `VM_MAP_32BIT` usage out of ARM64-only JIT allocators (pool/cache helper paths) and rely on low reservation + address-range checks.
+- With low-address mapping fixed, next likely blocker is execution correctness: `stage_coverage_score` remains 0 under JIT=true. Audit remaining ARM64 mixed-width `pc_p` update paths in `compemu_midfunc_arm64.cpp` and related emit helpers.
+- Add optional (env-gated) allocator diagnostics that print first few `vm_acquire()` addresses and whether each is below 4GB, then disable once confidence is high.
+- If JIT boot progression still stalls, extend run window and capture first JIT-dispatch transitions (e.g., first compiled block entry / first cache miss path) to localize where execution stops.
