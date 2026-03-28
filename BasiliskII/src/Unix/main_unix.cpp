@@ -1448,10 +1448,10 @@ static void one_tick(...)
 #endif
 
 	// Trigger 60Hz interrupt
-	if (ROMVersion != ROM_VERSION_CLASSIC || HasMacStarted()) {
-		SetInterruptFlag(INTFLAG_60HZ);
-		TriggerInterrupt();
-	}
+	// NOTE: removed HasMacStarted() guard — early boot needs interrupts
+	// to progress past CLKNOMEM/PRAM init.
+	SetInterruptFlag(INTFLAG_60HZ);
+	TriggerInterrupt();
 }
 
 #ifdef USE_PTHREADS_SERVICES
