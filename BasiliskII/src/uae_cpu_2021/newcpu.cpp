@@ -1504,8 +1504,23 @@ void m68k_do_execute (void)
 {
     uae_u32 pc;
     uae_u32 opcode;
+    static unsigned long nojit_insn_count = 0;
+    static unsigned long nojit_last_report_count = 0;
+    static uae_u32 nojit_pc_min = 0xFFFFFFFF;
+    static uae_u32 nojit_pc_max = 0;
     for (;;) {
 	regs.fault_pc = pc = m68k_getpc();
+	nojit_insn_count++;
+	if (pc < nojit_pc_min) nojit_pc_min = pc;
+	if (pc > nojit_pc_max) nojit_pc_max = pc;
+	if ((nojit_insn_count - nojit_last_report_count) >= 5000000) {
+	    nojit_last_report_count = nojit_insn_count;
+	    fprintf(stderr, "NOJIT_DIAG insn=%lu pc=0x%08x range=[0x%08x,0x%08x] sr=0x%04x d0=0x%08x a7=0x%08x\n",
+	        nojit_insn_count, pc, nojit_pc_min, nojit_pc_max, (unsigned)regs.sr,
+	        (unsigned)m68k_dreg(regs,0), (unsigned)m68k_areg(regs,7));
+	    nojit_pc_min = 0xFFFFFFFF;
+	    nojit_pc_max = 0;
+	}
 #ifdef FULL_HISTORY
 #ifdef NEED_TO_DEBUG_BADLY
 	history[lasthist] = regs;

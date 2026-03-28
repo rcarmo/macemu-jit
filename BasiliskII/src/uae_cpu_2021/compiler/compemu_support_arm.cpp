@@ -333,6 +333,48 @@ static blockinfo* hold_bi[MAX_HOLD_BI];
 blockinfo* active;
 blockinfo* dormant;
 
+/* ---- JIT dispatch diagnostic counters ---- */
+#if defined(CPU_AARCH64)
+#include <cstdio>
+#include <ctime>
+static unsigned long jit_diag_execute_normal_calls = 0;
+static unsigned long jit_diag_execute_normal_cache_hit = 0;  /* check_for_cache_miss returned 1 */
+static unsigned long jit_diag_compile_block_calls = 0;
+static unsigned long jit_diag_compile_block_fresh = 0;     /* bi->status == BI_INVALID */
+static unsigned long jit_diag_compile_block_recomp = 0;    /* bi->status == BI_NEED_RECOMP */
+static unsigned long jit_diag_do_nothing_calls = 0;
+static unsigned long jit_diag_exec_nostats_calls = 0;
+static unsigned long jit_diag_cache_miss_calls = 0;
+static unsigned long jit_diag_recompile_block_calls = 0;
+static unsigned long jit_diag_check_checksum_calls = 0;
+static unsigned long jit_diag_flush_icache_hard_calls = 0;
+static unsigned long jit_diag_dispatch_count = 0;          /* total pushall_call_handler returns */
+static unsigned long jit_diag_optlev0_blocks = 0;          /* blocks compiled at optlev 0 */
+static unsigned long jit_diag_optlev_gt0_blocks = 0;       /* blocks compiled at optlev > 0 */
+static time_t jit_diag_last_print = 0;
+static time_t jit_diag_start_time = 0;
+
+static void jit_diag_maybe_print(void)
+{
+    if (jit_diag_start_time == 0) jit_diag_start_time = time(NULL);
+    time_t now = time(NULL);
+    if (now - jit_diag_last_print < 2) return;
+    jit_diag_last_print = now;
+    unsigned long elapsed = (unsigned long)(now - jit_diag_start_time);
+    fprintf(stderr, "JIT_DIAG t=%lus dispatch=%lu exec_normal=%lu (cache_hit=%lu) compile=%lu (fresh=%lu recomp=%lu opt0=%lu opt>0=%lu) "
+        "do_nothing=%lu exec_nostats=%lu cache_miss=%lu recompile_block=%lu check_checksum=%lu flush_hard=%lu pc=0x%08x\n",
+        elapsed, jit_diag_dispatch_count,
+        jit_diag_execute_normal_calls, jit_diag_execute_normal_cache_hit,
+        jit_diag_compile_block_calls, jit_diag_compile_block_fresh, jit_diag_compile_block_recomp,
+        jit_diag_optlev0_blocks, jit_diag_optlev_gt0_blocks,
+        jit_diag_do_nothing_calls, jit_diag_exec_nostats_calls,
+        jit_diag_cache_miss_calls, jit_diag_recompile_block_calls,
+        jit_diag_check_checksum_calls, jit_diag_flush_icache_hard_calls,
+        (unsigned)m68k_getpc());
+}
+#endif
+/* ---- end JIT dispatch diagnostic counters ---- */
+
 static void disable_jit_runtime(const char* reason)
 {
 	jit_log("JIT disabled: %s", reason);
@@ -2871,6 +2913,9 @@ int check_for_cache_miss(void)
         int cl = cacheline(regs.pc_p);
         if (bi != cache_tags[cl + 1].bi) {
             raise_in_cl_list(bi);
+#if defined(CPU_AARCH64)
+            jit_diag_execute_normal_cache_hit++;
+#endif
             return 1;
         }
     }
@@ -2880,6 +2925,10 @@ int check_for_cache_miss(void)
 
 static void recompile_block(void)
 {
+#if defined(CPU_AARCH64)
+    jit_diag_recompile_block_calls++;
+    jit_diag_dispatch_count++;
+#endif
 #ifdef JIT_DEBUG_MEM_CORRUPTION
     jit_dbg_check_vec2_dispatch("recompile_block");
 #endif
@@ -2896,6 +2945,10 @@ static void recompile_block(void)
 
 static void cache_miss(void)
 {
+#if defined(CPU_AARCH64)
+    jit_diag_cache_miss_calls++;
+    jit_diag_dispatch_count++;
+#endif
 #ifdef JIT_DEBUG_MEM_CORRUPTION
     jit_dbg_check_vec2_dispatch("cache_miss");
 #endif
@@ -2971,6 +3024,10 @@ static int called_check_checksum(blockinfo* bi)
 
 static void check_checksum(void)
 {
+#if defined(CPU_AARCH64)
+    jit_diag_check_checksum_calls++;
+    jit_diag_dispatch_count++;
+#endif
     blockinfo* bi = get_blockinfo_addr(regs.pc_p);
     uae_u32 cl = cacheline(regs.pc_p);
     blockinfo* bi2 = get_blockinfo(cl);
@@ -3325,6 +3382,10 @@ static void flush_icache_none(int v)
 
 void flush_icache_hard(int n)
 {
+#if defined(CPU_AARCH64)
+    jit_diag_flush_icache_hard_calls++;
+    fprintf(stderr, "JIT_DIAG flush_icache_hard called (n=%d), total=%lu\n", n, jit_diag_flush_icache_hard_calls);
+#endif
     blockinfo* bi, * dbi;
 
     bi = active;
@@ -3407,6 +3468,9 @@ static inline unsigned int get_opcode_cft_map(unsigned int f)
 
 void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 {
+#if defined(CPU_AARCH64)
+    jit_diag_compile_block_calls++;
+#endif
     if (cache_enabled && compiled_code && currprefs.cpu_model >= 68020) {
 		jit_begin_write_window();
 #ifdef PROFILE_COMPILE_TIME
@@ -3445,6 +3509,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
         }
 #endif
         if (bi->status != BI_INVALID) {
+#if defined(CPU_AARCH64)
+            jit_diag_compile_block_recomp++;
+#endif
             Dif(bi != bi2) {
                 /* I don't think it can happen anymore. Shouldn't, in
                    any case. So let's make sure... */
@@ -3456,6 +3523,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 /* What the heck? We are not supposed to be here! */
             }
         }
+#if defined(CPU_AARCH64)
+        else {
+            jit_diag_compile_block_fresh++;
+        }
+#endif
         if (bi->count == -1) {
 #if defined(CPU_AARCH64)
             if (currprefs.cpu_compatible) {
@@ -3546,9 +3618,29 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             compemu_raw_maybe_recompile();
         }
         if (optlev == 0) { /* No need to actually translate */
+#if defined(CPU_AARCH64)
+          jit_diag_optlev0_blocks++;
+#endif
           /* Execute normally without keeping stats */
             compemu_raw_exec_nostats((uintptr)pc_hist[0].location);
         } else {
+#if defined(CPU_AARCH64)
+            jit_diag_optlev_gt0_blocks++;
+            /* Log which blocks get promoted to actual JIT compilation */
+            {
+                uae_u32 block_m68k_pc = 0;
+                if (pc_hist[0].location) {
+                    block_m68k_pc = (uae_u32)((uintptr)pc_hist[0].location - (uintptr)regs.pc_oldp) + regs.pc;
+                }
+                fprintf(stderr, "JIT_COMPILE optlev=%d pc=0x%08x blocklen=%d opcodes=",
+                    optlev, block_m68k_pc, blocklen);
+                for (int di = 0; di < blocklen && di < 20; di++) {
+                    uae_u32 op = DO_GET_OPCODE(pc_hist[di].location);
+                    fprintf(stderr, "%04x ", op);
+                }
+                fprintf(stderr, "\n");
+            }
+#endif
             reg_alloc_run = 0;
             next_pc_p = 0;
             taken_pc_p = 0;

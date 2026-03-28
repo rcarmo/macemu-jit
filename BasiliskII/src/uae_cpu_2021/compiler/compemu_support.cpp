@@ -87,6 +87,7 @@ static bool ensure_aarch64_jit_runtime_ready(void)
 	if (pushall_call_handler)
 		return true;
 	check_prefs_changed_comp(false);
+	init_table68k();  // Must be called before build_comp uses table68k
 	build_comp();
 	return pushall_call_handler != nullptr;
 }

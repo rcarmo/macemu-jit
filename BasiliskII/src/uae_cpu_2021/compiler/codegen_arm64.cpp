@@ -512,6 +512,9 @@ STATIC_INLINE void compemu_raw_jmp_pc_tag(void)
 {
 	uintptr idx = (uintptr)&regs.pc_p - (uintptr)&regs;
 	LDRH_wXi(REG_WORK1, R_REGSTRUCT, idx);
+	/* Clear bit 0 to ensure even cacheline index (handler slot, not bi slot) */
+	UBFX_xxii(REG_WORK1, REG_WORK1, 1, 15);
+	LSL_xxi(REG_WORK1, REG_WORK1, 1);
 	idx = (uintptr)&regs.cache_tags - (uintptr)&regs;
 	LDR_xXi(REG_WORK2, R_REGSTRUCT, idx);
 	LDR_xXxLSLi(REG_WORK1, REG_WORK2, REG_WORK1, 3); // cacheline is 8 bytes (pointer) on AArch64
@@ -581,8 +584,11 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	}
 	STR_wXi(REG_WORK1, REG_WORK3, 0);
 
-	TBNZ_xii(REG_WORK1, 31, 5); // test sign and branch if set (negative)
-	UBFIZ_xxii(rr_pc, rr_pc, 0, 16);  // apply TAGMASK
+	TBNZ_xii(REG_WORK1, 31, 7); // test sign → skip 7 insns to B_i(do_nothing)
+	UBFIZ_xxii(rr_pc, rr_pc, 0, 16);  // apply TAGMASK (bottom 16 bits)
+	/* Clear bit 0 to ensure even cacheline index (handler slot, not bi slot) */
+	UBFX_xxii(rr_pc, rr_pc, 1, 15);
+	LSL_xxi(rr_pc, rr_pc, 1);
 	uintptr offs = (uintptr)(&regs.cache_tags) - (uintptr)&regs;
 	LDR_xXi(REG_WORK1, R_REGSTRUCT, offs);
 	LDR_xXxLSLi(REG_WORK1, REG_WORK1, rr_pc, 3); // cacheline holds pointer -> multiply with 8
