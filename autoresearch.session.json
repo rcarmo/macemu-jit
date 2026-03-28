@@ -1,0 +1,14 @@
+{
+  "chat_jid": "web:default",
+  "display_name": "JIT LOW-ADDRESS — the final piece. Fresh history, 50 runs.\n\n## CURRENT STATE:\n- ",
+  "model": "github-copilot/gpt-5.3-codex",
+  "max_iterations": 50,
+  "variables": [
+    "jit_boot_score",
+    "build_ok",
+    "jit_alive",
+    "jit_nonsolid",
+    "crash_count",
+    "lowaddr_score"
+  ]
+}
