@@ -245,7 +245,9 @@ static void *mmap_low_4gb_noreplace(size_t size, int prot, int flags, int fd)
 {
 	const vm_uintptr_t low_base = (vm_uintptr_t)MAP_BASE;
 	const vm_uintptr_t low_limit = (vm_uintptr_t)0x100000000ULL;
-	const vm_uintptr_t probe_step = (vm_uintptr_t)0x04000000; // 64 MB
+	/* Use allocation-sized steps (page-aligned) to pack tightly */
+	const vm_uintptr_t page_mask = (vm_uintptr_t)0xFFF;
+	const vm_uintptr_t probe_step = (size + page_mask) & ~page_mask;
 
 	for (vm_uintptr_t addr = low_base; addr + size <= low_limit; addr += probe_step) {
 		void *p = mmap((void *)addr, size, prot, flags | MAP_FIXED_NOREPLACE, fd, 0);
@@ -306,12 +308,21 @@ static void *vm_acquire_internal(size_t size, int options)
 #ifdef __aarch64__
 	const bool had_reserved_buf = reserved_buf != NULL;
 	const size_t alloc_size = had_reserved_buf ? size : size + RESERVED_SIZE;
-	addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
+	if (options & VM_MAP_32BIT) {
+		/* Use the low-4GB scanner for JIT code allocations. The generic
+		   hint-based path does not work on AArch64 because MAP_32BIT is
+		   unavailable and the kernel ignores low hints. */
+		addr = mmap_low_4gb_noreplace(alloc_size, VM_PAGE_DEFAULT,
+					(the_map_flags & ~MAP_FIXED), fd);
+	} else {
+		addr = mmap((caddr_t)next_address, alloc_size, VM_PAGE_DEFAULT, the_map_flags, fd, 0);
+	}
 	if (addr == (void *)MAP_FAILED)
 		return VM_MAP_FAILED;
 	if (!had_reserved_buf)
 		reserved_buf = (char *)addr + size;
-	next_address = (char *)addr + alloc_size;
+	if (!(options & VM_MAP_32BIT))
+		next_address = (char *)addr + alloc_size;
 #else
 	if ((addr = mmap((caddr_t)next_address, size, VM_PAGE_DEFAULT, the_map_flags, fd, 0)) == (void *)MAP_FAILED)
 		return VM_MAP_FAILED;
