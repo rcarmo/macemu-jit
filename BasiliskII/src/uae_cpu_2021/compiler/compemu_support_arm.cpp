@@ -2452,7 +2452,8 @@ void register_possible_exception(void)
 static uintptr get_handler(uintptr addr)
 {
     blockinfo* bi = get_blockinfo_addr_new((void*)(uintptr)addr);
-    return (uintptr)bi->direct_handler_to_use;
+    uintptr h = (uintptr)bi->direct_handler_to_use;
+    return h ? h : (uintptr)popall_execute_normal;
 }
 
 /* This version assumes that it is writing *real* memory, and *will* fail
