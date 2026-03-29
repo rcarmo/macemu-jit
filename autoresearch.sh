@@ -41,11 +41,12 @@ fi
 echo "METRIC build_ok=1"
 
 # Run emulator for 120 seconds
-Xvfb :23 -screen 0 800x600x24 &>/dev/null &
+XDISP=:$((23 + (RANDOM % 50)))
+Xvfb $XDISP -screen 0 800x600x24 &>/dev/null &
 XVFB_PID=$!
 sleep 1
 
-SDL_VIDEODRIVER=x11 DISPLAY=:23 HOME="$RUN_DIR/home" XDG_CONFIG_HOME="$RUN_DIR/xdg" \
+SDL_VIDEODRIVER=x11 DISPLAY=$XDISP HOME="$RUN_DIR/home" XDG_CONFIG_HOME="$RUN_DIR/xdg" \
   "$UNIX_DIR/BasiliskII" --config "$RUN_DIR/prefs" >"$RUN_DIR/emu.log" 2>&1 &
 EMU_PID=$!
 

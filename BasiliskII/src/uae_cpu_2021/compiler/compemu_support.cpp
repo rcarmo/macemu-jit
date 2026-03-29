@@ -3439,6 +3439,13 @@ void register_branch(uae_u32 not_taken, uae_u32 taken, uae_u8 cond)
 static uintptr get_handler(uintptr addr)
 {
 	blockinfo* bi=get_blockinfo_addr_new((void*)(uintptr)addr,0);
+#if defined(CPU_AARCH64) || defined(CPU_aarch64)
+	/* AArch64: Force interpreter fallback for all blocks until register
+	   allocator upper-32-bit corruption is fixed. Native blocks compile
+	   but are not executed — use cpu_compatible=false to enable native. */
+	if (currprefs.cpu_compatible)
+		return (uintptr)popall_execute_normal;
+#endif
 	return (uintptr)bi->direct_handler_to_use;
 }
 

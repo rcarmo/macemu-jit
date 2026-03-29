@@ -64,7 +64,7 @@ static void sync_jit_prefs(uae_prefs &p)
 	p.m68k_speed = -1;
 	p.cpu_model = pref_cpu_to_model(PrefsFindInt32("cpu"));
 	p.cpu_level = pref_cpu_to_level(p.cpu_model);
-	p.cpu_compatible = false;  /* AArch64: native block dispatch, interpreter opcodes (optlev capped at 1) */
+	p.cpu_compatible = true;   /* AArch64: default safe — JIT dispatch with interpreter fallback */
 	p.illegal_mem = false;
 	p.address_space_24 = false;
 
