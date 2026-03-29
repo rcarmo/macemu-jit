@@ -104,6 +104,7 @@ bool Init680x0(void)
 	init_m68k();
 #if USE_JIT
 	UseJIT = compiler_use_jit();
+	fprintf(stderr, "JIT: UseJIT=%d\n", (int)UseJIT);
 	if (UseJIT)
 	    compiler_init();
 #endif

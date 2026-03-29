@@ -71,6 +71,7 @@ static const uae_u32 MIN_CACHE_SIZE = 1024;
 
 bool compiler_use_jit(void)
 {
+	fflush(stderr); fprintf(stderr, "JIT_INIT: jit=%d cs=%d\n", PrefsFindBool("jit"), PrefsFindInt32("jitcachesize"));
 	if (!PrefsFindBool("jit"))
 		return false;
 	int32 cs = PrefsFindInt32("jitcachesize");

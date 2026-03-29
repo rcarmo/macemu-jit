@@ -3619,6 +3619,20 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             compemu_raw_dec_m((uintptr) & (bi->count));
             compemu_raw_maybe_recompile();
         }
+        /* AArch64: force optlev=0 for blocks containing DBcc (0x50C8-0x5FCF).
+           The native DBcc codegen has a branch target initialization bug
+           that causes jumps to NULL. Use interpreter for these blocks. */
+#if defined(CPU_AARCH64)
+        if (optlev > 0) {
+            for (int _i = 0; _i < blocklen; _i++) {
+                uae_u16 _op = do_get_mem_word(pc_hist[_i].location);
+                if ((_op & 0xF0F8) == 0x50C8) { /* DBcc */
+                    optlev = 0;
+                    break;
+                }
+            }
+        }
+#endif
         if (optlev == 0) { /* No need to actually translate */
 #if defined(CPU_AARCH64)
           jit_diag_optlev0_blocks++;
