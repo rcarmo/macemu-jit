@@ -3373,6 +3373,8 @@ void build_comp(void)
         cache_tags[i + 1].bi = NULL;
     }
     compemu_reset();
+    cache_enabled = 1;
+    SPCFLAGS_CLEAR(SPCFLAG_JIT_EXEC_RETURN);
 }
 
 static void flush_icache_none(int v)

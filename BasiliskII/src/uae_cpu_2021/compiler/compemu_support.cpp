@@ -73,7 +73,9 @@ bool compiler_use_jit(void)
 {
 	if (!PrefsFindBool("jit"))
 		return false;
-	if (PrefsFindInt32("jitcachesize") < MIN_CACHE_SIZE) {
+	int32 cs = PrefsFindInt32("jitcachesize");
+	if (cs <= 0) cs = 8192;
+	if (cs < (int32)MIN_CACHE_SIZE) {
 		write_log("<JIT compiler> : translation cache size is less than %d KB. Disabling JIT.\n", MIN_CACHE_SIZE);
 		return false;
 	}
