@@ -442,10 +442,21 @@ void execute_normal(void)
 {
 	if (!check_for_cache_miss()) {
 		cpu_history pc_hist[MAXRUN];
+		memset(pc_hist, 0, sizeof(pc_hist));
 		int blocklen = 0;
 		int total_cycles = 0;
 		start_pc_p = regs.pc_oldp;
 		start_pc = regs.pc;
+#if defined(CPU_AARCH64)
+		/* Inhibit one_tick() during block tracing. The tick thread's
+		   one_tick() has side effects (incrementing Ticks, SDL events)
+		   that happen during interpreter tracing but NOT during native
+		   block execution. This asymmetry causes different execution paths.
+		   Inhibiting during tracing (typically <64 instructions, ~microseconds)
+		   has negligible impact on 60Hz timing accuracy. */
+		extern bool tick_inhibit;
+		tick_inhibit = true;
+#endif
 		for (;;) {
 			pc_hist[blocklen++].location = (uae_u16 *)regs.pc_p;
 			uae_u32 opcode = GET_OPCODE;
@@ -453,6 +464,9 @@ void execute_normal(void)
 			cpu_check_ticks();
 			total_cycles += 4 * CYCLE_UNIT;
 			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= MAXRUN) {
+#if defined(CPU_AARCH64)
+				tick_inhibit = false;
+#endif
 				compile_block(pc_hist, blocklen, total_cycles);
 				return;
 			}

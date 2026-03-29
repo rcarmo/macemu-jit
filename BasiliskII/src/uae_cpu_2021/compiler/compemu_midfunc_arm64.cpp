@@ -369,16 +369,14 @@ MIDFUNC(2,mov_l_rr,(W4 d, RR4 s))
 		COMPCALL(mov_l_ri)(d, live.state[s].val);
 		return;
 	}
+	/* Do a real copy instead of sharing hardware registers.
+	   Register sharing causes lock conflicts when subsequent opcodes
+	   need both source and destination simultaneously. */
 	olds = s;
-	disassociate(d);
 	s = readreg(s);
-	live.state[d].realreg = s;
-	live.state[d].realind = live.nat[s].nholds;
-	live.state[d].val = 0;
-	set_status(d, DIRTY);
-
-	live.nat[s].holds[live.nat[s].nholds] = d;
-	live.nat[s].nholds++;
+	d = writereg(d);
+	compemu_raw_mov_l_rr(d, s);
+	unlock2(d);
 	unlock2(s);
 }
 MENDFUNC(2,mov_l_rr,(W4 d, RR4 s))

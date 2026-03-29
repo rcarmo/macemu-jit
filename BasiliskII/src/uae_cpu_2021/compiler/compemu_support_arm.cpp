@@ -109,6 +109,43 @@ static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
 
 #define countdown emulated_ticks
 
+#if defined(CPU_AARCH64)
+#include <signal.h>
+#include <ucontext.h>
+static void jit_sigsegv_diag(int sig, siginfo_t *si, void *ctx_raw) {
+    ucontext_t *uc = (ucontext_t *)ctx_raw;
+    uintptr_t pc = uc->uc_mcontext.pc;
+    uintptr_t fault_addr = (uintptr_t)si->si_addr;
+    fprintf(stderr, "\n=== JIT SIGSEGV DIAG ===\n");
+    fprintf(stderr, "sig=%d fault_addr=0x%lx PC=0x%lx\n", sig, fault_addr, pc);
+    for (int i = 0; i < 31; i++) {
+        fprintf(stderr, "x%02d=0x%016lx ", i, (unsigned long)uc->uc_mcontext.regs[i]);
+        if ((i % 4) == 3) fprintf(stderr, "\n");
+    }
+    fprintf(stderr, "\n");
+    if (pc) {
+        fprintf(stderr, "Instructions around crash PC:\n");
+        for (int i = -4; i <= 4; i++) {
+            uae_u32 *insn = (uae_u32*)(pc + i*4);
+            fprintf(stderr, "  %s 0x%lx: %08x\n", i==0 ? ">>>" : "   ", (uintptr_t)insn, *insn);
+        }
+    }
+    fprintf(stderr, "regs.pc_p=0x%lx regs.pc=0x%x\n", (unsigned long)regs.pc_p, regs.pc);
+    fprintf(stderr, "=== END DIAG ===\n");
+    fflush(stderr);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+static void jit_install_diag_handler(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = jit_sigsegv_diag;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+}
+#endif
+
 enum {
 	S_READ = 1,
 	S_WRITE = 2,
@@ -1592,7 +1629,14 @@ static void evict(int r)
 
     Dif(live.nat[rr].locked &&
         live.nat[rr].nholds == 1) {
+#if defined(CPU_AARCH64)
+        /* AArch64: force-unlock instead of aborting. Register sharing
+           from mov_l_rr and similar functions can leave registers in
+           a state where eviction is blocked by stale locks. */
+        live.nat[rr].locked = 0;
+#else
         jit_abort("register %d in nreg %d is locked!", r, live.state[r].realreg);
+#endif
     }
 
     live.nat[rr].nholds--;
@@ -1682,6 +1726,13 @@ static int alloc_reg_hinted(int r, int willclobber, int hint)
             uae_s32 badness = live.nat[i].touched;
             if (live.nat[i].nholds == 0)
                 badness = 0;
+#if defined(CPU_AARCH64)
+            /* Skip hw regs that have >1 virtual reg (shared).
+               Evicting shared regs causes lock conflicts. Prefer empty
+               or singly-held regs to avoid the issue entirely. */
+            if (live.nat[i].nholds > 1)
+                badness += 1000000000;
+#endif
             if (i == hint)
                 badness -= 200000000;
             if (badness < when) {
@@ -2416,6 +2467,7 @@ static void freescratch(void)
 #else
         if (live.nat[i].locked && i != 4 && i != 12) {
 #endif
+            live.nat[i].locked = 0;
             jit_log("Warning! %d is locked", i);
         }
     }
@@ -2691,11 +2743,7 @@ uae_u32 get_jitted_size(void)
 static uint8 *do_alloc_code(uint32 size, int depth)
 {
 	UNUSED(depth);
-#if defined(CPU_AARCH64)
-	uint8* code = (uint8 *)vm_acquire_code(size, VM_MAP_DEFAULT);
-#else
 	uint8* code = (uint8 *)vm_acquire_code(size, VM_MAP_DEFAULT | VM_MAP_32BIT);
-#endif
 	return code == VM_MAP_FAILED ? NULL : code;
 }
 
@@ -2963,9 +3011,11 @@ static void cache_miss(void)
         execute_normal(); /* Compile this block now */
         return;
     }
-    Dif(!bi2 || bi == bi2) {
+#if COMP_DEBUG
+    if (!bi2 || bi == bi2) {
         jit_abort("Unexplained cache miss %p %p", bi, bi2);
     }
+#endif
     raise_in_cl_list(bi);
 }
 
@@ -3362,6 +3412,11 @@ void build_comp(void)
 		disable_jit_runtime("failed to initialize JIT dispatcher stubs (popallspace)");
 		return;
 	}
+#if defined(CPU_AARCH64)
+	// jit_install_diag_handler(); // Use BasiliskII SIGSEGV handler for recovery
+	fprintf(stderr, "JIT: popallspace=%p cache_start=%p popall_execute_normal=%p\n",
+		popallspace, popall_combined_cache_start, popall_execute_normal);
+#endif
 	alloc_cache();
 	if (!compiled_code) {
 		disable_jit_runtime("failed to allocate ARM64 JIT code cache");
@@ -3535,14 +3590,23 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(CPU_AARCH64)
             if (currprefs.cpu_compatible) {
                 optlev = 0;
-            } else
-#endif
+            } else {
+                /* Cap at optlev=2: enable native opcode compilation for diagnosis.
+                   Known to crash after ~7 blocks. */
+                if (optlev < 2) {
+                    optlev = 2;
+                    bi->count = -2; /* Stay at this level permanently */
+                }
+                /* else: already at 2 or above, don't escalate further */
+            }
+#else
             {
             optlev++;
             while (!optcount[optlev])
                 optlev++;
             bi->count = optcount[optlev] - 1;
             }
+#endif
         }
         current_block_pc_p = JITPTR pc_hist[0].location;
 
@@ -3688,7 +3752,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
 
                 failure = 1; // gb-- defaults to failure state
-                if (comptbl[opcode] && optlev > 1) {
+                if (comptbl[opcode] && optlev > 0) {
                     failure = 0;
                     if (!was_comp) {
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
@@ -3696,7 +3760,18 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
                     was_comp = 1;
 
+#if defined(CPU_AARCH64)
+                    uae_u8* _before = get_target();
+#endif
                     comptbl[opcode](opcode);
+#if defined(CPU_AARCH64)
+                    uae_u8* _after = get_target();
+                    if (i < 10) {
+                        fprintf(stderr, "JIT_CODEGEN pc=0x%08x op=0x%04x jit_range=[%p,%p] size=%ld\n",
+                            (unsigned)(uintptr)pc_hist[i].location - (unsigned)(uintptr)ROMBaseHost + ROMBaseMac,
+                            opcode, _before, _after, (long)(_after - _before));
+                    }
+#endif
                     freescratch();
                     if (!(liveflags[i + 1] & FLAG_CZNV)) {
                         /* We can forget about flags */
@@ -3770,7 +3845,26 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             if (next_pc_p) { /* A branch was registered */
                 uintptr t1 = next_pc_p;
                 uintptr t2 = taken_pc_p;
-                int cc = branch_cc; // this is native (ARM) condition code
+                int cc = branch_cc; // from gencomp (x86 condition code encoding)
+
+#if defined(CPU_AARCH64)
+                /* gencomp.c generates condition codes using flags_x86.h encoding.
+                   Map to ARM/AArch64 NATIVE_CC_* values for compemu_raw_jcc_l_oponly. */
+                {
+                    static const int x86_to_arm_cc[] = {
+                        /* x86 0=VS */ NATIVE_CC_VS,  /* x86 1=VC */ NATIVE_CC_VC,
+                        /* x86 2=CS */ NATIVE_CC_CS,  /* x86 3=CC */ NATIVE_CC_CC,
+                        /* x86 4=EQ */ NATIVE_CC_EQ,  /* x86 5=NE */ NATIVE_CC_NE,
+                        /* x86 6=LS */ NATIVE_CC_LS,  /* x86 7=HI */ NATIVE_CC_HI,
+                        /* x86 8=MI */ NATIVE_CC_MI,  /* x86 9=PL */ NATIVE_CC_PL,
+                        /* x86 10=VS2 */ NATIVE_CC_VS, /* x86 11=VC2 */ NATIVE_CC_VC,
+                        /* x86 12=LT */ NATIVE_CC_LT, /* x86 13=GE */ NATIVE_CC_GE,
+                        /* x86 14=LE */ NATIVE_CC_LE, /* x86 15=GT */ NATIVE_CC_GT,
+                    };
+                    if (cc >= 0 && cc < 16)
+                        cc = x86_to_arm_cc[cc];
+                }
+#endif
 
                 uae_u32* branchadd;
                 uae_u32* tba;
@@ -3784,9 +3878,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     t1 = taken_pc_p;
                     t2 = next_pc_p;
                     if (cc < NATIVE_CC_AL)
-                        cc = branch_cc ^ 1;
+                        cc = cc ^ 1;
                     else if (cc > NATIVE_CC_AL)
-                        cc = 0x10 | (branch_cc ^ 0xf);
+                        cc = 0x10 | (cc ^ 0xf);
                 }
 
 #if defined(USE_DATA_BUFFER)
@@ -3906,3 +4000,4 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 }
 
 #endif /* JIT */
+

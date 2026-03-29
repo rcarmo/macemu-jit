@@ -356,6 +356,19 @@ MIDFUNC(2,mov_l_rr,(W4 d, RR4 s))
 		COMPCALL(mov_l_ri)(d, live.state[s].val);
 		return;
 	}
+#if defined(CPU_AARCH64)
+	/* AArch64: do a real copy instead of sharing hardware registers.
+	   Register sharing causes lock conflicts when subsequent opcodes
+	   need both the source and destination simultaneously (e.g.,
+	   MOVEA.L A1,A3 followed by ADDA.L (d16,A3),A3 — both A1 and A3
+	   map to the same hw reg, causing "register N in nreg M is locked"). */
+	olds = s;
+	s = readreg(s);
+	d = writereg(d);
+	compemu_raw_mov_l_rr(d, s);
+	unlock2(d);
+	unlock2(s);
+#else
 	olds = s;
 	disassociate(d);
 	s = readreg(s);
@@ -367,6 +380,7 @@ MIDFUNC(2,mov_l_rr,(W4 d, RR4 s))
 	live.nat[s].holds[live.nat[s].nholds] = d;
 	live.nat[s].nholds++;
 	unlock2(s);
+#endif
 }
 MENDFUNC(2,mov_l_rr,(W4 d, RR4 s))
 

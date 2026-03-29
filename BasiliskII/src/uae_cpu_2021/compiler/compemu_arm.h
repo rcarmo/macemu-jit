@@ -100,7 +100,7 @@ typedef uae_u32 uintptr;
    of memory! */
 #define TAGMASK 0x0000ffff
 #define TAGSIZE (TAGMASK+1)
-#define MAXRUN 1024
+#define MAXRUN 64
 #define cacheline(x) (((uintptr)x)&TAGMASK)
 
 extern uae_u8* start_pc_p;

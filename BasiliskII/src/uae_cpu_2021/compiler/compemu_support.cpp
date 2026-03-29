@@ -99,8 +99,13 @@ void m68k_do_compile_execute(void)
 {
 	if (!ensure_aarch64_jit_runtime_ready())
 		jit_abort("ARM64 JIT dispatcher stubs were not initialized before compiled execution");
+	static unsigned long _dc = 0;
 	for (;;) {
 		((compiled_handler)(pushall_call_handler))();
+		_dc++;
+		if (0) {
+			fprintf(stderr, "D %lu %08x", _dc, (unsigned)m68k_getpc()); if (_dc >= 11710 && _dc <= 11720) { MakeSR(); fprintf(stderr, " sr=%04x d0=%08x d1=%08x a3=%08x", (unsigned)regs.sr, (unsigned)m68k_dreg(regs,0), (unsigned)m68k_dreg(regs,1), (unsigned)m68k_areg(regs,3)); } fprintf(stderr, "\n");
+		}
 		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
 			if (m68k_do_specialties())
 				return;

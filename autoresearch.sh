@@ -22,16 +22,20 @@ displaycolordepth 8
 nosound true
 nocdrom true
 nogui false
+ignoresegv true
 EOF
 
-# Build
+# Build (incremental — only reconfigure if needed)
 cd "$UNIX_DIR"
-make clean >/dev/null 2>&1 || true
-NO_CONFIGURE=1 ./autogen.sh >/dev/null 2>&1
-ac_cv_have_asm_extended_signals=yes ./configure --with-uae-core=2021 --enable-aarch64-jit-experimental --disable-vosf >/dev/null 2>&1
+if [ ! -f Makefile ]; then
+  NO_CONFIGURE=1 ./autogen.sh >/dev/null 2>&1
+  ac_cv_have_asm_extended_signals=yes ./configure --with-uae-core=2021 --enable-aarch64-jit-experimental --disable-vosf >/dev/null 2>&1
+fi
 if ! make -j12 >"$RUN_DIR/make.log" 2>&1; then
   echo "METRIC build_ok=0"
   echo "METRIC score=0"
+  tail -30 "$RUN_DIR/make.log" >&2
+  rm -rf "$RUN_DIR"
   exit 0
 fi
 echo "METRIC build_ok=1"
@@ -70,17 +74,22 @@ else
   echo "METRIC uptime=$ALIVE_CHECKS"
 fi
 
-DISK_STATUS=$(grep -c 'DiskStatus' "$RUN_DIR/emu.log" 2>/dev/null || echo 0)
-SEGFAULTS=$(grep -c 'SIGSEGV\|Segmentation' "$RUN_DIR/emu.log" 2>/dev/null || echo 0)
-JIT_BLOCKS=$(grep -c 'JIT_COMPILE' "$RUN_DIR/emu.log" 2>/dev/null || echo 0)
+DISK_STATUS=$(grep -c 'DiskStatus' "$RUN_DIR/emu.log" 2>/dev/null || true)
+DISK_STATUS=${DISK_STATUS:-0}
+SEGFAULTS=$(grep -c 'SIGSEGV\|Segmentation' "$RUN_DIR/emu.log" 2>/dev/null || true)
+SEGFAULTS=${SEGFAULTS:-0}
+JIT_BLOCKS=$(grep -c 'JIT_COMPILE' "$RUN_DIR/emu.log" 2>/dev/null || true)
+JIT_BLOCKS=${JIT_BLOCKS:-0}
 
 echo "METRIC boot_ok=$BOOT_OK"
 echo "METRIC disk_status=$DISK_STATUS"
 echo "METRIC segfaults=$SEGFAULTS"
 echo "METRIC jit_blocks=$JIT_BLOCKS"
 
+# Dump last JIT diagnostics for debugging
+grep -E 'JIT_DIAG|JIT_COMPILE|SIGSEGV|Segmentation|direct_handler|cache_tags|NULL' "$RUN_DIR/emu.log" 2>/dev/null | tail -30 >&2 || true
+
 # Score: 0-100
-# 40 pts for boot, 40 pts for 120s uptime, 10 pts for 0 segfaults, 10 pts for native blocks
 SCORE=0
 [ $BOOT_OK -eq 1 ] && SCORE=$((SCORE + 40))
 [ $ALIVE_CHECKS -ge 120 ] && SCORE=$((SCORE + 40))
@@ -92,5 +101,3 @@ echo "METRIC score=$SCORE"
 kill $EMU_PID 2>/dev/null; sleep 1; kill -9 $EMU_PID 2>/dev/null
 kill $XVFB_PID 2>/dev/null
 rm -rf "$RUN_DIR"
-
-echo "ARTIFACT_DIR $RUN_DIR"

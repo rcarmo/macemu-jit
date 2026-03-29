@@ -84,6 +84,9 @@ struct sigstate {
 using std::string;
 
 #include "cpu_emulation.h"
+unsigned long long jit_recovery_address = 0;
+void *jit_popallspace_start = NULL;
+size_t jit_popallspace_size = 0;
 #include "sys.h"
 #include "rom_patches.h"
 #include "xpram.h"
@@ -1478,6 +1481,9 @@ static void *tick_func(void *arg)
 #endif
 	return NULL;
 }
+#endif
+#ifndef USE_PTHREADS_SERVICES
+bool tick_inhibit;
 #endif
 
 

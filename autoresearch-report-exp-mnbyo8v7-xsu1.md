@@ -1,3 +1,36 @@
+# Autoresearch Report: AArch64 JIT native codegen stability
+
+**Generated:** 2026-03-29T16:46:10.291Z
+**Project:** /workspace/projects/macemu
+**Primary metric:** score (unitless, higher is better)
+
+## Summary
+
+| Stat | Value |
+|------|-------|
+| Total runs | 8 |
+| Kept | 4 |
+| Discarded | 4 |
+| Crashed | 0 |
+| Checks failed | 0 |
+| Best score | 100 |
+| Confidence | 1.3× |
+
+## Run History
+
+| # | Status | score | Commit | Description |
+|---|--------|-------|--------|-------------|
+| 1 | discard | 80 | 7699f8c | Baseline with cpu_compatible=true: boots, runs 120s, no segf |
+| 2 | keep | 90 | c33cb4a | Baseline: cpu_compatible=true, score=90 (boot+alive+no_segfa |
+| 3 | discard | 20 | c33cb4a | cpu_compatible=false + prepare_block handler init: builds, 7 |
+| 4 | discard | 20 | dcf2844 | cpu_compatible=false with crash recovery: compiles 39 blocks |
+| 5 | keep | 100 | 8b93de7 | cpu_compatible=false + optlev capped at 1: native block disp |
+| 6 | keep | 100 | f222924 | Confirmation run: score=100 again, 37252 JIT blocks, boots 1 |
+| 7 | keep | 100 | d7c5750 | Confirmed optlev=1 stable (score=100, 36567 blocks). optlev= |
+| 8 | discard | 10 | a49260e | optlev=2 with all native opcodes enabled: SIGSEGV after 16 b |
+
+## Experiment Brief
+
 # Autoresearch: AArch64 JIT native codegen stability
 
 ## Objective
