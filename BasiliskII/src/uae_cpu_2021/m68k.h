@@ -864,10 +864,10 @@ static inline int cctrue(int cc)
                         "sxth %w[b], %w[rs]\n\t" \
                         "adds %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u16)v; \
+  v = (uae_u16)_a; \
   regflags.nzcv = _nzcv; \
   COPY_CARRY(); \
   } while(0)
@@ -879,10 +879,10 @@ static inline int cctrue(int cc)
                         "sxtb %w[b], %w[rs]\n\t" \
                         "adds %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u8)v; \
+  v = (uae_u8)_a; \
   regflags.nzcv = _nzcv; \
   COPY_CARRY(); \
   } while(0)
@@ -906,10 +906,10 @@ static inline int cctrue(int cc)
                         "sxth %w[b], %w[rs]\n\t" \
                         "subs %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u16)v; \
+  v = (uae_u16)_a; \
   regflags.nzcv = _nzcv ^ FLAGVAL_C; \
   COPY_CARRY(); \
   } while(0)
@@ -921,10 +921,10 @@ static inline int cctrue(int cc)
                         "sxtb %w[b], %w[rs]\n\t" \
                         "subs %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
-                        : [flags] "=r" (_nzcv), [rv] "=r" (v), [a] "=&r" (_a), [b] "=&r" (_b) \
+                        : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u8)v; \
+  v = (uae_u8)_a; \
   regflags.nzcv = _nzcv ^ FLAGVAL_C; \
   COPY_CARRY(); \
   } while(0)

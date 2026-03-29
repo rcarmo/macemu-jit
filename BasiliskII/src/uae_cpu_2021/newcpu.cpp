@@ -1550,6 +1550,18 @@ void m68k_do_execute (void)
 	m68k_record_step(m68k_getpc(), cft_map(opcode));
 #endif
 	(*cpufunctbl[opcode])(opcode);
+
+	/* Flag divergence trace */
+	{
+		static unsigned long _ft_count = 0;
+		_ft_count++;
+		if (_ft_count <= 2000) {
+			MakeSR();
+			fprintf(stderr, "FT %lu %08x %04x %04x D1=%08x D3=%08x\n",
+				_ft_count, (unsigned)m68k_getpc(), (unsigned)opcode, (unsigned)regs.sr, (unsigned)m68k_dreg(regs,1), (unsigned)m68k_dreg(regs,3));
+		}
+	}
+
 	cpu_check_ticks();
 	regs.fault_pc = m68k_getpc();
 
