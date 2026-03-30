@@ -109,7 +109,7 @@ union cacheline {
 
 #define USE_F_ALIAS 1
 #define USE_OFFSET 1
-#define COMP_DEBUG 1
+#define COMP_DEBUG 0
 
 #if COMP_DEBUG
 #define Dif(x) if (x)
