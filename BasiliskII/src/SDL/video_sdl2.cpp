@@ -2102,7 +2102,6 @@ void SDL_monitor_desc::set_palette(uint8 *pal, int num_in)
 
 	// Tell redraw thread to change palette
 	sdl_palette_changed = true;
-	VNCServerRequestFullUpdate();
 
 	UNLOCK_PALETTE;
 }

@@ -23,7 +23,6 @@ namespace {
 static bool vnc_enabled = false;
 static int vnc_port = 5900;
 static bool vnc_warned_unavailable = false;
-static bool vnc_needs_full_update = false;
 
 #ifdef HAVE_LIBVNCSERVER
 static rfbScreenInfoPtr vnc_server = NULL;
@@ -460,7 +459,6 @@ static bool vnc_ensure_server(int width, int height, int bpp, int pitch)
 	vnc_mod_state = KMOD_NONE;
 
 	rfbInitServer(vnc_server);
-	vnc_needs_full_update = true;
 	printf("VNC server enabled on port %d (%dx%d)\n", vnc_port, width, height);
 
 	// Start background VNC thread
@@ -522,14 +520,6 @@ void VNCServerUpdate(SDL_Surface *surface, const SDL_Rect &updated_rect)
 		return;
 
 	SDL_Rect clipped = updated_rect;
-
-	// Always expand to full screen to avoid stale VNC framebuffer data.
-	// Without this, partial dirty rects can leave corrupted pixels in
-	// scrollbar/inactive regions that the Mac OS only draws once.
-	clipped.x = 0;
-	clipped.y = 0;
-	clipped.w = surface->w;
-	clipped.h = surface->h;
 	if (clipped.x < 0) {
 		clipped.w += clipped.x;
 		clipped.x = 0;
@@ -638,10 +628,3 @@ void VNCServerProcessEvents()
 }
 
 #endif
-
-void VNCServerRequestFullUpdate()
-{
-#ifdef HAVE_LIBVNCSERVER
-	vnc_needs_full_update = true;
-#endif
-}
