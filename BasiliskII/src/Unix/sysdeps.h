@@ -386,11 +386,21 @@ void Set_pthread_attr(pthread_attr_t *attr, int priority);
 
 #ifdef CPU_CAN_ACCESS_UNALIGNED
 
+#if defined(__aarch64__) || defined(__arm__)
+/* AArch64/ARM: WORDS_BIGENDIAN is set because the UAE CPU core stores Mac
+   memory in big-endian byte order, but the HOST CPU is little-endian.
+   We need byte-swap for multi-byte reads/writes. */
+static inline uae_u32 do_get_mem_long(uae_u32 *a) {return __builtin_bswap32(*a);}
+static inline uae_u32 do_get_mem_word(uae_u16 *a) {return __builtin_bswap16(*a);}
+static inline void do_put_mem_long(uae_u32 *a, uae_u32 v) {*a = __builtin_bswap32(v);}
+static inline void do_put_mem_word(uae_u16 *a, uae_u32 v) {*a = __builtin_bswap16(v);}
+#else
 /* Big-endian CPUs which can do unaligned accesses */
 static inline uae_u32 do_get_mem_long(uae_u32 *a) {return *a;}
 static inline uae_u32 do_get_mem_word(uae_u16 *a) {return *a;}
 static inline void do_put_mem_long(uae_u32 *a, uae_u32 v) {*a = v;}
 static inline void do_put_mem_word(uae_u16 *a, uae_u32 v) {*a = v;}
+#endif
 
 #else /* CPU_CAN_ACCESS_UNALIGNED */
 
