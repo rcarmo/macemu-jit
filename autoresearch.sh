@@ -23,6 +23,8 @@ nosound true
 nocdrom true
 nogui false
 ignoresegv true
+vncserver true
+vncport 5999
 EOF
 
 # Build (incremental — only reconfigure if needed)
@@ -96,6 +98,15 @@ SCORE=0
 [ $SEGFAULTS -eq 0 ] && SCORE=$((SCORE + 10))
 [ $JIT_BLOCKS -gt 0 ] && SCORE=$((SCORE + 10))
 echo "METRIC score=$SCORE"
+
+# Capture VNC screenshot if booted
+if [ $BOOT_OK -eq 1 ] && kill -0 $EMU_PID 2>/dev/null; then
+  python3 "$(dirname "$0")/bin/vnc-screenshot.py" "$RUN_DIR/screenshot.png" 2>/dev/null
+  if [ -f "$RUN_DIR/screenshot.png" ]; then
+    cp "$RUN_DIR/screenshot.png" /workspace/tmp/jit-latest-screenshot.png
+    echo "METRIC screenshot=1"
+  fi
+fi
 
 # Cleanup
 kill $EMU_PID 2>/dev/null; sleep 1; kill -9 $EMU_PID 2>/dev/null

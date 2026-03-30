@@ -1,0 +1,15 @@
+rom /workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM
+disk /workspace/tmp/rpi-basilisk-assets/HD200MB
+ramsize 67108864
+modelid 14
+cpu 4
+fpu true
+jit true
+jitfpu false
+jitcachesize 8192
+screen win/640/480
+displaycolordepth 8
+nosound true
+nocdrom true
+nogui false
+ignoresegv true
