@@ -2998,6 +2998,10 @@ static inline void handle_palette_changes(void)
 	if (sdl_palette_changed) {
 		sdl_palette_changed = false;
 		drv->update_palette();
+		// Force full re-blit so static regions get re-converted with new palette
+		if (the_buffer && the_buffer_copy && !VideoMonitors.empty()) {
+			force_complete_window_refresh();
+		}
 	}
 
 	UNLOCK_PALETTE;
