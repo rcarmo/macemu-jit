@@ -562,10 +562,10 @@ int16 monitor_desc::driver_control(uint16 code, uint32 param, uint32 dce)
 			// Convert palette
 			if (start == 0xffff) {	// Indexed
 				for (uint32 i=0; i<=count; i++) {
-					d_pal = palette + (ReadMacInt16(s_pal) & 0xff) * 3;
-					uint8 red = (uint16)ReadMacInt16(s_pal + 2) >> 8;
-					uint8 green = (uint16)ReadMacInt16(s_pal + 4) >> 8;
-					uint8 blue = (uint16)ReadMacInt16(s_pal + 6) >> 8;
+					d_pal = palette + ReadMacInt8(s_pal + 1) * 3;
+					uint8 red = ReadMacInt8(s_pal + 2);
+					uint8 green = ReadMacInt8(s_pal + 4);
+					uint8 blue = ReadMacInt8(s_pal + 6);
 					if (luminance_mapping && !is_direct)
 						red = green = blue = (red * 0x4ccc + green * 0x970a + blue * 0x1c29) >> 16;
 					if (have_gamma) {
@@ -583,9 +583,9 @@ int16 monitor_desc::driver_control(uint16 code, uint32 param, uint32 dce)
 					return paramErr;
 				d_pal = palette + start * 3;
 				for (uint32 i=0; i<=count; i++) {
-					uint8 red = (uint16)ReadMacInt16(s_pal + 2) >> 8;
-					uint8 green = (uint16)ReadMacInt16(s_pal + 4) >> 8;
-					uint8 blue = (uint16)ReadMacInt16(s_pal + 6) >> 8;
+					uint8 red = ReadMacInt8(s_pal + 2);
+					uint8 green = ReadMacInt8(s_pal + 4);
+					uint8 blue = ReadMacInt8(s_pal + 6);
 					if (luminance_mapping && !is_direct)
 						red = green = blue = (red * 0x4ccc + green * 0x970a + blue * 0x1c29) >> 16;
 					if (have_gamma) {
