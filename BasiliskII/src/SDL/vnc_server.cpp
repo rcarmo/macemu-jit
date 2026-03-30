@@ -519,7 +519,11 @@ void VNCServerUpdate(SDL_Surface *surface, const SDL_Rect &updated_rect)
 	if (updated_rect.w <= 0 || updated_rect.h <= 0)
 		return;
 
-	SDL_Rect clipped = updated_rect;
+	// Use full surface for VNC snapshot instead of partial dirty rect.
+	// The host_surface is correct (verified via PNG dump), but partial
+	// dirty rects leave stale palette-converted pixels in the VNC
+	// framebuffer for regions drawn once (scrollbar backgrounds etc).
+	SDL_Rect clipped = { 0, 0, surface->w, surface->h };
 	if (clipped.x < 0) {
 		clipped.w += clipped.x;
 		clipped.x = 0;
