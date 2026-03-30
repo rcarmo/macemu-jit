@@ -1,0 +1,25 @@
+#!/bin/bash
+# Usage: vnc-screenshot [output.png] [port]
+OUT="${1:-/workspace/tmp/vnc-screenshot.png}"
+PORT="${2:-5999}"
+RAW="/tmp/.vnc_frame_$$.rgba"
+bun -e "
+import { VNCClient } from '/workspace/projects/macemu-vnc/src/index';
+const c = new VNCClient({ port: ${PORT}, timeout: 10000 });
+await c.connect();
+const f = await c.screenshot();
+// Write width, height, then RGBA data
+const hdr = Buffer.alloc(8);
+hdr.writeUInt32LE(f.width, 0);
+hdr.writeUInt32LE(f.height, 4);
+await Bun.write('${RAW}', Buffer.concat([hdr, f.data]));
+c.close();
+" && python3 -c "
+from PIL import Image
+import struct
+with open('${RAW}','rb') as f:
+    w,h = struct.unpack('<II', f.read(8))
+    img = Image.frombytes('RGBA', (w,h), f.read())
+    img.save('${OUT}')
+print('${OUT}')
+" && rm -f "${RAW}"
