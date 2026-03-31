@@ -1229,7 +1229,7 @@ void m68k_emulop_return(void)
 
 void m68k_emulop(uae_u32 opcode)
 {
-	struct M68kRegisters r;
+	struct M68kRegisters r = {};
 	int i;
 
 	for (i=0; i<8; i++) {

@@ -748,7 +748,7 @@ static void ether_dispatch_packet(uint32 p, uint32 length)
 	D(bug(" header %08x%04x %08x%04x %04x\n", ReadMacInt32(ether_data + ed_RHA), ReadMacInt16(ether_data + ed_RHA + 4), ReadMacInt32(ether_data + ed_RHA + 6), ReadMacInt16(ether_data + ed_RHA + 10), ReadMacInt16(ether_data + ed_RHA + 12)));
 
 	// Call protocol handler
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = type;									// Packet type
 	r.d[1] = length - 14;							// Remaining packet length (without header, for ReadPacket)
 	r.a[0] = p + 14;								// Pointer to packet (Mac address, for ReadPacket)

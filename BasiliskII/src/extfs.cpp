@@ -477,7 +477,7 @@ void ExtFSExit(void)
 void InstallExtFS(void)
 {
 	int num_blocks = 0xffff;	// Fake number of blocks of our drive
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	D(bug("InstallExtFS\n"));
 	if (!ready)
@@ -790,7 +790,7 @@ int16 ExtFSComm(uint16 message, uint32 paramBlock, uint32 globalsPtr)
 
 static int16 get_current_dir(uint32 pb, uint32 dirID, uint32 &current_dir, bool no_vol_name = false)
 {
-	M68kRegisters r;
+	M68kRegisters r = {};
 	int16 result;
 
 	// Determine volume
@@ -873,7 +873,7 @@ static int16 get_current_dir(uint32 pb, uint32 dirID, uint32 &current_dir, bool 
 static int16 get_path_component_name(uint32 rec)
 {
 //	D(bug("  getting path component\n"));
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.a[0] = rec;
 	Execute68k(fs_data + fsGetPathComponentName, &r);
 //	D(bug("  UTGetPathComponentName returned %d\n", r.d[0]));
@@ -887,7 +887,7 @@ static int16 get_path_component_name(uint32 rec)
 
 static int16 get_item_and_path(uint32 pb, uint32 dirID, FSItem *&item, bool no_vol_name = false)
 {
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Find FSItem for parent directory
 	int16 result;
@@ -1005,7 +1005,7 @@ static int16 get_item_and_path(uint32 pb, uint32 dirID, FSItem *&item, bool no_v
 static uint32 find_fcb(int16 refNum)
 {
 	D(bug("  finding FCB\n"));
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = refNum;
 	r.a[0] = fs_data + fsReturn;
 	Execute68k(fs_data + fsResolveFCB, &r);
@@ -1036,7 +1036,7 @@ static int16 fs_mount_vol(uint32 pb)
 static int16 fs_volume_mount(uint32 pb)
 {
 	D(bug(" fs_volume_mount(%08lx)\n", pb));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Create new VCB
 	D(bug("  creating VCB\n"));
@@ -1100,7 +1100,7 @@ static int16 fs_volume_mount(uint32 pb)
 static int16 fs_unmount_vol(uint32 vcb)
 {
 	D(bug(" fs_unmount_vol(%08lx), vRefNum %d\n", vcb, ReadMacInt16(vcb + vcbVRefNum)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Remove and free VCB
 	D(bug("  freeing VCB\n"));
@@ -1183,7 +1183,7 @@ static int16 fs_get_vol_parms(uint32 pb)
 static int16 fs_get_vol(uint32 pb)
 {
 	D(bug(" fs_get_vol(%08lx)\n", pb));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Getting default volume
 	D(bug("  getting default volume\n"));
@@ -1197,7 +1197,7 @@ static int16 fs_get_vol(uint32 pb)
 static int16 fs_set_vol(uint32 pb, bool hfs, uint32 vcb)
 {
 	D(bug(" fs_set_vol(%08lx), vRefNum %d, name %.31s, dirID %d\n", pb, ReadMacInt16(pb + ioVRefNum), Mac2HostAddr(ReadMacInt32(pb + ioNamePtr) + 1), ReadMacInt32(pb + ioWDDirID)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Determine parameters
 	uint32 dirID;
@@ -1520,7 +1520,7 @@ static int16 fs_set_cat_info(uint32 pb)
 static int16 fs_open(uint32 pb, uint32 dirID, uint32 vcb, bool resource_fork)
 {
 	D(bug(" fs_open(%08lx), %s, vRefNum %d, name %.31s, dirID %d, perm %d\n", pb, resource_fork ? "rsrc" : "data", ReadMacInt16(pb + ioVRefNum), Mac2HostAddr(ReadMacInt32(pb + ioNamePtr) + 1), dirID, ReadMacInt8(pb + ioPermssn)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Find FSItem for given file
 	FSItem *fs_item;
@@ -1612,7 +1612,7 @@ static int16 fs_open(uint32 pb, uint32 dirID, uint32 vcb, bool resource_fork)
 static int16 fs_close(uint32 pb)
 {
 	D(bug(" fs_close(%08lx), refNum %d\n", pb, ReadMacInt16(pb + ioRefNum)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Find FCB and fd for file
 	uint32 fcb = find_fcb(ReadMacInt16(pb + ioRefNum));
@@ -1645,7 +1645,7 @@ static int16 fs_close(uint32 pb)
 static int16 fs_get_fcb_info(uint32 pb, uint32 vcb)
 {
 	D(bug(" fs_get_fcb_info(%08lx), vRefNum %d, refNum %d, idx %d\n", pb, ReadMacInt16(pb + ioVRefNum), ReadMacInt16(pb + ioRefNum), ReadMacInt16(pb + ioFCBIndx)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	uint32 fcb = 0;
 	if (ReadMacInt16(pb + ioFCBIndx) == 0) {	// Get information about single file
@@ -1691,7 +1691,7 @@ static int16 fs_get_fcb_info(uint32 pb, uint32 vcb)
 static int16 fs_get_eof(uint32 pb)
 {
 	D(bug(" fs_get_eof(%08lx), refNum %d\n", pb, ReadMacInt16(pb + ioRefNum)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Find FCB and fd for file
 	uint32 fcb = find_fcb(ReadMacInt16(pb + ioRefNum));
@@ -1729,7 +1729,7 @@ static int16 fs_get_eof(uint32 pb)
 static int16 fs_set_eof(uint32 pb)
 {
 	D(bug(" fs_set_eof(%08lx), refNum %d, size %d\n", pb, ReadMacInt16(pb + ioRefNum), ReadMacInt32(pb + ioMisc)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Find FCB and fd for file
 	uint32 fcb = find_fcb(ReadMacInt16(pb + ioRefNum));
@@ -2101,7 +2101,7 @@ static int16 fs_cat_move(uint32 pb)
 static int16 fs_open_wd(uint32 pb)
 {
 	D(bug(" fs_open_wd(%08lx), vRefNum %d, name %.31s, dirID %d\n", pb, ReadMacInt16(pb + ioVRefNum), Mac2HostAddr(ReadMacInt32(pb + ioNamePtr) + 1), ReadMacInt32(pb + ioWDDirID)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Allocate WDCB
 	D(bug("  allocating WDCB\n"));
@@ -2115,7 +2115,7 @@ static int16 fs_open_wd(uint32 pb)
 static int16 fs_close_wd(uint32 pb)
 {
 	D(bug(" fs_close_wd(%08lx), vRefNum %d\n", pb, ReadMacInt16(pb + ioVRefNum)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Release WDCB
 	D(bug("  releasing WDCB\n"));
@@ -2129,7 +2129,7 @@ static int16 fs_close_wd(uint32 pb)
 static int16 fs_get_wd_info(uint32 pb, uint32 vcb)
 {
 	D(bug(" fs_get_wd_info(%08lx), vRefNum %d, idx %d, procID %d\n", pb, ReadMacInt16(pb + ioVRefNum), ReadMacInt16(pb + ioWDIndex), ReadMacInt32(pb + ioWDProcID)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Querying volume?
 	if (ReadMacInt16(pb + ioWDIndex) == 0 && ReadMacInt16(pb + ioVRefNum) == ReadMacInt16(vcb + vcbVRefNum)) {

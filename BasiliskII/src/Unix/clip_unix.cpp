@@ -473,7 +473,7 @@ static void do_getscrap(void **handle, uint32 type, int32 offset)
 		return;
 
 	// Allocate space for new scrap in MacOS side
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = data.size();
 	Execute68kTrap(0xa71e, &r);			// NewPtrSysClear()
 	uint32 scrap_area = r.a[0];

@@ -160,7 +160,7 @@ void AudioInterrupt(void)
 	uint32 apple_stream_info;
 	uint32 numSamples;
 	int16 *p;
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	if (!AudioStatus.mixer)
 	{

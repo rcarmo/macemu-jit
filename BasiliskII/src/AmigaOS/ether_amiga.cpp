@@ -688,7 +688,7 @@ void EtherInterrupt(void)
 		D(bug(" header %08lx%04lx %08lx%04lx %04lx\n", ReadMacInt32(ether_data + ed_RHA), ReadMacInt16(ether_data + ed_RHA + 4), ReadMacInt32(ether_data + ed_RHA + 6), ReadMacInt16(ether_data + ed_RHA + 10), ReadMacInt16(ether_data + ed_RHA + 12)));
 
 		// Call protocol handler
-		M68kRegisters r;
+		M68kRegisters r = {};
 		r.d[0] = *(uint16 *)((uint32)io->ios2_Data + 12);	// Packet type
 		r.d[1] = io->ios2_DataLength - 18;					// Remaining packet length (without header, for ReadPacket) (-18 because the CRC is also included)
 		r.a[0] = (uint32)io->ios2_Data + 14;				// Pointer to packet (host address, for ReadPacket)

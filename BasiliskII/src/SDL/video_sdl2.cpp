@@ -153,7 +153,7 @@ void VideoRequestScreenDumpPNG(void)
 	sdl_png_dump_requested = 1;
 }
 
-static std::string build_png_dump_path()
+static std::string build_png_dump_path(const char *label = NULL)
 {
 	const char *dump_dir = getenv("B2_DUMP_DIR");
 	if (!dump_dir || !*dump_dir)
@@ -163,8 +163,12 @@ static std::string build_png_dump_path()
 	gettimeofday(&tv, NULL);
 
 	char path[512];
-	snprintf(path, sizeof(path), "%s/basiliskii-frame-%ld-%06ld.png", dump_dir,
-		(long)tv.tv_sec, (long)tv.tv_usec);
+	if (label && *label)
+		snprintf(path, sizeof(path), "%s/basiliskii-frame-%s-%ld-%06ld.png", dump_dir, label,
+			(long)tv.tv_sec, (long)tv.tv_usec);
+	else
+		snprintf(path, sizeof(path), "%s/basiliskii-frame-%ld-%06ld.png", dump_dir,
+			(long)tv.tv_sec, (long)tv.tv_usec);
 	return std::string(path);
 }
 
@@ -211,7 +215,7 @@ static bool write_rgba_png(const char *path, const uint8_t *pixels, int width, i
 }
 #endif
 
-static bool dump_surface_png_now(SDL_Surface *surface, const char *reason)
+static bool dump_surface_png_now(SDL_Surface *surface, const char *reason, const char *label = NULL)
 {
 	if (!surface)
 		return false;
@@ -241,7 +245,7 @@ static bool dump_surface_png_now(SDL_Surface *surface, const char *reason)
 		return false;
 	}
 
-	const std::string path = build_png_dump_path();
+	const std::string path = build_png_dump_path(label);
 	const bool ok = write_rgba_png(path.c_str(), static_cast<const uint8_t *>(rgba->pixels), rgba->w, rgba->h, rgba->pitch);
 	SDL_FreeSurface(rgba);
 
@@ -254,13 +258,15 @@ static bool dump_surface_png_now(SDL_Surface *surface, const char *reason)
 #endif
 }
 
+static void dump_debug_surfaces_now(const char *reason);
+
 static void maybe_dump_surface_png(SDL_Surface *surface)
 {
 	if (!sdl_png_dump_requested)
 		return;
 
 	sdl_png_dump_requested = 0;
-	dump_surface_png_now(surface, "signal");
+	dump_debug_surfaces_now("signal");
 }
 
 static bool ctrl_down = false;						// Flag: Ctrl key pressed (for use with hotkeys)
@@ -292,6 +298,17 @@ static SDL_Palette *sdl_palette = NULL;				// Color palette to be used as CLUT a
 static bool sdl_palette_changed = false;			// Flag: Palette changed, redraw thread must set new colors
 static bool toggle_fullscreen = false;
 static bool did_add_event_watch = false;
+
+static void dump_debug_surfaces_now(const char *reason)
+{
+	fprintf(stderr, "PNG debug dump requested (%s): guest=%p host=%p\n",
+		reason ? reason : "unknown", (void *)guest_surface, (void *)host_surface);
+	fflush(stderr);
+	if (guest_surface)
+		dump_surface_png_now(guest_surface, reason, "guest");
+	if (host_surface && host_surface != guest_surface)
+		dump_surface_png_now(host_surface, reason, "host");
+}
 
 static bool mouse_grabbed = false;
 
@@ -1005,13 +1022,18 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 #endif
 			break;
 		case VIDEO_DEPTH_16BIT:
-			guest_surface = SDL_CreateRGBSurface(0, width, height, 16, 0xf800, 0x07e0, 0x001f, 0);
+			// Mac 16-bit direct pixels are 5/5/5, not 5/6/5.
+			guest_surface = SDL_CreateRGBSurface(0, width, height, 16, 0x7c00, 0x03e0, 0x001f, 0);
 			break;
 		case VIDEO_DEPTH_32BIT:
 #ifdef ENABLE_VOSF
-			guest_surface = SDL_CreateRGBSurface(0, width, height, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+			// Mac 32-bit direct pixels are stored as xRGB bytes in memory.
+			guest_surface = SDL_CreateRGBSurface(0, width, height, 32, 0x0000ff00, 0x00ff0000, 0xff000000, 0x000000ff);
 #else
-			guest_surface = SDL_CreateRGBSurfaceFrom(the_buffer, width, height, 32, pitch, 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff);
+			// Wrap raw Mac frame buffer as xRGB (big-endian byte order in guest memory,
+			// little-endian 32-bit host words => masks below). Keep the low byte as a
+			// dummy alpha channel so SDL's conversion path behaves consistently.
+			guest_surface = SDL_CreateRGBSurfaceFrom(the_buffer, width, height, 32, pitch, 0x0000ff00, 0x00ff0000, 0xff000000, 0x000000ff);
 #endif
 			host_surface = guest_surface;
             break;

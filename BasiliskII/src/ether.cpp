@@ -223,7 +223,7 @@ int16 EtherOpen(uint32 pb, uint32 dce)
 	D(bug("EtherOpen\n"));
 
 	// Allocate driver data
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = SIZEOF_etherdata;
 	Execute68kTrap(0xa71e, &r);		// NewPtrSysClear()
 	if (r.a[0] == 0)
@@ -441,7 +441,7 @@ void ether_udp_read(uint32 packet, int length, struct sockaddr_in *from)
 	D(bug(" header %08x%04x %08x%04x %04x\n", ReadMacInt32(ether_data + ed_RHA), ReadMacInt16(ether_data + ed_RHA + 4), ReadMacInt32(ether_data + ed_RHA + 6), ReadMacInt16(ether_data + ed_RHA + 10), ReadMacInt16(ether_data + ed_RHA + 12)));
 
 	// Call protocol handler
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = type;									// Packet type
 	r.d[1] = length - 14;							// Remaining packet length (without header, for ReadPacket)
 	r.a[0] = packet + 14;							// Pointer to packet (Mac address, for ReadPacket)
@@ -471,7 +471,7 @@ EthernetPacket::EthernetPacket()
 	if (ether_packet && n_ether_packets == 1)
 		packet = ether_packet;
 	else {
-        M68kRegisters r;
+        M68kRegisters r = {};
         r.d[0] = 1516;
         Execute68kTrap(0xa71e, &r);		// NewPtrSysClear()
 		assert(r.a[0] != 0);
@@ -485,7 +485,7 @@ EthernetPacket::~EthernetPacket()
 {
 	--n_ether_packets;
 	if (packet != ether_packet) {
-		M68kRegisters r;
+		M68kRegisters r = {};
 		r.a[0] = packet;
 		Execute68kTrap(0xa01f, &r);		// DisposePtr
 	}

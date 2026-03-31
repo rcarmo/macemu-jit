@@ -75,7 +75,7 @@ int16 SerialOpen(uint32 pb, uint32 dce, int port)
 			return res;
 
 		// Allocate Deferred Task structures
-		M68kRegisters r;
+		M68kRegisters r = {};
 		r.d[0] = SIZEOF_serdt * 2;
 		Execute68kTrap(0xa71e, &r);		// NewPtrSysClear()
 		if (r.a[0] == 0) {
@@ -213,7 +213,7 @@ int16 SerialClose(uint32 pb, uint32 dce, int port)
 		SERDPort *the_port = the_serd_port[port >> 1];
 		if (the_port->is_open) {
 			int16 res = the_port->close();
-			M68kRegisters r;				// Free Deferred Task structures
+			M68kRegisters r = {};				// Free Deferred Task structures
 			r.a[0] = the_port->input_dt;
 			Execute68kTrap(0xa01f, &r);		// DisposePtr()
 			the_port->is_open = false;

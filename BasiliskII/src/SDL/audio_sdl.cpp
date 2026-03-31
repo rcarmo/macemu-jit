@@ -346,7 +346,7 @@ void AudioInterrupt(void)
 
 	// Get data from apple mixer
 	if (AudioStatus.mixer) {
-		M68kRegisters r;
+		M68kRegisters r = {};
 		r.a[0] = audio_data + adatStreamInfo;
 		r.a[1] = AudioStatus.mixer;
 		Execute68k(audio_data + adatGetSourceData, &r);

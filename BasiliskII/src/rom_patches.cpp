@@ -710,7 +710,7 @@ static const uint8 adbop_patch[] = {	// Call ADBOp() completion procedure
 void InstallDrivers(uint32 pb)
 {
 	D(bug("InstallDrivers, pb %08x\n", pb));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Install Microseconds() replacement routine
 	r.a[0] = ROMBaseMac + microseconds_offset;
@@ -767,7 +767,7 @@ void InstallSERD(void)
 	D(bug("InstallSERD\n"));
 
 	// All drivers are inside the SERD resource
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	// Install .AIn driver
 	r.d[0] = (uint32)-6;

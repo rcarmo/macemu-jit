@@ -625,7 +625,7 @@ void TimerInterrupt(void)
 			uint32 addr = ReadMacInt32(tm + tmAddr);
 			if (addr) {
 				D(bug("Calling TimeTask %08lx, addr %08lx\n", tm, addr));
-				M68kRegisters r;
+				M68kRegisters r = {};
 				r.a[0] = addr;
 				r.a[1] = tm;
 				Execute68k(r.a[0], &r);

@@ -38,6 +38,14 @@
 #include "video_defs.h"
 
 #define DEBUG 1
+
+static bool trace_video_calls_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_VIDEO_CALLS") && *getenv("B2_TRACE_VIDEO_CALLS")) ? 1 : 0;
+	return cached != 0;
+}
 #include "debug.h"
 
 
@@ -283,7 +291,7 @@ void monitor_desc::load_gamma_ramp(void)
 
 bool monitor_desc::allocate_gamma_table(int size)
 {
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	if (size > alloc_gamma_table_size) {
 		if (gamma_table) {
@@ -377,7 +385,7 @@ void monitor_desc::switch_mode(vector<video_mode>::const_iterator it, uint32 par
 	current_apple_mode = depth_to_apple_mode(mode.depth);
 	current_id = mode.resolution_id;
 
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.a[0] = slot_param;
 
 	// Find functional sResource for this display
@@ -466,7 +474,7 @@ int16 monitor_desc::driver_open(void)
 	dm_present = false;
 
 	// Allocate Slot Manager parameter block in Mac RAM
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = SIZEOF_SPBlock;
 	Execute68kTrap(0xa71e, &r);	// NewPtrSysClear()
 	if (r.a[0] == 0)
@@ -528,6 +536,19 @@ int16 monitor_desc::driver_control(uint16 code, uint32 param, uint32 dce)
 		case cscSetEntries:		// Set palette
 		case cscDirectSetEntries: {
 			D(bug(" (Direct)SetEntries table %08x, count %d, start %d\n", ReadMacInt32(param + csTable), ReadMacInt16(param + csCount), ReadMacInt16(param + csStart)));
+			if (trace_video_calls_enabled()) {
+				fprintf(stderr, "VIDEO TRACE SetEntries direct=%d table=%08x count=%u start=%u\n", code == cscDirectSetEntries, ReadMacInt32(param + csTable), (unsigned)ReadMacInt16(param + csCount), (unsigned)ReadMacInt16(param + csStart));
+				uint32 trace_table = ReadMacInt32(param + csTable);
+				for (int trace_i = 0; trace_i < 4; ++trace_i) {
+					uint32 e = trace_table + trace_i * 8;
+					fprintf(stderr, "VIDEO TRACE   entry[%d] val=%u rgb=(%u,%u,%u)\n",
+						trace_i,
+						(unsigned)ReadMacInt16(e),
+						(unsigned)(ReadMacInt16(e + 2) >> 8),
+						(unsigned)(ReadMacInt16(e + 4) >> 8),
+						(unsigned)(ReadMacInt16(e + 6) >> 8));
+				}
+			}
 			bool is_direct = IsDirectMode(*current_mode);
 			if (code == cscSetEntries && is_direct)
 				return controlErr;
@@ -606,6 +627,18 @@ int16 monitor_desc::driver_control(uint16 code, uint32 param, uint32 dce)
 		case cscSetGamma: {		// Set gamma table
 			uint32 user_table = ReadMacInt32(param + csGTable);
 			D(bug(" SetGamma %08x\n", user_table));
+			if (trace_video_calls_enabled()) {
+				fprintf(stderr, "VIDEO TRACE SetGamma table=%08x\n", user_table);
+				if (user_table) {
+					fprintf(stderr, "VIDEO TRACE   gamma version=%u type=%u formula=%u chan=%u dataCnt=%u dataWidth=%u\n",
+						(unsigned)ReadMacInt16(user_table + gVersion),
+						(unsigned)ReadMacInt16(user_table + gType),
+						(unsigned)ReadMacInt16(user_table + gFormulaSize),
+						(unsigned)ReadMacInt16(user_table + gChanCnt),
+						(unsigned)ReadMacInt16(user_table + gDataCnt),
+						(unsigned)ReadMacInt16(user_table + gDataWidth));
+				}
+			}
 			return set_gamma_table(user_table);
 		}
 
@@ -643,6 +676,8 @@ int16 monitor_desc::driver_control(uint16 code, uint32 param, uint32 dce)
 		case cscSetGray:		// Enable/disable luminance mapping
 			D(bug(" SetGray %02x\n", ReadMacInt8(param + csMode)));
 			luminance_mapping = ReadMacInt8(param + csMode) != 0;
+			if (trace_video_calls_enabled())
+				fprintf(stderr, "VIDEO TRACE SetGray mode=%u\n", (unsigned)ReadMacInt8(param + csMode));
 			return noErr;
 
 		case cscSetInterrupt:	// Enable/disable VBL
@@ -725,6 +760,8 @@ int16 monitor_desc::driver_status(uint16 code, uint32 param)
 
 		case cscGetEntries: {		// Read palette
 			D(bug(" GetEntries table %08x, count %d, start %d\n", ReadMacInt32(param + csTable), ReadMacInt16(param + csCount), ReadMacInt16(param + csStart)));
+			if (trace_video_calls_enabled())
+				fprintf(stderr, "VIDEO TRACE GetEntries table=%08x count=%u start=%u\n", ReadMacInt32(param + csTable), (unsigned)ReadMacInt16(param + csCount), (unsigned)ReadMacInt16(param + csStart));
 
 			uint8 *s_pal;									// Source palette
 			uint32 d_pal = ReadMacInt32(param + csTable);	// Destination palette
@@ -752,6 +789,7 @@ int16 monitor_desc::driver_status(uint16 code, uint32 param)
 					uint8 red = *s_pal++;
 					uint8 green = *s_pal++;
 					uint8 blue = *s_pal++;
+					WriteMacInt16(d_pal, start + i);
 					WriteMacInt16(d_pal + 2, red * 0x0101);
 					WriteMacInt16(d_pal + 4, green * 0x0101);
 					WriteMacInt16(d_pal + 6, blue * 0x0101);
@@ -883,6 +921,8 @@ int16 monitor_desc::driver_status(uint16 code, uint32 param)
 			uint32 id = ReadMacInt32(param + csDisplayModeID);
 			uint16 mode = ReadMacInt16(param + csDepthMode);
 			D(bug(" GetVideoParameters %04x/%08x\n", mode, id));
+			if (trace_video_calls_enabled())
+				fprintf(stderr, "VIDEO TRACE GetVideoParameters mode=%04x id=%08x\n", mode, id);
 			dm_present = true;	// Display Manager seems to be present
 			D(bug("  Display Manager detected\n"));
 
@@ -923,6 +963,7 @@ int16 monitor_desc::driver_status(uint16 code, uint32 param)
 					WriteMacInt16(vp + vpPixelSize, pix_size);
 					WriteMacInt16(vp + vpCmpCount, cmp_count);
 					WriteMacInt16(vp + vpCmpSize, cmp_size);
+					WriteMacInt32(vp + vpPlaneBytes, 0);
 					WriteMacInt32(param + csPageCount, 1);
 					WriteMacInt32(param + csDeviceType, dev_type);
 					return noErr;

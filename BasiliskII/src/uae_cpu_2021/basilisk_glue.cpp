@@ -32,6 +32,13 @@
 #include "newcpu.h"
 #include "compiler/compemu.h"
 
+static bool trace_d6_enabled_glue()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_D6") && *getenv("B2_TRACE_D6")) ? 1 : 0;
+	return cached != 0;
+}
 
 // RAM and ROM pointers
 uint32 RAMBaseMac = 0;		// RAM base (Mac address space) gb-- initializer is important
@@ -189,6 +196,9 @@ void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 {
 	int i;
 
+	if (trace_d6_enabled_glue())
+		fprintf(stderr, "TRACE_D6 Execute68kTrap enter trap=%04x oldpc=%08x d6=%08x d7=%08x a5=%08x\n", trap, m68k_getpc(), r->d[6], r->d[7], r->a[5]);
+
 	// Save old PC
 	uaecptr oldpc = m68k_getpc();
 
@@ -222,6 +232,8 @@ void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 		r->d[i] = m68k_dreg(regs, i);
 	for (i=0; i<7; i++)
 		r->a[i] = m68k_areg(regs, i);
+	if (trace_d6_enabled_glue())
+		fprintf(stderr, "TRACE_D6 Execute68kTrap leave trap=%04x restorepc=%08x d6=%08x d7=%08x a5=%08x\n", trap, oldpc, r->d[6], r->d[7], r->a[5]);
 	quit_program = 0;
 }
 
@@ -235,6 +247,9 @@ void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 void Execute68k(uint32 addr, struct M68kRegisters *r)
 {
 	int i;
+
+	if (trace_d6_enabled_glue())
+		fprintf(stderr, "TRACE_D6 Execute68k enter addr=%08x oldpc=%08x d6=%08x d7=%08x a5=%08x\n", addr, m68k_getpc(), r->d[6], r->d[7], r->a[5]);
 
 	// Save old PC
 	uaecptr oldpc = m68k_getpc();
@@ -269,6 +284,8 @@ void Execute68k(uint32 addr, struct M68kRegisters *r)
 		r->d[i] = m68k_dreg(regs, i);
 	for (i=0; i<7; i++)
 		r->a[i] = m68k_areg(regs, i);
+	if (trace_d6_enabled_glue())
+		fprintf(stderr, "TRACE_D6 Execute68k leave addr=%08x restorepc=%08x d6=%08x d7=%08x a5=%08x\n", addr, oldpc, r->d[6], r->d[7], r->a[5]);
 	quit_program = 0;
 }
 

@@ -74,7 +74,7 @@ void AudioReset(void)
 static int32 AudioGetInfo(uint32 infoPtr, uint32 selector, uint32 sourceID)
 {
 	D(bug(" AudioGetInfo %c%c%c%c, infoPtr %08lx, source ID %08lx\n", selector >> 24, (selector >> 16) & 0xff, (selector >> 8) & 0xff, selector & 0xff, infoPtr, sourceID));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	switch (selector) {
 		case siSampleSize:
@@ -169,7 +169,7 @@ static int32 AudioGetInfo(uint32 infoPtr, uint32 selector, uint32 sourceID)
 		default:	// Delegate to Apple Mixer
 			if (AudioStatus.mixer == 0)
 				return badComponentSelector;
-			M68kRegisters r;
+			M68kRegisters r = {};
 			r.a[0] = infoPtr;
 			r.d[0] = selector;
 			r.a[1] = sourceID;
@@ -189,7 +189,7 @@ static int32 AudioGetInfo(uint32 infoPtr, uint32 selector, uint32 sourceID)
 static int32 AudioSetInfo(uint32 infoPtr, uint32 selector, uint32 sourceID)
 {
 	D(bug(" AudioSetInfo %c%c%c%c, infoPtr %08lx, source ID %08lx\n", selector >> 24, (selector >> 16) & 0xff, (selector >> 8) & 0xff, selector & 0xff, infoPtr, sourceID));
-	M68kRegisters r;
+	M68kRegisters r = {};
 
 	switch (selector) {
 		case siSampleSize:
@@ -277,7 +277,7 @@ static int32 AudioSetInfo(uint32 infoPtr, uint32 selector, uint32 sourceID)
 int32 AudioDispatch(uint32 params, uint32 globals)
 {
 	D(bug("AudioDispatch params %08lx (size %d), what %d\n", params, ReadMacInt8(params + cp_paramSize), (int16)ReadMacInt16(params + cp_what)));
-	M68kRegisters r;
+	M68kRegisters r = {};
 	uint32 p = params + cp_params;
 	int16 selector = (int16)ReadMacInt16(params + cp_what);
 
@@ -676,7 +676,7 @@ int16 SoundInStatus(uint32 pb, uint32 dce) // A0 points to Device Manager parame
 			// todo: add soundin ICN, borrow from CD ROM for now
 			WriteMacInt32(pb + csParam, 0);
 			
-			M68kRegisters r;
+			M68kRegisters r = {};
 			r.d[0] = sizeof(CDROMIcon);
 			Execute68kTrap(0xa122, &r);	// NewHandle()
 			uint32 h = r.a[0];
@@ -689,7 +689,7 @@ int16 SoundInStatus(uint32 pb, uint32 dce) // A0 points to Device Manager parame
 			return noErr;
 			
 			// 68k code causes crash in sheep and link error in basilisk
-//			M68kRegisters r;
+//			M68kRegisters r = {};
 //			static const uint8 proc[] = {
 //				0x55, 0x8f,							// 	subq.l	#2,sp
 //				0xa9, 0x94,							// 	CurResFile
@@ -752,7 +752,7 @@ int16 SoundInStatus(uint32 pb, uint32 dce) // A0 points to Device Manager parame
 
 			WriteMacInt32(pb + csParam, 0);
 
-			M68kRegisters r;
+			M68kRegisters r = {};
 			r.d[0] = sizeof(str);
 			Execute68kTrap(0xa122, &r);	// NewHandle()
 			uint32 h = r.a[0];
@@ -795,7 +795,7 @@ int16 SoundInStatus(uint32 pb, uint32 dce) // A0 points to Device Manager parame
 		case siSampleRateAvailable: {
 			WriteMacInt32(pb + csParam, 0);
             
-            M68kRegisters r;
+            M68kRegisters r = {};
             r.d[0] = 4;
             Execute68kTrap(0xa122, &r);    // NewHandle()
             uint32 h = r.a[0];

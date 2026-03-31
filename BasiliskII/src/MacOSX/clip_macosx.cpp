@@ -115,7 +115,7 @@ void GetScrap(void **handle, uint32 type, int32 offset)
 	if (GetScrapFlavorSize(theScrap, type, &byteCount) == noErr) {
 
 		// Allocate space for new scrap in MacOS side
-		M68kRegisters r;
+		M68kRegisters r = {};
 		r.d[0] = byteCount;
 		Execute68kTrap(0xa71e, &r);				// NewPtrSysClear()
 		uint32 scrap_area = r.a[0];

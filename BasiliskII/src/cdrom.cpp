@@ -416,7 +416,7 @@ static void mount_mountable_volumes(void)
 		// Mount disk if flagged
 		if (info->to_be_mounted) {
 			D(bug(" mounting drive %d\n", info->num));
-			M68kRegisters r;
+			M68kRegisters r = {};
 			r.d[0] = info->num;
 			r.a[0] = 7;	// diskEvent
 			Execute68kTrap(0xa02f, &r);		// PostEvent()
@@ -468,7 +468,7 @@ uint16 InsertNewDriverUnit(uint32 handle) {
 		newUnitEntryCount = minUnitEntryToUse + 1;
 
 	// Allocate space for a new unit table
-	M68kRegisters r;
+	M68kRegisters r = {};
 	r.d[0] = newUnitEntryCount * 4;
 	Execute68kTrap(0xa71e, &r);		// NewPtrSysClear()
 	if (r.a[0] == 0)
@@ -526,7 +526,7 @@ int16 CDROMOpen(uint32 pb, uint32 dce)
 			info->power_mode = 0;
 			
 			// Allocate drive status record
-			M68kRegisters r;
+			M68kRegisters r = {};
 			r.d[0] = SIZEOF_DrvSts;
 			Execute68kTrap(0xa71e, &r);		// NewPtrSysClear()
 			if (r.a[0] == 0)

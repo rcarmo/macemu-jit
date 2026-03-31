@@ -243,7 +243,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			InstallDrivers(r->a[0]);
 
 			// Install PutScrap() patch
-			M68kRegisters r;
+			M68kRegisters r = {};
 			if (PutScrapPatch) {
 				r.d[0] = 0xa9fe;
 				r.a[0] = PutScrapPatch;
@@ -468,7 +468,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 
 					// Call DoVBLTask(0)
 					if (ROMVersion == ROM_VERSION_32) {
-						M68kRegisters r2;
+						M68kRegisters r2 = {};
 						r2.d[0] = 0;
 						Execute68kTrap(0xa072, &r2);
 					}

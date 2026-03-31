@@ -514,7 +514,7 @@ void EtherInterrupt(void)
 				D(bug(" header %08lx%04lx %08lx%04lx %04lx\n", ReadMacInt32(ether_data + ed_RHA), ReadMacInt16(ether_data + ed_RHA + 4), ReadMacInt32(ether_data + ed_RHA + 6), ReadMacInt16(ether_data + ed_RHA + 10), ReadMacInt16(ether_data + ed_RHA + 12)));
 
 				// Call protocol handler
-				M68kRegisters r;
+				M68kRegisters r = {};
 				r.d[0] = type;									// Packet type
 				r.d[1] = p->length - 14;						// Remaining packet length (without header, for ReadPacket)
 				r.a[0] = packet + 14;							// Pointer to packet (Mac address, for ReadPacket)

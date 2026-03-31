@@ -38,6 +38,14 @@
 #include "main.h"
 #include "emul_op.h"
 #include "m68k.h"
+
+static bool trace_d6_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_D6") && *getenv("B2_TRACE_D6")) ? 1 : 0;
+	return cached != 0;
+}
 #include "memory.h"
 #include "readcpu.h"
 #include "newcpu.h"
@@ -1101,12 +1109,12 @@ static void restore_regs(struct M68kRegisters &r)
 void m68k_emulop(uae_u32 opcode)
 {
 #if 0
-	struct M68kRegisters r;
+	struct M68kRegisters r = {};
 	save_regs(r);
 	if (EmulOp(opcode, &r))
 		restore_regs(r);
 #else
-	struct M68kRegisters r;
+	struct M68kRegisters r = {};
 	int i;
 
 	for (i=0; i<8; i++) {
@@ -1115,7 +1123,11 @@ void m68k_emulop(uae_u32 opcode)
 	}
 	MakeSR();
 	r.sr = regs.sr;
+	if (trace_d6_enabled())
+		fprintf(stderr, "TRACE_D6 m68k_emulop enter opcode=%04x pc=%08x d6=%08x d7=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[5]);
 	EmulOp(opcode, &r);
+	if (trace_d6_enabled())
+		fprintf(stderr, "TRACE_D6 m68k_emulop leave opcode=%04x pc=%08x d6=%08x d7=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[5]);
 	for (i=0; i<8; i++) {
 		m68k_dreg(regs, i) = r.d[i];
 		m68k_areg(regs, i) = r.a[i];
@@ -1128,7 +1140,7 @@ void m68k_emulop(uae_u32 opcode)
 #if 0
 void m68k_natfeat_id(void)
 {
-	struct M68kRegisters r;
+	struct M68kRegisters r = {};
 
 	/* is it really necessary to save all registers? */
 	save_regs(r);
@@ -1141,7 +1153,7 @@ void m68k_natfeat_id(void)
 
 void m68k_natfeat_call(void)
 {
-	struct M68kRegisters r;
+	struct M68kRegisters r = {};
 
 	/* is it really necessary to save all registers? */
 	save_regs(r);
@@ -1198,7 +1210,7 @@ static uae_u32 m68k_alloca(int size)
 uae_u32 linea68000(volatile uae_u16 opcode)
 {
 	sigjmp_buf jmp;
-	struct M68kRegisters r;
+	struct M68kRegisters r = {};
 	volatile uae_u32 abase = 0;
 	
 	SAVE_EXCEPTION;

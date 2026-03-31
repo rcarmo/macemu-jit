@@ -158,6 +158,31 @@ int jit_n_addr_unsafe = 0;
 static uae_u8 *baseaddr[65536] = { 0 };
 static void *mem_banks[65536] = { 0 };
 
+static inline bool jit_force_special_fb_writes(void)
+{
+	static int enabled = -1;
+	if (enabled < 0)
+		enabled = (getenv("B2_JIT_FB_SPECIAL_WRITES") && *getenv("B2_JIT_FB_SPECIAL_WRITES")) ? 1 : 0;
+	return enabled != 0;
+}
+
+static inline bool jit_force_all_special_mem(void)
+{
+	static int enabled = -1;
+	if (enabled < 0)
+		enabled = (getenv("B2_JIT_ALL_SPECIAL_MEM") && *getenv("B2_JIT_ALL_SPECIAL_MEM")) ? 1 : 0;
+	return enabled != 0;
+}
+
+static inline bool jit_is_framebuffer_addr(uae_u32 addr)
+{
+	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
+	   at 0x14110000 for our test setups. Use a generous 2 MiB window so we can
+	   force JIT VRAM writes through the slow mem-bank helpers and distinguish
+	   store-path bugs from value-generation bugs. */
+	return addr >= 0x14110000 && addr < 0x14310000;
+}
+
 
 static inline int distrust_check(int value)
 {
@@ -2536,7 +2561,7 @@ static inline void writemem_special(int address, int source, int offset)
 
 void writebyte(int address, int source)
 {
-    if ((special_mem & S_WRITE) || distrust_byte() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_WRITE) || distrust_byte() || jit_n_addr_unsafe || (jit_force_special_fb_writes() && jit_is_framebuffer_addr(address)))
         writemem_special(address, source, SIZEOF_VOID_P * 5);
     else
         writemem_real(address, source, 1);
@@ -2544,7 +2569,7 @@ void writebyte(int address, int source)
 
 void writeword(int address, int source)
 {
-    if ((special_mem & S_WRITE) || distrust_word() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_WRITE) || distrust_word() || jit_n_addr_unsafe || (jit_force_special_fb_writes() && jit_is_framebuffer_addr(address)))
         writemem_special(address, source, SIZEOF_VOID_P * 4);
     else
         writemem_real(address, source, 2);
@@ -2552,7 +2577,7 @@ void writeword(int address, int source)
 
 void writelong(int address, int source)
 {
-    if ((special_mem & S_WRITE) || distrust_long() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_WRITE) || distrust_long() || jit_n_addr_unsafe || (jit_force_special_fb_writes() && jit_is_framebuffer_addr(address)))
         writemem_special(address, source, SIZEOF_VOID_P * 3);
     else
         writemem_real(address, source, 4);
@@ -2561,7 +2586,7 @@ void writelong(int address, int source)
 // Now the same for clobber variant
 void writeword_clobber(int address, int source)
 {
-    if ((special_mem & S_WRITE) || distrust_word() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_WRITE) || distrust_word() || jit_n_addr_unsafe || (jit_force_special_fb_writes() && jit_is_framebuffer_addr(address)))
         writemem_special(address, source, SIZEOF_VOID_P * 4);
     else
         writemem_real(address, source, 2);
@@ -2570,7 +2595,7 @@ void writeword_clobber(int address, int source)
 
 void writelong_clobber(int address, int source)
 {
-    if ((special_mem & S_WRITE) || distrust_long() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_WRITE) || distrust_long() || jit_n_addr_unsafe || (jit_force_special_fb_writes() && jit_is_framebuffer_addr(address)))
         writemem_special(address, source, SIZEOF_VOID_P * 3);
     else
         writemem_real(address, source, 4);
@@ -2606,7 +2631,7 @@ static inline void readmem_special(int address, int dest, int offset)
 
 void readbyte(int address, int dest)
 {
-    if ((special_mem & S_READ) || distrust_byte() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_READ) || distrust_byte() || jit_n_addr_unsafe)
         readmem_special(address, dest, SIZEOF_VOID_P * 2);
     else
         readmem_real(address, dest, 1);
@@ -2614,7 +2639,7 @@ void readbyte(int address, int dest)
 
 void readword(int address, int dest)
 {
-    if ((special_mem & S_READ) || distrust_word() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_READ) || distrust_word() || jit_n_addr_unsafe)
         readmem_special(address, dest, SIZEOF_VOID_P * 1);
     else
         readmem_real(address, dest, 2);
@@ -2622,7 +2647,7 @@ void readword(int address, int dest)
 
 void readlong(int address, int dest)
 {
-    if ((special_mem & S_READ) || distrust_long() || jit_n_addr_unsafe)
+    if (jit_force_all_special_mem() || (special_mem & S_READ) || distrust_long() || jit_n_addr_unsafe)
         readmem_special(address, dest, SIZEOF_VOID_P * 0);
     else
         readmem_real(address, dest, 4);
@@ -3969,6 +3994,15 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
         flush(1);
 
         compemu_raw_jmp((uintptr)bi->direct_handler);
+
+        /* AArch64 optlev=0 blocks execute via exec_nostats()/interpreter and need
+           a clean in-memory m68k register state. If other compiled blocks jump to
+           their direct handler, they bypass this wrapper and stale cached Dn/An
+           values can leak into the interpreter path. Route direct jumps for
+           non-compiled blocks through the flushed wrapper instead. */
+        if (!was_comp) {
+            set_dhtu(bi, bi->handler);
+        }
 
 
 
