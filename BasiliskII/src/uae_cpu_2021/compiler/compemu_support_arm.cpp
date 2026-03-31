@@ -196,6 +196,32 @@ static inline int jit_max_optlev(void)
 	return value;
 }
 
+static inline bool jit_force_optlev1_opcode(uae_u16 op)
+{
+	/* First optlev=2 stability pass: keep native opcode codegen away from
+	   branch/call/return and stack-heavy MOVEM blocks that are currently the
+	   most likely source of guest A7 / control-flow corruption. */
+	if ((op & 0xf000) == 0x6000) /* BRA/BSR/Bcc */
+		return true;
+	if ((op & 0xffc0) == 0x4e80) /* JSR */
+		return true;
+	if ((op & 0xffc0) == 0x4ec0) /* JMP */
+		return true;
+	if (op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e76 || op == 0x4e77) /* RTE/RTD/RTS/TRAPV/RTR */
+		return true;
+	if ((op & 0xfb80) == 0x4880) /* MOVEM */
+		return true;
+	if ((op & 0xf000) == 0xa000) /* A-line traps / EmulOps */
+		return true;
+	/* Early optlev=2 runs still hit boot-sensitive system/stack instructions.
+	   Keep them at optlev=1 while narrowing the first safe native subset. */
+	if (op == 0x007c || op == 0x027c || op == 0x023c) /* immediate to SR/CCR */
+		return true;
+	if (op == 0x40e7 || op == 0x46df || op == 0x40c1 || op == 0x46c1 || op == 0x46c0) /* SR stack/reg transfers */
+		return true;
+	return false;
+}
+
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 {
 	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
@@ -3806,6 +3832,10 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 uae_u16 _op = do_get_mem_word(pc_hist[_i].location);
                 if ((_op & 0xF0F8) == 0x50C8) { /* DBcc */
                     optlev = 0;
+                    break;
+                }
+                if (optlev > 1 && jit_force_optlev1_opcode(_op)) {
+                    optlev = 1;
                     break;
                 }
             }
