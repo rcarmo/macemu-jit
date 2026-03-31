@@ -424,11 +424,21 @@ int kill_rodent(int r)
 
 void do_nothing(void)
 {
+#if defined(CPU_AARCH64)
+	jit_diag_do_nothing_calls++;
+	jit_diag_dispatch_count++;
+	jit_diag_maybe_print();
+#endif
 	/* Intentionally empty. */
 }
 
 void exec_nostats(void)
 {
+#if defined(CPU_AARCH64)
+	jit_diag_exec_nostats_calls++;
+	jit_diag_dispatch_count++;
+	jit_diag_maybe_print();
+#endif
 	for (;;) {
 		uae_u32 opcode = GET_OPCODE;
 		(*cpufunctbl[opcode])(opcode);
@@ -440,6 +450,11 @@ void exec_nostats(void)
 
 void execute_normal(void)
 {
+#if defined(CPU_AARCH64)
+	jit_diag_execute_normal_calls++;
+	jit_diag_dispatch_count++;
+	jit_diag_maybe_print();
+#endif
 	if (!check_for_cache_miss()) {
 		cpu_history pc_hist[MAXRUN];
 		memset(pc_hist, 0, sizeof(pc_hist));

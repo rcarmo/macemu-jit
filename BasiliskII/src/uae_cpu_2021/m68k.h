@@ -811,7 +811,9 @@ static inline int cctrue(int cc)
     return 0;
 }
 
-/* AArch64: tst sets NZ, clears CV. mrs nzcv reads bits 31:28. */
+/* AArch64: keep the active operand width in the high bits so NZCV reflects
+ * 8/16/32-bit 68k semantics rather than 32-bit sign-extended arithmetic.
+ */
 #define optflag_testl(v) do { \
   uae_u32 _nzcv; \
   __asm__ __volatile__ ("tst %w[rv], %w[rv]\n\t" \
@@ -825,7 +827,7 @@ static inline int cctrue(int cc)
 #define optflag_testw(v) do { \
   uae_u32 _nzcv; \
   uae_u32 _tmp; \
-  __asm__ __volatile__ ("sxth %w[tmp], %w[rv]\n\t" \
+  __asm__ __volatile__ ("lsl %w[tmp], %w[rv], #16\n\t" \
                         "tst %w[tmp], %w[tmp]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [tmp] "=&r" (_tmp) \
@@ -837,7 +839,7 @@ static inline int cctrue(int cc)
 #define optflag_testb(v) do { \
   uae_u32 _nzcv; \
   uae_u32 _tmp; \
-  __asm__ __volatile__ ("sxtb %w[tmp], %w[rv]\n\t" \
+  __asm__ __volatile__ ("lsl %w[tmp], %w[rv], #24\n\t" \
                         "tst %w[tmp], %w[tmp]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [tmp] "=&r" (_tmp) \
@@ -860,14 +862,14 @@ static inline int cctrue(int cc)
 #define optflag_addw(v, s, d) do { \
   uae_u32 _nzcv; \
   uae_u32 _a, _b; \
-  __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
-                        "sxth %w[b], %w[rs]\n\t" \
+  __asm__ __volatile__ ("lsl %w[a], %w[rd], #16\n\t" \
+                        "lsl %w[b], %w[rs], #16\n\t" \
                         "adds %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u16)_a; \
+  v = (uae_u16)(_a >> 16); \
   regflags.nzcv = _nzcv; \
   COPY_CARRY(); \
   } while(0)
@@ -875,19 +877,19 @@ static inline int cctrue(int cc)
 #define optflag_addb(v, s, d) do { \
   uae_u32 _nzcv; \
   uae_u32 _a, _b; \
-  __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
-                        "sxtb %w[b], %w[rs]\n\t" \
+  __asm__ __volatile__ ("lsl %w[a], %w[rd], #24\n\t" \
+                        "lsl %w[b], %w[rs], #24\n\t" \
                         "adds %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u8)_a; \
+  v = (uae_u8)(_a >> 24); \
   regflags.nzcv = _nzcv; \
   COPY_CARRY(); \
   } while(0)
 
-/* AArch64 SUB/CMP: ARM carry is inverted vs 68k, so XOR bit 29 */
+/* AArch64 SUB/CMP: ARM carry is inverted vs 68k, so XOR bit 29. */
 #define optflag_subl(v, s, d) do { \
   uae_u32 _nzcv; \
   __asm__ __volatile__ ("subs %w[rv], %w[rd], %w[rs]\n\t" \
@@ -902,14 +904,14 @@ static inline int cctrue(int cc)
 #define optflag_subw(v, s, d) do { \
   uae_u32 _nzcv; \
   uae_u32 _a, _b; \
-  __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
-                        "sxth %w[b], %w[rs]\n\t" \
+  __asm__ __volatile__ ("lsl %w[a], %w[rd], #16\n\t" \
+                        "lsl %w[b], %w[rs], #16\n\t" \
                         "subs %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u16)_a; \
+  v = (uae_u16)(_a >> 16); \
   regflags.nzcv = _nzcv ^ FLAGVAL_C; \
   COPY_CARRY(); \
   } while(0)
@@ -917,14 +919,14 @@ static inline int cctrue(int cc)
 #define optflag_subb(v, s, d) do { \
   uae_u32 _nzcv; \
   uae_u32 _a, _b; \
-  __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
-                        "sxtb %w[b], %w[rs]\n\t" \
+  __asm__ __volatile__ ("lsl %w[a], %w[rd], #24\n\t" \
+                        "lsl %w[b], %w[rs], #24\n\t" \
                         "subs %w[a], %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
                         : [rs] "r" (s), [rd] "r" (d) \
                         : "cc"); \
-  v = (uae_u8)_a; \
+  v = (uae_u8)(_a >> 24); \
   regflags.nzcv = _nzcv ^ FLAGVAL_C; \
   COPY_CARRY(); \
   } while(0)
@@ -942,8 +944,8 @@ static inline int cctrue(int cc)
 #define optflag_cmpw(s, d) do { \
   uae_u32 _nzcv; \
   uae_u32 _a, _b; \
-  __asm__ __volatile__ ("sxth %w[a], %w[rd]\n\t" \
-                        "sxth %w[b], %w[rs]\n\t" \
+  __asm__ __volatile__ ("lsl %w[a], %w[rd], #16\n\t" \
+                        "lsl %w[b], %w[rs], #16\n\t" \
                         "cmp %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \
@@ -955,8 +957,8 @@ static inline int cctrue(int cc)
 #define optflag_cmpb(s, d) do { \
   uae_u32 _nzcv; \
   uae_u32 _a, _b; \
-  __asm__ __volatile__ ("sxtb %w[a], %w[rd]\n\t" \
-                        "sxtb %w[b], %w[rs]\n\t" \
+  __asm__ __volatile__ ("lsl %w[a], %w[rd], #24\n\t" \
+                        "lsl %w[b], %w[rs], #24\n\t" \
                         "cmp %w[a], %w[b]\n\t" \
                         "mrs %[flags], nzcv\n\t" \
                         : [flags] "=r" (_nzcv), [a] "=&r" (_a), [b] "=&r" (_b) \

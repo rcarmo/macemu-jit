@@ -174,6 +174,14 @@ static inline bool jit_force_all_special_mem(void)
 	return enabled != 0;
 }
 
+static inline bool jit_force_optlev0(void)
+{
+	static int enabled = -1;
+	if (enabled < 0)
+		enabled = (getenv("B2_JIT_FORCE_OPTLEV0") && *getenv("B2_JIT_FORCE_OPTLEV0")) ? 1 : 0;
+	return enabled != 0;
+}
+
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 {
 	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
@@ -410,30 +418,89 @@ static unsigned long jit_diag_cache_miss_calls = 0;
 static unsigned long jit_diag_recompile_block_calls = 0;
 static unsigned long jit_diag_check_checksum_calls = 0;
 static unsigned long jit_diag_flush_icache_hard_calls = 0;
-static unsigned long jit_diag_dispatch_count = 0;          /* total pushall_call_handler returns */
+static unsigned long jit_diag_dispatch_count = 0;          /* total helper/dispatcher entries */
 static unsigned long jit_diag_optlev0_blocks = 0;          /* blocks compiled at optlev 0 */
 static unsigned long jit_diag_optlev_gt0_blocks = 0;       /* blocks compiled at optlev > 0 */
+static unsigned long long jit_diag_compiled_m68k_insns = 0;
+static unsigned long long jit_diag_compiled_m68k_cycles = 0;
+static unsigned long long jit_diag_compiled_code_bytes = 0;
+static unsigned long long jit_diag_peak_cache_bytes = 0;
+static unsigned long jit_diag_max_blocklen = 0;
+static unsigned long jit_diag_max_block_cycles = 0;
+static unsigned long jit_diag_max_block_bytes = 0;
+static unsigned long jit_diag_checksum_good = 0;
+static unsigned long jit_diag_checksum_bad = 0;
 static time_t jit_diag_last_print = 0;
 static time_t jit_diag_start_time = 0;
 
+static bool jit_diag_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0)
+        cached = (getenv("B2_JIT_DIAG") && *getenv("B2_JIT_DIAG")) ? 1 : 0;
+    return cached != 0;
+}
+
+static void jit_diag_note_compile_block(unsigned blocklen, unsigned totcycles, unsigned emitted_bytes, unsigned long long cache_bytes_used)
+{
+    jit_diag_compiled_m68k_insns += blocklen;
+    jit_diag_compiled_m68k_cycles += totcycles;
+    jit_diag_compiled_code_bytes += emitted_bytes;
+    if (blocklen > jit_diag_max_blocklen)
+        jit_diag_max_blocklen = blocklen;
+    if (totcycles > jit_diag_max_block_cycles)
+        jit_diag_max_block_cycles = totcycles;
+    if (emitted_bytes > jit_diag_max_block_bytes)
+        jit_diag_max_block_bytes = emitted_bytes;
+    if (cache_bytes_used > jit_diag_peak_cache_bytes)
+        jit_diag_peak_cache_bytes = cache_bytes_used;
+}
+
+static void jit_diag_note_checksum_result(bool isgood)
+{
+    if (isgood)
+        jit_diag_checksum_good++;
+    else
+        jit_diag_checksum_bad++;
+}
+
 static void jit_diag_maybe_print(void)
 {
-    if (jit_diag_start_time == 0) jit_diag_start_time = time(NULL);
+    if (!jit_diag_enabled())
+        return;
+    if (jit_diag_start_time == 0)
+        jit_diag_start_time = time(NULL);
     time_t now = time(NULL);
-    if (now - jit_diag_last_print < 2) return;
+    if (now - jit_diag_last_print < 2)
+        return;
     jit_diag_last_print = now;
     unsigned long elapsed = (unsigned long)(now - jit_diag_start_time);
-    fprintf(stderr, "JIT_DIAG t=%lus dispatch=%lu exec_normal=%lu (cache_hit=%lu) compile=%lu (fresh=%lu recomp=%lu opt0=%lu opt>0=%lu) "
-        "do_nothing=%lu exec_nostats=%lu cache_miss=%lu recompile_block=%lu check_checksum=%lu flush_hard=%lu pc=0x%08x\n",
+    const double avg_blocklen = jit_diag_compile_block_calls ? (double)jit_diag_compiled_m68k_insns / (double)jit_diag_compile_block_calls : 0.0;
+    const double avg_block_bytes = jit_diag_compile_block_calls ? (double)jit_diag_compiled_code_bytes / (double)jit_diag_compile_block_calls : 0.0;
+    const double bytes_per_insn = jit_diag_compiled_m68k_insns ? (double)jit_diag_compiled_code_bytes / (double)jit_diag_compiled_m68k_insns : 0.0;
+    fprintf(stderr,
+        "JIT_DIAG t=%lus dispatch=%lu exec_normal=%lu (cache_hit=%lu) compile=%lu (fresh=%lu recomp=%lu opt0=%lu opt>0=%lu) "
+        "do_nothing=%lu exec_nostats=%lu cache_miss=%lu recompile_block=%lu check_checksum=%lu (good=%lu bad=%lu) flush_hard=%lu "
+        "avg_block=%.1f insn avg_code=%.1fB code_per_insn=%.2fB peak_cache=%.1fKB max_block=%lu insn/%lu cyc/%luB pc=0x%08x\n",
         elapsed, jit_diag_dispatch_count,
         jit_diag_execute_normal_calls, jit_diag_execute_normal_cache_hit,
         jit_diag_compile_block_calls, jit_diag_compile_block_fresh, jit_diag_compile_block_recomp,
         jit_diag_optlev0_blocks, jit_diag_optlev_gt0_blocks,
         jit_diag_do_nothing_calls, jit_diag_exec_nostats_calls,
         jit_diag_cache_miss_calls, jit_diag_recompile_block_calls,
-        jit_diag_check_checksum_calls, jit_diag_flush_icache_hard_calls,
+        jit_diag_check_checksum_calls, jit_diag_checksum_good, jit_diag_checksum_bad,
+        jit_diag_flush_icache_hard_calls,
+        avg_blocklen, avg_block_bytes, bytes_per_insn,
+        (double)jit_diag_peak_cache_bytes / 1024.0,
+        jit_diag_max_blocklen, jit_diag_max_block_cycles, jit_diag_max_block_bytes,
         (unsigned)m68k_getpc());
+    fflush(stderr);
 }
+#else
+static inline bool jit_diag_enabled(void) { return false; }
+static inline void jit_diag_note_compile_block(unsigned, unsigned, unsigned, unsigned long long) {}
+static inline void jit_diag_note_checksum_result(bool) {}
+static inline void jit_diag_maybe_print(void) {}
 #endif
 /* ---- end JIT dispatch diagnostic counters ---- */
 
@@ -3002,6 +3069,7 @@ static void recompile_block(void)
 #if defined(CPU_AARCH64)
     jit_diag_recompile_block_calls++;
     jit_diag_dispatch_count++;
+    jit_diag_maybe_print();
 #endif
 #ifdef JIT_DEBUG_MEM_CORRUPTION
     jit_dbg_check_vec2_dispatch("recompile_block");
@@ -3022,6 +3090,7 @@ static void cache_miss(void)
 #if defined(CPU_AARCH64)
     jit_diag_cache_miss_calls++;
     jit_diag_dispatch_count++;
+    jit_diag_maybe_print();
 #endif
 #ifdef JIT_DEBUG_MEM_CORRUPTION
     jit_dbg_check_vec2_dispatch("cache_miss");
@@ -3069,6 +3138,7 @@ static inline int block_check_checksum(blockinfo* bi)
         bi->status = BI_CHECKING;
         isgood = called_check_checksum(bi) != 0;
     }
+    jit_diag_note_checksum_result(isgood != 0);
     if (isgood) {
         jit_log2("reactivate %p/%p (%x %x/%x %x)", bi, bi->pc_p, c1, c2, bi->c1, bi->c2);
         remove_from_list(bi);
@@ -3103,6 +3173,7 @@ static void check_checksum(void)
 #if defined(CPU_AARCH64)
     jit_diag_check_checksum_calls++;
     jit_diag_dispatch_count++;
+    jit_diag_maybe_print();
 #endif
     blockinfo* bi = get_blockinfo_addr(regs.pc_p);
     uae_u32 cl = cacheline(regs.pc_p);
@@ -3468,6 +3539,8 @@ void flush_icache_hard(int n)
 #if defined(CPU_AARCH64)
     jit_diag_flush_icache_hard_calls++;
     fprintf(stderr, "JIT_DIAG flush_icache_hard called (n=%d), total=%lu\n", n, jit_diag_flush_icache_hard_calls);
+    fflush(stderr);
+    jit_diag_maybe_print();
 #endif
     blockinfo* bi, * dbi;
 
@@ -3713,7 +3786,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
            The native DBcc codegen has a branch target initialization bug
            that causes jumps to NULL. Use interpreter for these blocks. */
 #if defined(CPU_AARCH64)
-        if (optlev > 0) {
+        if (jit_force_optlev0()) {
+            optlev = 0;
+        } else if (optlev > 0) {
             for (int _i = 0; _i < blocklen; _i++) {
                 uae_u16 _op = do_get_mem_word(pc_hist[_i].location);
                 if ((_op & 0xF0F8) == 0x50C8) { /* DBcc */
@@ -3980,7 +4055,10 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             add_to_active(bi);
         }
 
-        current_cache_size += JITPTR get_target() - JITPTR current_compile_p;
+        const unsigned emitted_bytes = (unsigned)(JITPTR get_target() - JITPTR current_compile_p);
+        current_cache_size += emitted_bytes;
+        jit_diag_note_compile_block((unsigned)blocklen, (unsigned)totcycles, emitted_bytes, (unsigned long long)current_cache_size);
+        jit_diag_maybe_print();
 
         /* This is the non-direct handler */
         bi->handler = bi->handler_to_use = (cpuop_func*)get_target();

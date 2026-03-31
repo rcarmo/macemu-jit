@@ -381,6 +381,78 @@ extern X11_LOCK_TYPE x_display_lock;
 void Set_pthread_attr(pthread_attr_t *attr, int priority);
 #endif
 
+#if DIRECT_ADDRESSING
+extern uintptr MEMBaseDiff;
+#endif
+extern uint8 *MacFrameBaseHost;
+extern uint32 MacFrameSize;
+#ifdef __cplusplus
+extern "C" uaecptr basilisk_trace_fault_pc(void);
+extern "C" void basilisk_trace_dump_recent(const char *reason, uaecptr addr, uae_u32 value);
+#else
+extern uaecptr basilisk_trace_fault_pc(void);
+extern void basilisk_trace_dump_recent(const char *reason, uaecptr addr, uae_u32 value);
+#endif
+
+static inline int basilisk_trace_write_enabled(void) {
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_WRITE_START") && *getenv("B2_TRACE_WRITE_START")) ? 1 : 0;
+	return cached != 0;
+}
+static inline uae_u32 basilisk_trace_write_start(void) {
+	static uae_u32 value = 0;
+	static int init = 0;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_WRITE_START");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0;
+		init = 1;
+	}
+	return value;
+}
+static inline uae_u32 basilisk_trace_write_end(void) {
+	static uae_u32 value = 0xffffffff;
+	static int init = 0;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_WRITE_END");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0xffffffff;
+		init = 1;
+	}
+	return value;
+}
+static inline unsigned long basilisk_trace_write_limit(void) {
+	static unsigned long value = 200;
+	static int init = 0;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_WRITE_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 200;
+		init = 1;
+	}
+	return value;
+}
+static inline void basilisk_trace_host_write(const char *kind, const void *ptr, uae_u32 v) {
+	static unsigned long count = 0;
+	if (!basilisk_trace_write_enabled())
+		return;
+	uae_u32 addr = 0xffffffff;
+	const uint8 *p = (const uint8 *)ptr;
+	if (MacFrameBaseHost && p >= MacFrameBaseHost && p < (MacFrameBaseHost + MacFrameSize))
+		addr = 0xa0000000u + (uae_u32)(p - MacFrameBaseHost);
+#if DIRECT_ADDRESSING
+	else
+		addr = (uae_u32)((uintptr)ptr - MEMBaseDiff);
+#endif
+	if (addr < basilisk_trace_write_start() || addr > basilisk_trace_write_end())
+		return;
+	if (count >= basilisk_trace_write_limit())
+		return;
+	count++;
+	fprintf(stderr, "TRACEWRITE %s step=%lu pc=%08x addr=%08x val=%08x\n",
+		kind, count, (unsigned)basilisk_trace_fault_pc(), (unsigned)addr, (unsigned)v);
+	if (addr >= 0x000877a0 && addr <= 0x000877ac && v >= 0x00100000)
+		basilisk_trace_dump_recent("ptrtable_write", addr, v);
+}
+
 /* UAE CPU defines */
 #ifdef WORDS_BIGENDIAN
 
@@ -392,8 +464,8 @@ void Set_pthread_attr(pthread_attr_t *attr, int priority);
    We need byte-swap for multi-byte reads/writes. */
 static inline uae_u32 do_get_mem_long(uae_u32 *a) {return __builtin_bswap32(*a);}
 static inline uae_u32 do_get_mem_word(uae_u16 *a) {return __builtin_bswap16(*a);}
-static inline void do_put_mem_long(uae_u32 *a, uae_u32 v) {*a = __builtin_bswap32(v);}
-static inline void do_put_mem_word(uae_u16 *a, uae_u32 v) {*a = __builtin_bswap16(v);}
+static inline void do_put_mem_long(uae_u32 *a, uae_u32 v) {basilisk_trace_host_write("L", a, v); *a = __builtin_bswap32(v);}
+static inline void do_put_mem_word(uae_u16 *a, uae_u32 v) {basilisk_trace_host_write("W", a, v); *a = __builtin_bswap16(v);}
 #else
 /* Big-endian CPUs which can do unaligned accesses */
 static inline uae_u32 do_get_mem_long(uae_u32 *a) {return *a;}
@@ -489,7 +561,7 @@ static inline uae_u32 do_byteswap_16(uae_u32 v)
 #endif
 
 #define do_get_mem_byte(a) ((uae_u32)*((uae_u8 *)(a)))
-#define do_put_mem_byte(a, v) (*(uae_u8 *)(a) = (v))
+#define do_put_mem_byte(a, v) (basilisk_trace_host_write("B", (const void *)(a), (uae_u32)(v)), (*(uae_u8 *)(a) = (v)))
 
 #define call_mem_get_func(func, addr) ((*func)(addr))
 #define call_mem_put_func(func, addr, v) ((*func)(addr, v))

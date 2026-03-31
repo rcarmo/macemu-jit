@@ -197,7 +197,7 @@ void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 	int i;
 
 	if (trace_d6_enabled_glue())
-		fprintf(stderr, "TRACE_D6 Execute68kTrap enter trap=%04x oldpc=%08x d6=%08x d7=%08x a5=%08x\n", trap, m68k_getpc(), r->d[6], r->d[7], r->a[5]);
+		fprintf(stderr, "TRACE_D6 Execute68kTrap enter trap=%04x oldpc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", trap, m68k_getpc(), r->d[6], r->d[7], r->a[4], r->a[5]);
 
 	// Save old PC
 	uaecptr oldpc = m68k_getpc();
@@ -233,7 +233,7 @@ void Execute68kTrap(uint16 trap, struct M68kRegisters *r)
 	for (i=0; i<7; i++)
 		r->a[i] = m68k_areg(regs, i);
 	if (trace_d6_enabled_glue())
-		fprintf(stderr, "TRACE_D6 Execute68kTrap leave trap=%04x restorepc=%08x d6=%08x d7=%08x a5=%08x\n", trap, oldpc, r->d[6], r->d[7], r->a[5]);
+		fprintf(stderr, "TRACE_D6 Execute68kTrap leave trap=%04x restorepc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", trap, oldpc, r->d[6], r->d[7], r->a[4], r->a[5]);
 	quit_program = 0;
 }
 
@@ -249,7 +249,7 @@ void Execute68k(uint32 addr, struct M68kRegisters *r)
 	int i;
 
 	if (trace_d6_enabled_glue())
-		fprintf(stderr, "TRACE_D6 Execute68k enter addr=%08x oldpc=%08x d6=%08x d7=%08x a5=%08x\n", addr, m68k_getpc(), r->d[6], r->d[7], r->a[5]);
+		fprintf(stderr, "TRACE_D6 Execute68k enter addr=%08x oldpc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", addr, m68k_getpc(), r->d[6], r->d[7], r->a[4], r->a[5]);
 
 	// Save old PC
 	uaecptr oldpc = m68k_getpc();
@@ -285,7 +285,7 @@ void Execute68k(uint32 addr, struct M68kRegisters *r)
 	for (i=0; i<7; i++)
 		r->a[i] = m68k_areg(regs, i);
 	if (trace_d6_enabled_glue())
-		fprintf(stderr, "TRACE_D6 Execute68k leave addr=%08x restorepc=%08x d6=%08x d7=%08x a5=%08x\n", addr, oldpc, r->d[6], r->d[7], r->a[5]);
+		fprintf(stderr, "TRACE_D6 Execute68k leave addr=%08x restorepc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", addr, oldpc, r->d[6], r->d[7], r->a[4], r->a[5]);
 	quit_program = 0;
 }
 

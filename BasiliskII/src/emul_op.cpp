@@ -51,6 +51,14 @@
 
 extern bool tick_inhibit;
 
+static bool skip_dovbltask_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_SKIP_DOVBLTASK") && *getenv("B2_SKIP_DOVBLTASK")) ? 1 : 0;
+	return cached != 0;
+}
+
 void PlayStartupSound();
 
 /*
@@ -467,7 +475,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 					VideoInterrupt();
 
 					// Call DoVBLTask(0)
-					if (ROMVersion == ROM_VERSION_32) {
+					if (ROMVersion == ROM_VERSION_32 && !skip_dovbltask_env()) {
 						M68kRegisters r2 = {};
 						r2.d[0] = 0;
 						Execute68kTrap(0xa072, &r2);

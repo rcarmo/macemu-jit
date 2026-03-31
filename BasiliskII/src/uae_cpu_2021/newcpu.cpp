@@ -38,6 +38,14 @@
 #include "main.h"
 #include "emul_op.h"
 #include "m68k.h"
+#include "memory.h"
+#include "readcpu.h"
+#include "newcpu.h"
+
+extern "C" uaecptr basilisk_trace_fault_pc(void)
+{
+	return regs.fault_pc;
+}
 
 static bool trace_d6_enabled()
 {
@@ -46,9 +54,175 @@ static bool trace_d6_enabled()
 		cached = (getenv("B2_TRACE_D6") && *getenv("B2_TRACE_D6")) ? 1 : 0;
 	return cached != 0;
 }
-#include "memory.h"
-#include "readcpu.h"
-#include "newcpu.h"
+
+static bool trace_window_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_PC_START") && *getenv("B2_TRACE_PC_START")) ? 1 : 0;
+	return cached != 0;
+}
+
+static uae_u32 trace_window_start()
+{
+	static uae_u32 value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_PC_START");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0;
+		init = true;
+	}
+	return value;
+}
+
+static uae_u32 trace_window_end()
+{
+	static uae_u32 value = 0xffffffff;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_PC_END");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0xffffffff;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned long trace_window_limit()
+{
+	static unsigned long value = 200;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 200;
+		init = true;
+	}
+	return value;
+}
+
+static bool trace_window_matches(uae_u32 pc)
+{
+	return trace_window_enabled() && pc >= trace_window_start() && pc <= trace_window_end();
+}
+
+static void trace_window_log(const char *phase, unsigned long step, uae_u32 pc, uae_u32 opcode)
+{
+	MakeSR();
+	fprintf(stderr,
+		"TRACEWIN %s step=%lu pc=%08x op=%04x sr=%04x "
+		"D0=%08x D1=%08x D2=%08x D3=%08x D4=%08x D5=%08x D6=%08x D7=%08x "
+		"A0=%08x A1=%08x A2=%08x A3=%08x A4=%08x A5=%08x A6=%08x A7=%08x\n",
+		phase,
+		step,
+		(unsigned)pc,
+		(unsigned)opcode,
+		(unsigned)regs.sr,
+		(unsigned)m68k_dreg(regs, 0), (unsigned)m68k_dreg(regs, 1),
+		(unsigned)m68k_dreg(regs, 2), (unsigned)m68k_dreg(regs, 3),
+		(unsigned)m68k_dreg(regs, 4), (unsigned)m68k_dreg(regs, 5),
+		(unsigned)m68k_dreg(regs, 6), (unsigned)m68k_dreg(regs, 7),
+		(unsigned)m68k_areg(regs, 0), (unsigned)m68k_areg(regs, 1),
+		(unsigned)m68k_areg(regs, 2), (unsigned)m68k_areg(regs, 3),
+		(unsigned)m68k_areg(regs, 4), (unsigned)m68k_areg(regs, 5),
+		(unsigned)m68k_areg(regs, 6), (unsigned)m68k_areg(regs, 7));
+}
+
+struct trace_recent_entry {
+	unsigned long seq;
+	uae_u32 pc;
+	uae_u32 opcode;
+	uae_u16 sr;
+	uae_u32 d0, d1, d3, d6;
+	uae_u32 a0, a3, a4, a5, a6;
+};
+
+static bool trace_recent_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_RING") && *getenv("B2_TRACE_RING")) ? 1 : 0;
+	return cached != 0;
+}
+
+static unsigned trace_recent_window()
+{
+	static unsigned value = 64;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_RING_WINDOW");
+		value = env && *env ? (unsigned)strtoul(env, NULL, 0) : 64;
+		if (value == 0)
+			value = 64;
+		if (value > 2048)
+			value = 2048;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned trace_recent_event_limit()
+{
+	static unsigned value = 8;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_RING_EVENTS");
+		value = env && *env ? (unsigned)strtoul(env, NULL, 0) : 8;
+		if (value == 0)
+			value = 8;
+		init = true;
+	}
+	return value;
+}
+
+static trace_recent_entry trace_recent_ring[2048];
+static unsigned trace_recent_pos = 0;
+static unsigned trace_recent_count = 0;
+static unsigned long trace_recent_seq = 0;
+
+static void trace_recent_record(uae_u32 pc, uae_u32 opcode)
+{
+	if (!trace_recent_enabled())
+		return;
+	MakeSR();
+	trace_recent_entry &e = trace_recent_ring[trace_recent_pos];
+	e.seq = ++trace_recent_seq;
+	e.pc = pc;
+	e.opcode = opcode;
+	e.sr = regs.sr;
+	e.d0 = m68k_dreg(regs, 0);
+	e.d1 = m68k_dreg(regs, 1);
+	e.d3 = m68k_dreg(regs, 3);
+	e.d6 = m68k_dreg(regs, 6);
+	e.a0 = m68k_areg(regs, 0);
+	e.a3 = m68k_areg(regs, 3);
+	e.a4 = m68k_areg(regs, 4);
+	e.a5 = m68k_areg(regs, 5);
+	e.a6 = m68k_areg(regs, 6);
+	trace_recent_pos = (trace_recent_pos + 1) % 2048;
+	if (trace_recent_count < 2048)
+		trace_recent_count++;
+}
+
+extern "C" void basilisk_trace_dump_recent(const char *reason, uaecptr addr, uae_u32 value)
+{
+	static unsigned dumps = 0;
+	if (!trace_recent_enabled() || dumps >= trace_recent_event_limit())
+		return;
+	dumps++;
+	unsigned want = trace_recent_window();
+	if (want > trace_recent_count)
+		want = trace_recent_count;
+	fprintf(stderr, "TRACEEVENT %u reason=%s addr=%08x value=%08x recent=%u\n",
+		dumps, reason ? reason : "?", (unsigned)addr, (unsigned)value, want);
+	unsigned start = (trace_recent_pos + 2048 - want) % 2048;
+	for (unsigned i = 0; i < want; i++) {
+		const trace_recent_entry &e = trace_recent_ring[(start + i) % 2048];
+		fprintf(stderr,
+			"TRACERING seq=%lu pc=%08x op=%04x sr=%04x D0=%08x D1=%08x D3=%08x D6=%08x A0=%08x A3=%08x A4=%08x A5=%08x A6=%08x\n",
+			e.seq, (unsigned)e.pc, (unsigned)e.opcode, (unsigned)e.sr,
+			(unsigned)e.d0, (unsigned)e.d1, (unsigned)e.d3, (unsigned)e.d6,
+			(unsigned)e.a0, (unsigned)e.a3, (unsigned)e.a4, (unsigned)e.a5, (unsigned)e.a6);
+	}
+}
 #ifdef USE_JIT
 # include "compiler/compemu.h"
 #endif
@@ -653,7 +827,10 @@ void Exception(int nr, uaecptr oldpc)
 	exc_make_frame(0, regs.sr, currpc, nr, 0, 0);
     }
     m68k_setpc (get_long (regs.vbr + 4*nr));
-    SPCFLAGS_SET( SPCFLAG_JIT_END_COMPILE );
+#ifdef USE_JIT
+    if (UseJIT)
+        SPCFLAGS_SET( SPCFLAG_JIT_END_COMPILE );
+#endif
     fill_prefetch_0 ();
     regs.t1 = regs.t0 = regs.m = 0;
     SPCFLAGS_CLEAR(SPCFLAG_TRACE | SPCFLAG_DOTRACE);
@@ -1124,10 +1301,10 @@ void m68k_emulop(uae_u32 opcode)
 	MakeSR();
 	r.sr = regs.sr;
 	if (trace_d6_enabled())
-		fprintf(stderr, "TRACE_D6 m68k_emulop enter opcode=%04x pc=%08x d6=%08x d7=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[5]);
+		fprintf(stderr, "TRACE_D6 m68k_emulop enter opcode=%04x pc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[4], r.a[5]);
 	EmulOp(opcode, &r);
 	if (trace_d6_enabled())
-		fprintf(stderr, "TRACE_D6 m68k_emulop leave opcode=%04x pc=%08x d6=%08x d7=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[5]);
+		fprintf(stderr, "TRACE_D6 m68k_emulop leave opcode=%04x pc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[4], r.a[5]);
 	for (i=0; i<8; i++) {
 		m68k_dreg(regs, i) = r.d[i];
 		m68k_areg(regs, i) = r.a[i];
@@ -1416,15 +1593,17 @@ int m68k_do_specialties(void)
 	SERVE_INTERNAL_IRQ();
 #endif
 #ifdef USE_JIT
-	// Block was compiled
-	SPCFLAGS_CLEAR( SPCFLAG_JIT_END_COMPILE );
+	if (UseJIT) {
+		// Block was compiled
+		SPCFLAGS_CLEAR( SPCFLAG_JIT_END_COMPILE );
 
-	// Retain the request to get out of compiled code until
-	// we reached the toplevel execution, i.e. the one that
-	// can compile then run compiled code. This also means
-	// we processed all (nested) EmulOps
-	if ((m68k_execute_depth == 0) && SPCFLAGS_TEST( SPCFLAG_JIT_EXEC_RETURN ))
-		SPCFLAGS_CLEAR( SPCFLAG_JIT_EXEC_RETURN );
+		// Retain the request to get out of compiled code until
+		// we reached the toplevel execution, i.e. the one that
+		// can compile then run compiled code. This also means
+		// we processed all (nested) EmulOps
+		if ((m68k_execute_depth == 0) && SPCFLAGS_TEST( SPCFLAG_JIT_EXEC_RETURN ))
+			SPCFLAGS_CLEAR( SPCFLAG_JIT_EXEC_RETURN );
+	}
 #endif
 	/*n_spcinsns++;*/
 	if (SPCFLAGS_TEST( SPCFLAG_DOTRACE )) {
@@ -1520,7 +1699,12 @@ void m68k_do_execute (void)
     static unsigned long nojit_last_report_count = 0;
     static uae_u32 nojit_pc_min = 0xFFFFFFFF;
     static uae_u32 nojit_pc_max = 0;
+    static unsigned long trace_window_count = 0;
     for (;;) {
+#ifdef USE_JIT
+	if (!UseJIT)
+		SPCFLAGS_CLEAR(SPCFLAG_JIT_END_COMPILE | SPCFLAG_JIT_EXEC_RETURN);
+#endif
 	regs.fault_pc = pc = m68k_getpc();
 	nojit_insn_count++;
 	if (pc < nojit_pc_min) nojit_pc_min = pc;
@@ -1558,10 +1742,20 @@ void m68k_do_execute (void)
 #endif
 #endif
 	opcode = GET_OPCODE;
+	trace_recent_record(pc, opcode);
+	bool trace_this_step = false;
+	if (trace_window_count < trace_window_limit() && trace_window_matches(pc)) {
+		trace_this_step = true;
+		trace_window_log("BEFORE", trace_window_count + 1, pc, opcode);
+	}
 #ifdef FLIGHT_RECORDER
 	m68k_record_step(m68k_getpc(), cft_map(opcode));
 #endif
 	(*cpufunctbl[opcode])(opcode);
+	if (trace_this_step) {
+		trace_window_count++;
+		trace_window_log("AFTER", trace_window_count, m68k_getpc(), opcode);
+	}
 
 	/* Flag divergence trace */
 	{

@@ -23,11 +23,71 @@
 #ifndef UAE_MEMORY_H
 #define UAE_MEMORY_H
 
+#include "registers.h"
+
 #if DIRECT_ADDRESSING
 extern uintptr MEMBaseDiff;
 #endif
 
 extern void Exception (int, uaecptr);
+
+static __inline__ bool trace_write_window_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0)
+        cached = (getenv("B2_TRACE_WRITE_START") && *getenv("B2_TRACE_WRITE_START")) ? 1 : 0;
+    return cached != 0;
+}
+
+static __inline__ uae_u32 trace_write_window_start(void)
+{
+    static uae_u32 value = 0;
+    static bool init = false;
+    if (!init) {
+        const char *env = getenv("B2_TRACE_WRITE_START");
+        value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0;
+        init = true;
+    }
+    return value;
+}
+
+static __inline__ uae_u32 trace_write_window_end(void)
+{
+    static uae_u32 value = 0xffffffff;
+    static bool init = false;
+    if (!init) {
+        const char *env = getenv("B2_TRACE_WRITE_END");
+        value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0xffffffff;
+        init = true;
+    }
+    return value;
+}
+
+static __inline__ unsigned long trace_write_limit(void)
+{
+    static unsigned long value = 200;
+    static bool init = false;
+    if (!init) {
+        const char *env = getenv("B2_TRACE_WRITE_LIMIT");
+        value = env && *env ? strtoul(env, NULL, 0) : 200;
+        init = true;
+    }
+    return value;
+}
+
+static __inline__ void trace_write_log(const char *kind, uaecptr addr, uae_u32 val)
+{
+    static unsigned long count = 0;
+    if (!trace_write_window_enabled())
+        return;
+    if (addr < trace_write_window_start() || addr > trace_write_window_end())
+        return;
+    if (count >= trace_write_limit())
+        return;
+    count++;
+    fprintf(stderr, "TRACEWRITE %s step=%lu pc=%08x addr=%08x val=%08x\n",
+        kind, count, (unsigned)regs.fault_pc, (unsigned)addr, (unsigned)val);
+}
 
 /* Auto-select longjmp-based exceptions when C++ exceptions are disabled
    (e.g. -fno-exceptions). GCC/Clang undefine __EXCEPTIONS in that case. */
@@ -97,18 +157,21 @@ static __inline__ uae_u32 get_byte(uaecptr addr)
 #define phys_get_byte get_byte
 static __inline__ void put_long(uaecptr addr, uae_u32 l)
 {
+    trace_write_log("L", addr, l);
     uae_u32 * const m = (uae_u32 *)do_get_real_address(addr);
     do_put_mem_long(m, l);
 }
 #define phys_put_long put_long
 static __inline__ void put_word(uaecptr addr, uae_u32 w)
 {
+    trace_write_log("W", addr, w);
     uae_u16 * const m = (uae_u16 *)do_get_real_address(addr);
     do_put_mem_word(m, w);
 }
 #define phys_put_word put_word
 static __inline__ void put_byte(uaecptr addr, uae_u32 b)
 {
+    trace_write_log("B", addr, b);
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     do_put_mem_byte(m, b);
 }
