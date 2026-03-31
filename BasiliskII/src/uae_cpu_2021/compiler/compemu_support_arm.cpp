@@ -219,6 +219,11 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 		return true;
 	if (op == 0x40e7 || op == 0x46df || op == 0x40c1 || op == 0x46c1 || op == 0x46c0) /* SR stack/reg transfers */
 		return true;
+	/* Remaining early-boot failures still include privileged CCR/SR writes in the
+	   surviving optlev=2 subset. Keep these interpreter-side while narrowing the
+	   first stable native opcode core. */
+	if (op == 0x44df || op == 0x44fc || op == 0x46fc)
+		return true;
 	return false;
 }
 
