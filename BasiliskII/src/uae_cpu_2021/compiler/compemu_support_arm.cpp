@@ -182,6 +182,20 @@ static inline bool jit_force_optlev0(void)
 	return enabled != 0;
 }
 
+static inline int jit_max_optlev(void)
+{
+	static int value = -1;
+	if (value < 0) {
+		const char *env = getenv("B2_JIT_MAX_OPTLEV");
+		value = env && *env ? atoi(env) : 1;
+		if (value < 0)
+			value = 0;
+		if (value > 2)
+			value = 2;
+	}
+	return value;
+}
+
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 {
 	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
@@ -3689,13 +3703,12 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             if (currprefs.cpu_compatible) {
                 optlev = 0;
             } else {
-                /* Cap at optlev=2: enable native opcode compilation for diagnosis.
-                   Known to crash after ~7 blocks. */
-                if (optlev < 2) {
-                    optlev = 2;
+                const int max_optlev = jit_max_optlev();
+                if (optlev < max_optlev) {
+                    optlev = max_optlev;
                     bi->count = -2; /* Stay at this level permanently */
                 }
-                /* else: already at 2 or above, don't escalate further */
+                /* else: already at the selected cap, don't escalate further */
             }
 #else
             {
@@ -3852,7 +3865,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
 
                 failure = 1; // gb-- defaults to failure state
-                if (comptbl[opcode] && optlev > 0) {
+                if (comptbl[opcode] && optlev > 1) {
                     failure = 0;
                     if (!was_comp) {
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
