@@ -196,6 +196,52 @@ static inline int jit_max_optlev(void)
 	return value;
 }
 
+static inline bool jit_force_optlev1_block(uae_u32 pc)
+{
+	static int initialized = 0;
+	static int range_count = 0;
+	static struct {
+		uae_u32 start;
+		uae_u32 end;
+	} ranges[64];
+	if (!initialized) {
+		const char *env = getenv("B2_JIT_FORCE_OPTLEV1_PCS");
+		initialized = 1;
+		if (env && *env) {
+			const char *p = env;
+			while (*p && range_count < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
+				while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+					p++;
+				if (!*p)
+					break;
+				char *endp = NULL;
+				unsigned long start = strtoul(p, &endp, 0);
+				unsigned long end = start;
+				if (endp == p)
+					break;
+				p = endp;
+				if (*p == '-') {
+					p++;
+					end = strtoul(p, &endp, 0);
+					if (endp == p)
+						end = start;
+					p = endp;
+				}
+				ranges[range_count].start = (uae_u32)start;
+				ranges[range_count].end = (uae_u32)end;
+				range_count++;
+				while (*p && *p != ',')
+					p++;
+			}
+		}
+	}
+	for (int i = 0; i < range_count; i++) {
+		if (pc >= ranges[i].start && pc <= ranges[i].end)
+			return true;
+	}
+	return false;
+}
+
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
 	/* First optlev=2 stability pass: keep native opcode codegen away from
@@ -3829,11 +3875,18 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
         /* AArch64: force optlev=0 for blocks containing DBcc (0x50C8-0x5FCF).
            The native DBcc codegen has a branch target initialization bug
            that causes jumps to NULL. Use interpreter for these blocks. */
+        uae_u32 block_m68k_pc = 0;
+        if (pc_hist[0].location) {
+            block_m68k_pc = (uae_u32)((uintptr)pc_hist[0].location - (uintptr)regs.pc_oldp) + regs.pc;
+        }
 #if defined(CPU_AARCH64)
         if (jit_force_optlev0()) {
             optlev = 0;
         } else if (optlev > 0) {
-            for (int _i = 0; _i < blocklen; _i++) {
+            if (optlev > 1 && jit_force_optlev1_block(block_m68k_pc)) {
+                optlev = 1;
+            }
+            for (int _i = 0; optlev > 0 && _i < blocklen; _i++) {
                 uae_u16 _op = do_get_mem_word(pc_hist[_i].location);
                 if ((_op & 0xF0F8) == 0x50C8) { /* DBcc */
                     optlev = 0;
@@ -3857,10 +3910,6 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             jit_diag_optlev_gt0_blocks++;
             /* Log which blocks get promoted to actual JIT compilation */
             {
-                uae_u32 block_m68k_pc = 0;
-                if (pc_hist[0].location) {
-                    block_m68k_pc = (uae_u32)((uintptr)pc_hist[0].location - (uintptr)regs.pc_oldp) + regs.pc;
-                }
                 fprintf(stderr, "JIT_COMPILE optlev=%d pc=0x%08x blocklen=%d opcodes=",
                     optlev, block_m68k_pc, blocklen);
                 for (int di = 0; di < blocklen && di < 20; di++) {
