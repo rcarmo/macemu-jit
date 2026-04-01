@@ -340,6 +340,13 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	   surface without spawning replacement-wave regressions. */
 	if (op == 0x201f)
 		return true;
+	/* A second exact stability cluster emerges around the low-memory bit-set /
+	   queue-walk path rooted at ROM 0x0400A2A0: the initial BSET to $0160.w,
+	   its replacement LEA 2(a1),a0, and the follow-on MOVE.L (a0),d0. Gating
+	   0x08f8 + 0x41e9 + 0x2010 together preserves the long-soak baseline and
+	   shrinks the surviving optlev=2 frontier further. */
+	if (op == 0x08f8 || op == 0x41e9 || op == 0x2010)
+		return true;
 	return false;
 }
 
