@@ -479,7 +479,19 @@ void setcc_for_cntzero(RR4 cnt, RR4 data, int size)
 void set_zero(int r, int tmp)
 {
 	(void)tmp;
-	jff_TST_l(r);
+	MRS_NZCV_x(REG_WORK1);
+	CLEAR_xxZflag(REG_WORK1, REG_WORK1);
+	if (isconst(r)) {
+		if ((uae_u32)live.state[r].val == 0)
+			SET_xxZflag(REG_WORK1, REG_WORK1);
+	} else {
+		int rr = readreg(r);
+		CBNZ_wi(rr, 2); /* skip next if non-zero */
+		SET_xxZflag(REG_WORK1, REG_WORK1);
+		unlock2(rr);
+	}
+	MSR_NZCV_x(REG_WORK1);
+	flags_carry_inverted = false;
 }
 
 int kill_rodent(int r)
