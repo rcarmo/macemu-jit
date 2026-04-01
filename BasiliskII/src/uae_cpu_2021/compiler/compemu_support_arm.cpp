@@ -311,6 +311,11 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	   pair repeatedly restores the long-soak late-startup baseline. */
 	if (op == 0x7000 || op == 0x7001)
 		return true;
+	/* Further narrowing shows a second safe/improving MOVEQ subset: #0x28,
+	   #0x29 and #0x30 into D0. Nearby immediates like #0x23 and #0x2c are not
+	   safe to gate in isolation, so keep this exact trio only. */
+	if (op == 0x7128 || op == 0x7129 || op == 0x7130)
+		return true;
 	return false;
 }
 
