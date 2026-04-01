@@ -249,11 +249,77 @@ void adc_l(RW4 d, RR4 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_en
 void sbb_b(RW1 d, RR1 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_SUBX_b(d, s); else jnf_SUBX_b(d, s); }
 void sbb_w(RW2 d, RR2 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_SUBX_w(d, s); else jnf_SUBX_w(d, s); }
 void sbb_l(RW4 d, RR4 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_SUBX_l(d, s); else jnf_SUBX_l(d, s); }
-void bt_l_rr(RR4 d, RR4 s) { jff_BTST_l(d, s); }
-void bt_l_ri(RR4 d, uae_s32 i) { jff_BTST_l_imm(d, i); }
-void btc_l_rr(RW4 d, RR4 s) { jff_BCHG_l(d, s); }
-void btr_l_rr(RW4 d, RR4 s) { jff_BCLR_l(d, s); }
-void bts_l_rr(RW4 d, RR4 s) { jff_BSET_l(d, s); }
+
+static inline void legacy_load_rr4_to_work(int work_reg, RR4 r)
+{
+	if (isconst(r)) {
+		LOAD_U32(work_reg, live.state[r].val);
+	} else {
+		int rr = readreg(r);
+		MOV_ww(work_reg, rr);
+		unlock2(rr);
+	}
+}
+
+static inline void legacy_set_c_preserve_nzv_from_work1_work2(void)
+{
+	MRS_NZCV_x(REG_WORK4);
+	TST_ww(REG_WORK1, REG_WORK2);
+	CSET_xc(REG_WORK3, NATIVE_CC_NE);
+	BFI_xxii(REG_WORK4, REG_WORK3, 29, 1);
+	MSR_NZCV_x(REG_WORK4);
+	flags_carry_inverted = false;
+}
+
+void bt_l_rr(RR4 d, RR4 s)
+{
+	legacy_load_rr4_to_work(REG_WORK1, d);
+	legacy_load_rr4_to_work(REG_WORK2, s);
+	UBFIZ_xxii(REG_WORK2, REG_WORK2, 0, 5);
+	MOV_xi(REG_WORK3, 1);
+	LSL_www(REG_WORK2, REG_WORK3, REG_WORK2);
+	legacy_set_c_preserve_nzv_from_work1_work2();
+}
+
+void bt_l_ri(RR4 d, uae_s32 i)
+{
+	legacy_load_rr4_to_work(REG_WORK1, d);
+	LOAD_U32(REG_WORK2, 1u << (i & 31));
+	legacy_set_c_preserve_nzv_from_work1_work2();
+}
+
+void btc_l_rr(RW4 d, RR4 s)
+{
+	legacy_load_rr4_to_work(REG_WORK1, d);
+	legacy_load_rr4_to_work(REG_WORK2, s);
+	UBFIZ_xxii(REG_WORK2, REG_WORK2, 0, 5);
+	MOV_xi(REG_WORK3, 1);
+	LSL_www(REG_WORK2, REG_WORK3, REG_WORK2);
+	legacy_set_c_preserve_nzv_from_work1_work2();
+	jnf_BCHG_l(d, s);
+}
+
+void btr_l_rr(RW4 d, RR4 s)
+{
+	legacy_load_rr4_to_work(REG_WORK1, d);
+	legacy_load_rr4_to_work(REG_WORK2, s);
+	UBFIZ_xxii(REG_WORK2, REG_WORK2, 0, 5);
+	MOV_xi(REG_WORK3, 1);
+	LSL_www(REG_WORK2, REG_WORK3, REG_WORK2);
+	legacy_set_c_preserve_nzv_from_work1_work2();
+	jnf_BCLR_l(d, s);
+}
+
+void bts_l_rr(RW4 d, RR4 s)
+{
+	legacy_load_rr4_to_work(REG_WORK1, d);
+	legacy_load_rr4_to_work(REG_WORK2, s);
+	UBFIZ_xxii(REG_WORK2, REG_WORK2, 0, 5);
+	MOV_xi(REG_WORK3, 1);
+	LSL_www(REG_WORK2, REG_WORK3, REG_WORK2);
+	legacy_set_c_preserve_nzv_from_work1_work2();
+	jnf_BSET_l(d, s);
+}
 
 void setcc(W1 d, uae_s32 cc)
 {
