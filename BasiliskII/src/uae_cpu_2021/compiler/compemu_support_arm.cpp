@@ -325,6 +325,21 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	   0x301f only help together, not alone. */
 	if (op == 0x3140 || op == 0x301f)
 		return true;
+	/* Two more exact semantic clusters proved safe after the 0x3140/0x301f gate:
+	   - memory-test / clear wave: TST.L / CLR.L variants at 0x4a80, 0x4290,
+	     0x4aa9, 0x4278, 0x4ab8
+	   - absolute/displacement source moves at 0x1030, 0x2038, 0x2069, 0x2078
+	   Each cluster survives the full long-soak run and shrinks the remaining
+	   optlev=2 frontier without reintroducing early hangs. */
+	if (op == 0x4a80 || op == 0x4290 || op == 0x4aa9 || op == 0x4278 || op == 0x4ab8)
+		return true;
+	if (op == 0x1030 || op == 0x2038 || op == 0x2069 || op == 0x2078)
+		return true;
+	/* With the above clusters hard-gated, MOVE.L (A7)+,D0 (0x201f) becomes the
+	   next clean singleton win: it removes itself from the surviving optlev=2
+	   surface without spawning replacement-wave regressions. */
+	if (op == 0x201f)
+		return true;
 	return false;
 }
 
