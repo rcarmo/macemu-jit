@@ -305,6 +305,12 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	   first stable native opcode core. */
 	if (op == 0x44df || op == 0x44fc || op == 0x46fc)
 		return true;
+	/* After collapsing the 0x000F* helper cluster, the first reproducible
+	   semantic win on the remaining frontier is the exact MOVEQ pair
+	   moveq #0,d0 / moveq #1,d0. Neither opcode alone is sufficient, but the
+	   pair repeatedly restores the long-soak late-startup baseline. */
+	if (op == 0x7000 || op == 0x7001)
+		return true;
 	return false;
 }
 
