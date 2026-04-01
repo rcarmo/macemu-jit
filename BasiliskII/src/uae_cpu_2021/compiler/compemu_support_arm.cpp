@@ -320,6 +320,11 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	   these values were noisy or misleading when tested in isolation. */
 	if (op == 0x7104 || op == 0x7111 || op == 0x7123 || op == 0x712c)
 		return true;
+	/* Past the MOVEQ cluster, the next reproducible semantic win is a tiny pair
+	   spanning a repeated MOVE.W store and its replacement wave: 0x3140 and
+	   0x301f only help together, not alone. */
+	if (op == 0x3140 || op == 0x301f)
+		return true;
 	return false;
 }
 
