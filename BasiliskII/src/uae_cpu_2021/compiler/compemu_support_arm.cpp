@@ -242,8 +242,43 @@ static inline bool jit_force_optlev1_block(uae_u32 pc)
 	return false;
 }
 
+static inline bool jit_force_optlev1_env_opcode(uae_u16 op)
+{
+	static int initialized = 0;
+	static int opcode_count = 0;
+	static uae_u16 opcodes[128];
+	if (!initialized) {
+		const char *env = getenv("B2_JIT_FORCE_OPTLEV1_OPS");
+		initialized = 1;
+		if (env && *env) {
+			const char *p = env;
+			while (*p && opcode_count < (int)(sizeof(opcodes) / sizeof(opcodes[0]))) {
+				while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+					p++;
+				if (!*p)
+					break;
+				char *endp = NULL;
+				unsigned long value = strtoul(p, &endp, 16);
+				if (endp == p)
+					break;
+				opcodes[opcode_count++] = (uae_u16)value;
+				p = endp;
+				while (*p && *p != ',')
+					p++;
+			}
+		}
+	}
+	for (int i = 0; i < opcode_count; i++) {
+		if (op == opcodes[i])
+			return true;
+	}
+	return false;
+}
+
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
+	if (jit_force_optlev1_env_opcode(op))
+		return true;
 	/* First optlev=2 stability pass: keep native opcode codegen away from
 	   branch/call/return and stack-heavy MOVEM blocks that are currently the
 	   most likely source of guest A7 / control-flow corruption. */
