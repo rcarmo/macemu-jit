@@ -2872,10 +2872,10 @@ void compemu_make_sr(int sr, int tmp)
      * NZCV---- -------- -------- --------
      *
      * -> m68k SR:
-     * --S--III ---XNZVC
+     * TSMSIIII ---XNZVC
      *
-     * Master-Bit and traceflags are ignored here,
-     * since they are not emulated in JIT code
+     * The legacy helper used to ignore Master and trace bits here, but
+     * full-SR operations and trap/privileged paths need the complete word.
      */
 	mov_l_rm(sr, uae_p32(live.state[FLAGTMP].mem));
 	mov_l_ri(tmp, FLAGVAL_N|FLAGVAL_Z|FLAGVAL_V|FLAGVAL_C);
@@ -2941,13 +2941,22 @@ void compemu_make_sr(int sr, int tmp)
 
 #endif /* OPTIMIZED_FLAGS */
 
+	mov_b_rm(tmp, uae_p32(&regs.t1));
+	shll_l_ri(tmp, 15);
+	or_l(sr, tmp);
+	mov_b_rm(tmp, uae_p32(&regs.t0));
+	shll_l_ri(tmp, 14);
+	or_l(sr, tmp);
 	mov_b_rm(tmp, uae_p32(&regs.s));
 	shll_l_ri(tmp, 13);
+	or_l(sr, tmp);
+	mov_b_rm(tmp, uae_p32(&regs.m));
+	shll_l_ri(tmp, 12);
 	or_l(sr, tmp);
 	mov_l_rm(tmp, uae_p32(&regs.intmask));
 	shll_l_ri(tmp, 8);
 	or_l(sr, tmp);
-	and_l_ri(sr, 0x271f);
+	and_l_ri(sr, 0xf71f);
 	mov_w_mr(uae_p32(&regs.sr), sr);
 }
 
