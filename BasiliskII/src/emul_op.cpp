@@ -59,6 +59,14 @@ static bool skip_dovbltask_env()
 	return cached != 0;
 }
 
+static bool trace_irqseq_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_IRQSEQ") && *getenv("B2_TRACE_IRQSEQ") && strcmp(getenv("B2_TRACE_IRQSEQ"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
 void PlayStartupSound();
 
 /*
@@ -459,6 +467,13 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 
 		case M68K_EMUL_OP_IRQ:			// Level 1 interrupt
 			r->d[0] = 0;
+			if (trace_irqseq_env()) {
+				static unsigned long irq_count = 0;
+				if (irq_count < 2000) {
+					fprintf(stderr, "IRQ %lu enter flags=%08x sr=%04x ticks=%08x\n",
+						++irq_count, (unsigned)InterruptFlags, (unsigned)r->sr, (unsigned)ReadMacInt32(0x16a));
+				}
+			}
 
 			if (InterruptFlags & INTFLAG_60HZ) {
 				ClearInterruptFlag(INTFLAG_60HZ);
@@ -476,6 +491,11 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 
 					// Call DoVBLTask(0)
 					if (ROMVersion == ROM_VERSION_32 && !skip_dovbltask_env()) {
+						if (trace_irqseq_env()) {
+							static unsigned long dovbl_count = 0;
+							if (dovbl_count < 2000)
+								fprintf(stderr, "IRQ DOVBL %lu pre d0=%08x ticks=%08x\n", ++dovbl_count, 0u, (unsigned)ReadMacInt32(0x16a));
+						}
 						M68kRegisters r2 = {};
 						r2.d[0] = 0;
 						Execute68kTrap(0xa072, &r2);

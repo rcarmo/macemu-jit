@@ -83,6 +83,22 @@ static map<uint16, uint32> udp_protocols;
  *  Initialization
  */
 
+static bool skip_ether_open_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_SKIP_ETHER_OPEN") && *getenv("B2_SKIP_ETHER_OPEN") && strcmp(getenv("B2_SKIP_ETHER_OPEN"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool trace_ether_open_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_ETHER_OPEN") && *getenv("B2_TRACE_ETHER_OPEN") && strcmp(getenv("B2_TRACE_ETHER_OPEN"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
 void EtherInit(void)
 {
 	net_open = false;
@@ -221,6 +237,11 @@ static inline bool is_ethernet_broadcast(uint8 *p)
 int16 EtherOpen(uint32 pb, uint32 dce)
 {
 	D(bug("EtherOpen\n"));
+	if (trace_ether_open_env()) {
+		fprintf(stderr, "ETHER_OPEN pb=%08x dce=%08x net_open=%d skip=%d\n", (unsigned)pb, (unsigned)dce, net_open ? 1 : 0, skip_ether_open_env() ? 1 : 0);
+	}
+	if (skip_ether_open_env())
+		return openErr;
 
 	// Allocate driver data
 	M68kRegisters r = {};

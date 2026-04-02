@@ -1454,6 +1454,11 @@ static void one_tick(...)
 	// NOTE: removed HasMacStarted() guard — early boot needs interrupts
 	// to progress past CLKNOMEM/PRAM init.
 	SetInterruptFlag(INTFLAG_60HZ);
+	if (getenv("B2_TRACE_IRQSEQ") && *getenv("B2_TRACE_IRQSEQ") && strcmp(getenv("B2_TRACE_IRQSEQ"), "0") != 0) {
+		static unsigned long tick_log_count = 0;
+		if (tick_log_count < 2000)
+			fprintf(stderr, "TICK %lu flags=%08x\n", ++tick_log_count, (unsigned)InterruptFlags);
+	}
 	TriggerInterrupt();
 }
 

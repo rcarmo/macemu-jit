@@ -1767,6 +1767,46 @@ void m68k_do_execute (void)
 				_ft_count, (unsigned)m68k_getpc(), (unsigned)opcode, (unsigned)regs.sr, (unsigned)m68k_dreg(regs,1), (unsigned)m68k_dreg(regs,3));
 		}
 	}
+	/* Targeted path-selection trace for the intermittent L2 startup split.
+	   Enable with B2_TRACE_PATHSEL=1 to log the exact guest state around the
+	   0x040099b0..0x04009a30 dispatcher and the related low-memory interrupt /
+	   scheduler region at 0x0400a298..0x0400a2f8. */
+	{
+		static int _ps_init = 0;
+		static int _ps_enabled = 0;
+		static unsigned long _ps_count = 0;
+		if (!_ps_init) {
+			const char *env = getenv("B2_TRACE_PATHSEL");
+			_ps_enabled = (env && env[0] && strcmp(env, "0") != 0) ? 1 : 0;
+			_ps_init = 1;
+		}
+		if (_ps_enabled) {
+			uaecptr _ps_pc = m68k_getpc();
+			if (((_ps_pc >= 0x040099b0 && _ps_pc <= 0x04009a30) ||
+				 (_ps_pc >= 0x0400a298 && _ps_pc <= 0x0400a2f8)) &&
+				_ps_count < 2000) {
+				MakeSR();
+				fprintf(stderr,
+					"PS %lu pc=%08x op=%04x sr=%04x D0=%08x D1=%08x D2=%08x A0=%08x A1=%08x A2=%08x A7=%08x LM110=%08x LM160=%02x LM162=%08x LM16A=%08x LM2AA=%08x\n",
+					++_ps_count,
+					(unsigned)_ps_pc,
+					(unsigned)opcode,
+					(unsigned)regs.sr,
+					(unsigned)m68k_dreg(regs, 0),
+					(unsigned)m68k_dreg(regs, 1),
+					(unsigned)m68k_dreg(regs, 2),
+					(unsigned)m68k_areg(regs, 0),
+					(unsigned)m68k_areg(regs, 1),
+					(unsigned)m68k_areg(regs, 2),
+					(unsigned)m68k_areg(regs, 7),
+					(unsigned)ReadMacInt32(0x110),
+					(unsigned)ReadMacInt8(0x160),
+					(unsigned)ReadMacInt32(0x162),
+					(unsigned)ReadMacInt32(0x16a),
+					(unsigned)ReadMacInt32(0x2aa));
+			}
+		}
+	}
 
 	cpu_check_ticks();
 	regs.fault_pc = m68k_getpc();
