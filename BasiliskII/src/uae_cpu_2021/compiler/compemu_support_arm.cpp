@@ -281,6 +281,8 @@ static void op_fullsr_orsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode);
+static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode);
+static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
@@ -352,9 +354,10 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
-	/* Remaining unsupported full-SR writes still go through the interpreter and
-	   must terminate the block after MakeFromSR()-style state changes. */
-	return false;
+	/* Word-sized MV2SR still changes supervisor state and stack banks via
+	   MakeFromSR(). When routed through the legacy/interpreter path, always
+	   terminate the current native block afterward. */
+	return table68k[op].mnemo == i_MV2SR && table68k[op].size == sz_word;
 }
 
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
@@ -2460,81 +2463,126 @@ static void jit_runtime_mv2sr_word_full(uae_u32 opcode)
 
     uae_u32 real_opcode = cft_map(opcode);
     uae_u32 srcreg = real_opcode & 7;
-    uae_u16 src = 0;
     uaecptr srca;
+    uae_u16 src;
+
     switch (real_opcode & 0x003f) {
     case 0x0000: /* Dn */
         src = (uae_u16)m68k_dreg(regs, srcreg);
+        regs.sr = src;
+        MakeFromSR();
         m68k_incpc(2);
-        break;
+        return;
     case 0x0010: /* (An) */
         srca = m68k_areg(regs, srcreg);
         src = get_word(srca);
+        regs.sr = src;
+        MakeFromSR();
         m68k_incpc(2);
-        break;
+        return;
     case 0x0018: /* (An)+ */
         srca = m68k_areg(regs, srcreg);
         src = get_word(srca);
         m68k_areg(regs, srcreg) += 2;
+        regs.sr = src;
+        MakeFromSR();
         m68k_incpc(2);
-        break;
+        return;
     case 0x0020: /* -(An) */
         srca = m68k_areg(regs, srcreg) - 2;
         src = get_word(srca);
         m68k_areg(regs, srcreg) = srca;
+        regs.sr = src;
+        MakeFromSR();
         m68k_incpc(2);
-        break;
+        return;
     case 0x0028: /* (d16,An) */
         srca = m68k_areg(regs, srcreg) + (uae_s32)(uae_s16)get_iword(2);
         src = get_word(srca);
+        regs.sr = src;
+        MakeFromSR();
         m68k_incpc(4);
-        break;
+        return;
     case 0x0030: /* (d8,An,Xn) */
-        srca = get_disp_ea_020(m68k_areg(regs, srcreg), get_iword(2));
+        m68k_incpc(2);
+        srca = get_disp_ea_020(m68k_areg(regs, srcreg), next_iword());
         src = get_word(srca);
-        m68k_incpc(4);
-        break;
+        regs.sr = src;
+        MakeFromSR();
+        return;
     case 0x0038: /* extension modes */
         switch (srcreg) {
         case 0: /* (xxx).W */
             srca = (uae_s32)(uae_s16)get_iword(2);
             src = get_word(srca);
+            regs.sr = src;
+            MakeFromSR();
             m68k_incpc(4);
-            break;
+            return;
         case 1: /* (xxx).L */
             srca = get_ilong(2);
             src = get_word(srca);
+            regs.sr = src;
+            MakeFromSR();
             m68k_incpc(6);
-            break;
+            return;
         case 2: /* (d16,PC) */
             srca = m68k_getpc() + 2 + (uae_s32)(uae_s16)get_iword(2);
             src = get_word(srca);
+            regs.sr = src;
+            MakeFromSR();
             m68k_incpc(4);
-            break;
+            return;
         case 3: /* (d8,PC,Xn) */
-            srca = get_disp_ea_020(m68k_getpc() + 2, get_iword(2));
+            m68k_incpc(2);
+            srca = get_disp_ea_020(m68k_getpc(), next_iword());
             src = get_word(srca);
-            m68k_incpc(4);
-            break;
+            regs.sr = src;
+            MakeFromSR();
+            return;
         case 4: /* #<data>.W */
             src = (uae_u16)get_iword(2);
+            regs.sr = src;
+            MakeFromSR();
             m68k_incpc(4);
-            break;
+            return;
         default:
             op_illg(opcode);
             return;
         }
-        break;
     default:
         op_illg(opcode);
         return;
     }
-
-    regs.sr = src;
-    MakeFromSR();
 }
 
-static inline void jit_emit_fullsr_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2)
+static void jit_runtime_move_l_d8anxn_absw(uae_u32 opcode)
+{
+    uae_u32 real_opcode = cft_map(opcode);
+    uae_u32 srcreg = real_opcode & 7;
+
+    m68k_incpc(2);
+    uaecptr srca = get_disp_ea_020(m68k_areg(regs, srcreg), next_iword());
+    uae_s32 src = get_long(srca);
+    uaecptr dsta = (uae_s32)(uae_s16)get_iword(0);
+
+    CLEAR_CZNV();
+    SET_ZFLG(((uae_s32)(src)) == 0);
+    SET_NFLG(((uae_s32)(src)) < 0);
+
+    m68k_incpc(2);
+    regs.fault_pc = m68k_getpc();
+    put_long(dsta, src);
+}
+
+static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_move_l_d8anxn_absw,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
+}
+
+static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2)
 {
     flush(1);
     compemu_raw_mov_l_ri(REG_PAR1, arg1);
@@ -2554,7 +2602,7 @@ static void op_fullsr_orsr_w_comp_ff(uae_u32 opcode)
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
     m68k_pc_offset += 2;
     uae_u32 src = (uae_u32)(uae_u16)comp_get_iword((m68k_pc_offset += 2) - 2);
-    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_orsr_word,
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_orsr_word,
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), src, 0, false);
 }
 
@@ -2564,7 +2612,7 @@ static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode)
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
     m68k_pc_offset += 2;
     uae_u32 src = (uae_u32)(uae_u16)comp_get_iword((m68k_pc_offset += 2) - 2);
-    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_andsr_word,
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_andsr_word,
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), src, 0, false);
 }
 
@@ -2574,7 +2622,7 @@ static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode)
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
     m68k_pc_offset += 2;
     uae_u32 src = (uae_u32)(uae_u16)comp_get_iword((m68k_pc_offset += 2) - 2);
-    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_eorsr_word,
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_eorsr_word,
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), src, 0, false);
 }
 
@@ -2583,7 +2631,7 @@ static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode)
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
     /* Delegate exact EA semantics to the runtime helper. It advances PC on
        success and raises privilege/address exceptions with the correct live PC. */
-    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_mv2sr_word_full,
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_mv2sr_word_full,
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
 }
 
@@ -3849,9 +3897,17 @@ void build_comp(void)
     compfunctbl[cft_map(0x007c)] = op_fullsr_orsr_w_comp_ff;
     compfunctbl[cft_map(0x027c)] = op_fullsr_andsr_w_comp_ff;
     compfunctbl[cft_map(0x0a7c)] = op_fullsr_eorsr_w_comp_ff;
-    for (opcode = 0; opcode < 65536; opcode++) {
-        if (table68k[opcode].mnemo == i_MV2SR && table68k[opcode].size == sz_word)
-            compfunctbl[cft_map(opcode)] = op_fullsr_mv2sr_w_comp_ff;
+    /* Keep MV2SR.W on the exact legacy/interpreter path for now; the block
+       barrier above preserves correctness after MakeFromSR()-style state
+       changes while we continue narrowing the native helper bug. */
+    /* Exact semantic containment for the confirmed remaining optlev=2 blocker:
+       MOVE.L (d8,An,Xn),(xxx).W. The failing boot path reaches this through
+       68020 memory-indirect full-format EAs; route the family through a
+       runtime helper until the native source-read bug is fixed from first
+       principles. */
+    for (opcode = 0x21f0; opcode <= 0x21f7; opcode++) {
+        compfunctbl[cft_map(opcode)] = op_move_l_d8anxn_absw_comp_ff;
+        nfcompfunctbl[cft_map(opcode)] = op_move_l_d8anxn_absw_comp_ff;
     }
 
     int count = 0;
@@ -4240,6 +4296,17 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
 #endif
                     if (jit_force_runtime_pc_endblock) {
+                        /* Runtime helper barriers can change guest PC/state in
+                           ways that require a fresh dispatcher entry. End the
+                           block exactly like the interpreter-side full-SR
+                           barrier path instead of just breaking out of codegen. */
+                        compemu_raw_mov_l_rm(0, (uintptr)specflags);
+#if defined(USE_DATA_BUFFER)
+                        data_check_end(12, 64);
+#endif
+                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
+                        compemu_raw_mov_l_rm(REG_PC_TMP, (uintptr)&regs.pc_p);
+                        compemu_raw_endblock_pc_inreg(REG_PC_TMP, scaled_cycles(totcycles));
                         forced_interpreter_barrier = true;
                         break;
                     }
