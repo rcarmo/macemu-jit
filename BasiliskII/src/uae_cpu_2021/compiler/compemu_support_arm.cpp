@@ -275,6 +275,13 @@ static inline bool jit_force_optlev1_env_opcode(uae_u16 op)
 	return false;
 }
 
+static void flush(int save_regs);
+
+static void op_fullsr_orsr_w_comp_ff(uae_u32 opcode);
+static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode);
+static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode);
+static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode);
+
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
 	if (jit_force_optlev1_env_opcode(op))
@@ -296,14 +303,14 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 		return true;
 	/* Early optlev=2 runs still hit boot-sensitive system/stack instructions.
 	   Keep them at optlev=1 while narrowing the first safe native subset. */
-	if (op == 0x007c || op == 0x027c || op == 0x023c) /* immediate to SR/CCR */
+	if (op == 0x023c) /* immediate to CCR */
 		return true;
-	if (op == 0x40e7 || op == 0x46df || op == 0x40c1 || op == 0x46c1 || op == 0x46c0) /* SR stack/reg transfers */
+	if (op == 0x40e7 || op == 0x40c1) /* remaining SR readout stack/reg transfers */
 		return true;
 	/* Remaining early-boot failures still include privileged CCR/SR writes in the
 	   surviving optlev=2 subset. Keep these interpreter-side while narrowing the
 	   first stable native opcode core. */
-	if (op == 0x44df || op == 0x44fc || op == 0x46fc)
+	if (op == 0x44df || op == 0x44fc)
 		return true;
 	/* After collapsing the 0x000F* helper cluster, the first reproducible
 	   semantic win on the remaining frontier is the exact MOVEQ pair
@@ -345,15 +352,8 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
-	/* Full-SR writes and immediate SR word operations currently execute via the
-	   interpreter path. They can switch supervisor stack banks, trace state, and
-	   interrupt masks through MakeFromSR(). Treat them as hard block boundaries
-	   after the fallback call so later native/interpreter mixing always starts
-	   from a fresh handler entry. */
-	if (op == 0x007c || op == 0x027c || op == 0x0a7c)
-		return true; /* ORSR.W / ANDSR.W / EORSR.W */
-	if ((op & 0xffc0) == 0x46c0)
-		return true; /* MV2SR.W <ea> */
+	/* Remaining unsupported full-SR writes still go through the interpreter and
+	   must terminate the block after MakeFromSR()-style state changes. */
 	return false;
 }
 
@@ -531,6 +531,7 @@ static uintptr next_pc_p;
 static uintptr taken_pc_p;
 static int     branch_cc;
 static int redo_current_block;
+static bool jit_force_runtime_pc_endblock = false;
 
 #ifdef UAE
 int segvcount = 0;
@@ -2414,6 +2415,178 @@ static void prepare_for_call_2(void)
                                      flags at the very start of the call_r functions! */
 }
 
+static void jit_runtime_orsr_word(uae_u32 src)
+{
+    if (!regs.s) {
+        Exception(8, 0);
+        return;
+    }
+    MakeSR();
+    regs.sr |= (uae_u16)src;
+    MakeFromSR();
+    m68k_incpc(4);
+}
+
+static void jit_runtime_andsr_word(uae_u32 src)
+{
+    if (!regs.s) {
+        Exception(8, 0);
+        return;
+    }
+    MakeSR();
+    regs.sr &= (uae_u16)src;
+    MakeFromSR();
+    m68k_incpc(4);
+}
+
+static void jit_runtime_eorsr_word(uae_u32 src)
+{
+    if (!regs.s) {
+        Exception(8, 0);
+        return;
+    }
+    MakeSR();
+    regs.sr ^= (uae_u16)src;
+    MakeFromSR();
+    m68k_incpc(4);
+}
+
+static void jit_runtime_mv2sr_word_full(uae_u32 opcode)
+{
+    if (!regs.s) {
+        Exception(8, 0);
+        return;
+    }
+
+    uae_u32 real_opcode = cft_map(opcode);
+    uae_u32 srcreg = real_opcode & 7;
+    uae_u16 src = 0;
+    uaecptr srca;
+    switch (real_opcode & 0x003f) {
+    case 0x0000: /* Dn */
+        src = (uae_u16)m68k_dreg(regs, srcreg);
+        m68k_incpc(2);
+        break;
+    case 0x0010: /* (An) */
+        srca = m68k_areg(regs, srcreg);
+        src = get_word(srca);
+        m68k_incpc(2);
+        break;
+    case 0x0018: /* (An)+ */
+        srca = m68k_areg(regs, srcreg);
+        src = get_word(srca);
+        m68k_areg(regs, srcreg) += 2;
+        m68k_incpc(2);
+        break;
+    case 0x0020: /* -(An) */
+        srca = m68k_areg(regs, srcreg) - 2;
+        src = get_word(srca);
+        m68k_areg(regs, srcreg) = srca;
+        m68k_incpc(2);
+        break;
+    case 0x0028: /* (d16,An) */
+        srca = m68k_areg(regs, srcreg) + (uae_s32)(uae_s16)get_iword(2);
+        src = get_word(srca);
+        m68k_incpc(4);
+        break;
+    case 0x0030: /* (d8,An,Xn) */
+        srca = get_disp_ea_020(m68k_areg(regs, srcreg), get_iword(2));
+        src = get_word(srca);
+        m68k_incpc(4);
+        break;
+    case 0x0038: /* extension modes */
+        switch (srcreg) {
+        case 0: /* (xxx).W */
+            srca = (uae_s32)(uae_s16)get_iword(2);
+            src = get_word(srca);
+            m68k_incpc(4);
+            break;
+        case 1: /* (xxx).L */
+            srca = get_ilong(2);
+            src = get_word(srca);
+            m68k_incpc(6);
+            break;
+        case 2: /* (d16,PC) */
+            srca = m68k_getpc() + 2 + (uae_s32)(uae_s16)get_iword(2);
+            src = get_word(srca);
+            m68k_incpc(4);
+            break;
+        case 3: /* (d8,PC,Xn) */
+            srca = get_disp_ea_020(m68k_getpc() + 2, get_iword(2));
+            src = get_word(srca);
+            m68k_incpc(4);
+            break;
+        case 4: /* #<data>.W */
+            src = (uae_u16)get_iword(2);
+            m68k_incpc(4);
+            break;
+        default:
+            op_illg(opcode);
+            return;
+        }
+        break;
+    default:
+        op_illg(opcode);
+        return;
+    }
+
+    regs.sr = src;
+    MakeFromSR();
+}
+
+static inline void jit_emit_fullsr_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2)
+{
+    flush(1);
+    compemu_raw_mov_l_ri(REG_PAR1, arg1);
+    if (has_arg2)
+        compemu_raw_mov_l_ri(REG_PAR2, arg2);
+    compemu_raw_set_pc_i(pc);
+    compemu_raw_call(helper);
+    live.state[PC_P].realreg = -1;
+    live.state[PC_P].val = 0;
+    set_status(PC_P, INMEM);
+    jit_force_runtime_pc_endblock = true;
+}
+
+static void op_fullsr_orsr_w_comp_ff(uae_u32 opcode)
+{
+    (void)opcode;
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    m68k_pc_offset += 2;
+    uae_u32 src = (uae_u32)(uae_u16)comp_get_iword((m68k_pc_offset += 2) - 2);
+    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_orsr_word,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), src, 0, false);
+}
+
+static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode)
+{
+    (void)opcode;
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    m68k_pc_offset += 2;
+    uae_u32 src = (uae_u32)(uae_u16)comp_get_iword((m68k_pc_offset += 2) - 2);
+    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_andsr_word,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), src, 0, false);
+}
+
+static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode)
+{
+    (void)opcode;
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    m68k_pc_offset += 2;
+    uae_u32 src = (uae_u32)(uae_u16)comp_get_iword((m68k_pc_offset += 2) - 2);
+    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_eorsr_word,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), src, 0, false);
+}
+
+static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    /* Delegate exact EA semantics to the runtime helper. It advances PC on
+       success and raises privilege/address exceptions with the correct live PC. */
+    jit_emit_fullsr_helper_barrier((uintptr)jit_runtime_mv2sr_word_full,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
+}
+
 #if defined(CPU_AARCH64) 
 #include "compemu_midfunc_arm64.cpp"
 #include "compemu_midfunc_arm64_2.cpp"
@@ -3670,6 +3843,17 @@ void build_comp(void)
     }
 #endif
 
+    /* AArch64 central full-SR support that bypasses the generic failure path.
+       These still terminate the block after the helper call, but they now have
+       dedicated compiled handlers instead of relying on unsupported-op fallback. */
+    compfunctbl[cft_map(0x007c)] = op_fullsr_orsr_w_comp_ff;
+    compfunctbl[cft_map(0x027c)] = op_fullsr_andsr_w_comp_ff;
+    compfunctbl[cft_map(0x0a7c)] = op_fullsr_eorsr_w_comp_ff;
+    for (opcode = 0; opcode < 65536; opcode++) {
+        if (table68k[opcode].mnemo == i_MV2SR && table68k[opcode].size == sz_word)
+            compfunctbl[cft_map(opcode)] = op_fullsr_mv2sr_w_comp_ff;
+    }
+
     int count = 0;
     for (opcode = 0; opcode < 65536; opcode++) {
         if (compfunctbl[cft_map(opcode)])
@@ -4007,6 +4191,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             next_pc_p = 0;
             taken_pc_p = 0;
             branch_cc = 0; // Only to be initialized. Will be set together with next_pc_p
+            jit_force_runtime_pc_endblock = false;
             bool forced_interpreter_barrier = false;
 
             comp_pc_p = (uae_u8*)pc_hist[0].location;
@@ -4054,6 +4239,10 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             opcode, _before, _after, (long)(_after - _before));
                     }
 #endif
+                    if (jit_force_runtime_pc_endblock) {
+                        forced_interpreter_barrier = true;
+                        break;
+                    }
                     freescratch();
                     if (!(liveflags[i + 1] & FLAG_CZNV)) {
                         /* We can forget about flags */
