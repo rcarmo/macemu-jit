@@ -282,6 +282,7 @@ static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode);
 static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode);
+static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
@@ -2575,10 +2576,30 @@ static void jit_runtime_move_l_d8anxn_absw(uae_u32 opcode)
     put_long(dsta, src);
 }
 
+static void jit_runtime_movea_l_postinc_an(uae_u32 opcode)
+{
+    uae_u32 real_opcode = cft_map(opcode);
+    uae_u32 srcreg = real_opcode & 7;
+    uae_u32 dstreg = (real_opcode >> 9) & 7;
+
+    uaecptr srca = m68k_areg(regs, srcreg);
+    uae_s32 src = get_long(srca);
+    m68k_areg(regs, srcreg) += 4;
+    m68k_areg(regs, dstreg) = (uae_u32)src;
+    m68k_incpc(2);
+}
+
 static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode)
 {
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
     jit_emit_runtime_helper_barrier((uintptr)jit_runtime_move_l_d8anxn_absw,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
+}
+
+static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_movea_l_postinc_an,
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
 }
 
@@ -3908,6 +3929,19 @@ void build_comp(void)
     for (opcode = 0x21f0; opcode <= 0x21f7; opcode++) {
         compfunctbl[cft_map(opcode)] = op_move_l_d8anxn_absw_comp_ff;
         nfcompfunctbl[cft_map(opcode)] = op_move_l_d8anxn_absw_comp_ff;
+    }
+    /* Current next frontier: MOVEA.L (An)+,An postincrement stack-pop family.
+       Route the whole semantic family through an exact runtime helper barrier
+       while we keep narrowing the native state-transition bug exposed by
+       0x225f (MOVEA.L (A7)+,A1). */
+    for (opcode = 0; opcode < 65536; opcode++) {
+        if (table68k[opcode].mnemo == i_MOVEA &&
+            table68k[opcode].size == sz_long &&
+            table68k[opcode].smode == Aipi &&
+            table68k[opcode].dmode == Areg) {
+            compfunctbl[cft_map(opcode)] = op_movea_l_postinc_an_comp_ff;
+            nfcompfunctbl[cft_map(opcode)] = op_movea_l_postinc_an_comp_ff;
+        }
     }
 
     int count = 0;
