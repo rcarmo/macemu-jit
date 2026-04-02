@@ -282,6 +282,7 @@ static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode);
 static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode);
+static void op_move_l_reg_d16an_comp_ff(uae_u32 opcode);
 static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
@@ -2589,10 +2590,36 @@ static void jit_runtime_movea_l_postinc_an(uae_u32 opcode)
     m68k_incpc(2);
 }
 
+static void jit_runtime_move_l_reg_d16an(uae_u32 opcode)
+{
+    uae_u32 real_opcode = cft_map(opcode);
+    uae_u32 srcreg = real_opcode & 7;
+    uae_u32 dstreg = (real_opcode >> 9) & 7;
+    uae_s32 src = table68k[cft_map(opcode)].smode == Dreg
+        ? (uae_s32)m68k_dreg(regs, srcreg)
+        : (uae_s32)m68k_areg(regs, srcreg);
+    uaecptr dsta = m68k_areg(regs, dstreg) + (uae_s32)(uae_s16)get_iword(2);
+
+    CLEAR_CZNV();
+    SET_ZFLG(((uae_s32)(src)) == 0);
+    SET_NFLG(((uae_s32)(src)) < 0);
+
+    m68k_incpc(4);
+    regs.fault_pc = m68k_getpc();
+    put_long(dsta, src);
+}
+
 static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode)
 {
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
     jit_emit_runtime_helper_barrier((uintptr)jit_runtime_move_l_d8anxn_absw,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
+}
+
+static void op_move_l_reg_d16an_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_move_l_reg_d16an,
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
 }
 
@@ -3929,6 +3956,20 @@ void build_comp(void)
     for (opcode = 0x21f0; opcode <= 0x21f7; opcode++) {
         compfunctbl[cft_map(opcode)] = op_move_l_d8anxn_absw_comp_ff;
         nfcompfunctbl[cft_map(opcode)] = op_move_l_d8anxn_absw_comp_ff;
+    }
+    /* Next proven deep-surface candidate: MOVE.L register -> (d16,An) long
+       store family. The strongest 60s improvement came from gating the exact
+       `2149` + `2140` pair, which are just two members of this semantic
+       family. Route the whole family through an exact runtime helper barrier
+       while we keep narrowing the deeper block interaction around it. */
+    for (opcode = 0; opcode < 65536; opcode++) {
+        if (table68k[opcode].mnemo == i_MOVE &&
+            table68k[opcode].size == sz_long &&
+            table68k[opcode].dmode == Ad16 &&
+            (table68k[opcode].smode == Dreg || table68k[opcode].smode == Areg)) {
+            compfunctbl[cft_map(opcode)] = op_move_l_reg_d16an_comp_ff;
+            nfcompfunctbl[cft_map(opcode)] = op_move_l_reg_d16an_comp_ff;
+        }
     }
     /* Current next frontier: MOVEA.L (An)+,An postincrement stack-pop family.
        Route the whole semantic family through an exact runtime helper barrier
