@@ -343,6 +343,20 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	return false;
 }
 
+static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
+{
+	/* Full-SR writes and immediate SR word operations currently execute via the
+	   interpreter path. They can switch supervisor stack banks, trace state, and
+	   interrupt masks through MakeFromSR(). Treat them as hard block boundaries
+	   after the fallback call so later native/interpreter mixing always starts
+	   from a fresh handler entry. */
+	if (op == 0x007c || op == 0x027c || op == 0x0a7c)
+		return true; /* ORSR.W / ANDSR.W / EORSR.W */
+	if ((op & 0xffc0) == 0x46c0)
+		return true; /* MV2SR.W <ea> */
+	return false;
+}
+
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 {
 	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
@@ -3993,6 +4007,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             next_pc_p = 0;
             taken_pc_p = 0;
             branch_cc = 0; // Only to be initialized. Will be set together with next_pc_p
+            bool forced_interpreter_barrier = false;
 
             comp_pc_p = (uae_u8*)pc_hist[0].location;
             init_comp();
@@ -4061,6 +4076,21 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_inc_opcount(opcode);
 #endif
 
+                    if (jit_force_interpreter_barrier_opcode((uae_u16)opcode)) {
+                        /* Full-SR interpreter fallbacks can switch stack banks,
+                           trace state, and interrupt masks via MakeFromSR().
+                           End the block immediately after the fallback call so
+                           later code restarts from a fresh handler entry. */
+                        compemu_raw_mov_l_rm(0, (uintptr)specflags);
+#if defined(USE_DATA_BUFFER)
+                        data_check_end(12, 64);
+#endif
+                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
+                        compemu_raw_mov_l_rm(REG_PC_TMP, (uintptr)&regs.pc_p);
+                        compemu_raw_endblock_pc_inreg(REG_PC_TMP, scaled_cycles(totcycles));
+                        forced_interpreter_barrier = true;
+                        break;
+                    }
                     if (i < blocklen - 1) {
                         uae_u8* branchadd;
 
@@ -4079,7 +4109,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     may_raise_exception = false;
                 }
             }
-            if (next_pc_p && taken_pc_p &&
+            if (!forced_interpreter_barrier && next_pc_p && taken_pc_p &&
                 was_comp && taken_pc_p == current_block_pc_p)
             {
                 blockinfo* bi1 = get_blockinfo_addr_new((void*)next_pc_p);
@@ -4109,7 +4139,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             }
             log_flush();
 
-            if (next_pc_p) { /* A branch was registered */
+            if (!forced_interpreter_barrier && next_pc_p) { /* A branch was registered */
                 uintptr t1 = next_pc_p;
                 uintptr t2 = taken_pc_p;
                 int cc = branch_cc; // from gencomp (x86 condition code encoding)
@@ -4173,7 +4203,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), t2);
                 write_jmp_target(tba, get_handler(t2));
                 create_jmpdep(bi, 1, tba, t2);
-            } else {
+            } else if (!forced_interpreter_barrier) {
                 if (was_comp) {
                     flush(1);
                 }
