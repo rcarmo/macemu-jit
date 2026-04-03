@@ -4671,10 +4671,10 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             (unsigned)liveflags[i + 1],
                             (unsigned)needed_flags);
                     }
-                    compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)opcode);
+                    compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)cft_map(opcode));
                     compemu_raw_mov_l_rr(REG_PAR2, R_REGSTRUCT);
                     compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
-                    compemu_raw_call((uintptr)cputbl[opcode]);
+                    compemu_raw_call((uintptr)cputbl[cft_map(opcode)]);
 #ifdef PROFILE_UNTRANSLATED_INSNS
                     // raw_cputbl_count[] is indexed with plain opcode (in m68k order)
                     compemu_raw_inc_opcount(opcode);

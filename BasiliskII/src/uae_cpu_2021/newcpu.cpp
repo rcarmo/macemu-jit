@@ -87,7 +87,8 @@ static unsigned long trace_emulopflow_count = 0;
 
 static bool trace_emulopflow_opcode(uae_u32 opcode)
 {
-	return (opcode & 0xff00) == 0x7100;
+	uae_u16 logical = do_get_mem_word((uae_u16*)&opcode);
+	return (logical & 0xff00) == 0x7100;
 }
 
 static bool trace_window_enabled()
