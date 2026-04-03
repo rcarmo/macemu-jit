@@ -1364,6 +1364,15 @@ void ClearInterruptFlag(uint32 flag)
 	InterruptFlags &= ~flag;
 	UNLOCK_INTFLAGS;
 }
+
+uint32 ConsumeInterruptFlags(void)
+{
+	LOCK_INTFLAGS;
+	uint32 flags = InterruptFlags;
+	InterruptFlags = 0;
+	UNLOCK_INTFLAGS;
+	return flags;
+}
 #endif
 
 #if !EMULATED_68K
@@ -1379,6 +1388,16 @@ void TriggerInterrupt(void)
 void TriggerNMI(void)
 {
 	// not yet supported
+}
+
+bool UseDeferredInterruptModel(void)
+{
+	return false;
+}
+
+uint32 ConsumeDeferredInterruptFlags(void)
+{
+	return 0;
 }
 #endif
 

@@ -275,6 +275,212 @@ static inline bool jit_force_optlev1_env_opcode(uae_u16 op)
 	return false;
 }
 
+static inline bool trace_flagflow_env(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *env = getenv("B2_TRACE_FLAGFLOW");
+		enabled = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+		if (enabled) {
+			const char *l2_only = getenv("B2_JIT_L2_ONLY");
+			const char *disable = getenv("B2_JIT_DISABLE_HARDCODED_OPTLEV1");
+			int l2 = ((l2_only && *l2_only && strcmp(l2_only, "0") != 0) ||
+				(disable && *disable && strcmp(disable, "0") != 0)) ? 1 : 0;
+			fprintf(stderr, "FLAGFLOW_CONFIG enabled=1 l2only=%d\n", l2);
+		}
+	}
+	return enabled != 0;
+}
+
+static inline unsigned long trace_flagflow_limit(void)
+{
+	static unsigned long value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_FLAGFLOW_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 2000;
+		init = true;
+	}
+	return value;
+}
+
+static inline bool trace_flagflow_opcode(uae_u16 op)
+{
+	return op == 0x7000 || op == 0x7001 || op == 0x7128 || op == 0x7129 || op == 0x7130 ||
+		op == 0x7104 || op == 0x7111 || op == 0x7123 || op == 0x712c ||
+		op == 0x4a80 || op == 0x4290 || op == 0x4aa9 || op == 0x4278 || op == 0x4ab8 ||
+		(op & 0xf000) == 0x6000;
+}
+
+static inline bool trace_propbuild_env(void)
+{
+	static int enabled = -1;
+	if (enabled < 0)
+		enabled = (getenv("B2_TRACE_PROPBUILD") && *getenv("B2_TRACE_PROPBUILD") && strcmp(getenv("B2_TRACE_PROPBUILD"), "0") != 0) ? 1 : 0;
+	return enabled != 0;
+}
+
+static inline bool trace_propbuild_opcode(uae_u16 op)
+{
+	return op == 0x7104 || op == 0x7000 || op == 0x6704 || op == 0x4a80 || op == 0x4278 ||
+		op == 0x0471 || op == 0x0070 || op == 0x0467 || op == 0x804a || op == 0x7842;
+}
+
+static inline bool trace_emulopflow_env(void)
+{
+	static int enabled = -1;
+	if (enabled < 0)
+		enabled = (getenv("B2_TRACE_EMULOPFLOW") && *getenv("B2_TRACE_EMULOPFLOW") && strcmp(getenv("B2_TRACE_EMULOPFLOW"), "0") != 0) ? 1 : 0;
+	return enabled != 0;
+}
+
+static inline unsigned long trace_emulopflow_limit(void)
+{
+	static unsigned long value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_EMULOPFLOW_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 2000;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned long trace_emulopflow_count = 0;
+
+static inline bool trace_emulopflow_opcode(uae_u16 op)
+{
+	return (op & 0xff00) == 0x7100;
+}
+
+static inline bool trace_emuneigh_env()
+{
+	static int enabled = -1;
+	if (enabled < 0)
+		enabled = (getenv("B2_TRACE_EMUNEIGH") && *getenv("B2_TRACE_EMUNEIGH") && strcmp(getenv("B2_TRACE_EMUNEIGH"), "0") != 0) ? 1 : 0;
+	return enabled != 0;
+}
+
+static inline unsigned long trace_emuneigh_limit()
+{
+	static unsigned long value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_EMUNEIGH_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 4000;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned long trace_emuneigh_count = 0;
+
+static inline bool trace_emuneigh_target(uae_u32 pc)
+{
+	return (pc >= 0x0400a3dc && pc <= 0x0400a3f2) ||
+		(pc >= 0x040b3566 && pc <= 0x040b35c8);
+}
+
+static void trace_emuneigh_entry(uae_u32 block_pc, uae_u32 first_op)
+{
+	if (!trace_emuneigh_env() || trace_emuneigh_count >= trace_emuneigh_limit())
+		return;
+	MakeSR();
+	fprintf(stderr,
+		"EMUNEIGH %lu ENTRY block=%08x first=%04x pc=%08x sr=%04x spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x lm160=%02x lm162=%08x ticks=%08x irq=%08x\n",
+		++trace_emuneigh_count,
+		(unsigned)block_pc,
+		(unsigned)first_op,
+		(unsigned)m68k_getpc(),
+		(unsigned)regs.sr,
+		(unsigned)regs.spcflags,
+		(unsigned)m68k_dreg(regs,0),
+		(unsigned)m68k_dreg(regs,1),
+		(unsigned)m68k_dreg(regs,2),
+		(unsigned)m68k_areg(regs,0),
+		(unsigned)m68k_areg(regs,1),
+		(unsigned)m68k_areg(regs,7),
+		(unsigned)ReadMacInt8(0x160),
+		(unsigned)ReadMacInt32(0x162),
+		(unsigned)ReadMacInt32(0x16a),
+		(unsigned)InterruptFlags);
+}
+
+static void trace_emulop_resume(uae_u32 opcode, uae_u32 next_pc)
+{
+	if (!trace_emulopflow_env() || trace_emulopflow_count >= trace_emulopflow_limit())
+		return;
+	MakeSR();
+	fprintf(stderr,
+		"EMUFLOW %lu RESUME op=%04x next=%08x pc=%08x sr=%04x spc=%08x quit=%d d0=%08x d1=%08x a0=%08x a1=%08x a7=%08x\n",
+		++trace_emulopflow_count,
+		(unsigned)opcode,
+		(unsigned)next_pc,
+		(unsigned)m68k_getpc(),
+		(unsigned)regs.sr,
+		(unsigned)regs.spcflags,
+		quit_program,
+		(unsigned)m68k_dreg(regs, 0),
+		(unsigned)m68k_dreg(regs, 1),
+		(unsigned)m68k_areg(regs, 0),
+		(unsigned)m68k_areg(regs, 1),
+		(unsigned)m68k_areg(regs, 7));
+}
+
+static unsigned long trace_flagflow_count = 0;
+static uae_u32 trace_flagflow_block_pc = 0;
+static uae_u32 trace_flagflow_pc = 0;
+static uae_u16 trace_flagflow_op = 0;
+
+static inline void trace_flagflow_log(const char *tag, uae_u32 a = 0, uae_u32 b = 0, uae_u32 c = 0, uae_u32 d = 0)
+{
+	if (!trace_flagflow_env() || trace_flagflow_count >= trace_flagflow_limit())
+		return;
+	fprintf(stderr,
+		"FLAGFLOW %lu %s block=%08x pc=%08x op=%04x a=%08x b=%08x c=%08x d=%08x\n",
+		++trace_flagflow_count,
+		tag,
+		(unsigned)trace_flagflow_block_pc,
+		(unsigned)trace_flagflow_pc,
+		(unsigned)trace_flagflow_op,
+		(unsigned)a,
+		(unsigned)b,
+		(unsigned)c,
+		(unsigned)d);
+}
+
+static inline void trace_flagflow_log_opmeta(uae_u16 opcode, uae_u32 next_live, uae_u16 next_op)
+{
+	if (!trace_flagflow_env() || trace_flagflow_count >= trace_flagflow_limit())
+		return;
+	unsigned int mapped = uae_bswap_16(opcode);
+	fprintf(stderr,
+		"FLAGFLOW %lu OPMETA block=%08x pc=%08x op=%04x mapped=%04x cur_use=%02x cur_set=%02x map_use=%02x map_set=%02x next_live=%08x next_op=%04x\n",
+		++trace_flagflow_count,
+		(unsigned)trace_flagflow_block_pc,
+		(unsigned)trace_flagflow_pc,
+		(unsigned)opcode,
+		(unsigned)mapped,
+		(unsigned)prop[opcode].use_flags,
+		(unsigned)prop[opcode].set_flags,
+		(unsigned)prop[mapped].use_flags,
+		(unsigned)prop[mapped].set_flags,
+		(unsigned)next_live,
+		(unsigned)next_op);
+}
+
+static inline bool jit_disable_hardcoded_optlev1(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *l2_only = getenv("B2_JIT_L2_ONLY");
+		const char *disable = getenv("B2_JIT_DISABLE_HARDCODED_OPTLEV1");
+		enabled = ((l2_only && *l2_only && strcmp(l2_only, "0") != 0) ||
+			(disable && *disable && strcmp(disable, "0") != 0)) ? 1 : 0;
+	}
+	return enabled != 0;
+}
+
 static void flush(int save_regs);
 
 static void op_fullsr_orsr_w_comp_ff(uae_u32 opcode);
@@ -290,6 +496,8 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
 	if (jit_force_optlev1_env_opcode(op))
 		return true;
+	if (jit_disable_hardcoded_optlev1())
+		return false;
 	/* First optlev=2 stability pass: keep native opcode codegen away from
 	   branch/call/return and stack-heavy MOVEM blocks that are currently the
 	   most likely source of guest A7 / control-flow corruption. */
@@ -1682,6 +1890,7 @@ static void make_flags_live_internal(void)
         jit_abort("Want flags, got something on stack, but it is TRASH");
     }
     if (live.flags_on_stack == VALID) {
+        trace_flagflow_log("FLAGS_RESTORE");
         int tmp;
         tmp = readreg(FLAGTMP);
         raw_reg_to_flags(tmp);
@@ -1702,6 +1911,7 @@ static void flags_to_stack(void)
         return;
     }
     if (!live.flags_are_important) {
+        trace_flagflow_log("FLAGS_SKIP_STORE");
         live.flags_on_stack = VALID;
         flags_carry_inverted = false;
         return;
@@ -1709,6 +1919,7 @@ static void flags_to_stack(void)
     Dif(live.flags_in_flags != VALID)
         jit_abort("flags_to_stack != VALID");
     else {
+        trace_flagflow_log("FLAGS_STORE");
         int tmp = writereg(FLAGTMP);
         raw_flags_to_reg(tmp);
         unlock2(tmp);
@@ -3876,6 +4087,18 @@ void build_comp(void)
             compfunctbl[cft_map(tbl[i].opcode)] = NULL;
         else
             compfunctbl[cft_map(tbl[i].opcode)] = tbl[i].handler;
+
+        if (trace_propbuild_env() && trace_propbuild_opcode((uae_u16)tbl[i].opcode)) {
+            fprintf(stderr,
+                "PROPBUILD tbl op=%04x map=%04x handler=%p specific=%x cflow=%x table_handler=%ld mnemo=%u\n",
+                (unsigned)tbl[i].opcode,
+                (unsigned)cft_map(tbl[i].opcode),
+                (void*)tbl[i].handler,
+                (unsigned)tbl[i].specific,
+                (unsigned)cflow,
+                (long)table68k[tbl[i].opcode].handler,
+                (unsigned)table68k[tbl[i].opcode].mnemo);
+        }
     }
 
     for (i = 0; nftbl[i].opcode < 65536; i++) {
@@ -3930,6 +4153,21 @@ void build_comp(void)
          * don't actually use any flags themselves */
         if (prop[cft_map(opcode)].cflow & fl_const_jump)
             prop[cft_map(opcode)].use_flags = 0;
+
+        if (trace_propbuild_env() && trace_propbuild_opcode((uae_u16)opcode)) {
+            fprintf(stderr,
+                "PROPBUILD final op=%04lx map=%04x handler=%ld mnemo=%u flagdead=%02x flaglive=%02x prop_use=%02x prop_set=%02x cflow=%x comp=%p\n",
+                opcode,
+                (unsigned)cft_map(opcode),
+                (long)table68k[opcode].handler,
+                (unsigned)table68k[opcode].mnemo,
+                (unsigned)table68k[opcode].flagdead,
+                (unsigned)table68k[opcode].flaglive,
+                (unsigned)prop[cft_map(opcode)].use_flags,
+                (unsigned)prop[cft_map(opcode)].set_flags,
+                (unsigned)prop[cft_map(opcode)].cflow,
+                (void*)compfunctbl[cft_map(opcode)]);
+        }
     }
 
 #ifdef NOFLAGS_SUPPORT_GENCOMP
@@ -4329,6 +4567,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             init_comp();
             was_comp = 1;
 
+            if (trace_emuneigh_env() && trace_emuneigh_target(block_m68k_pc) && trace_emuneigh_count < trace_emuneigh_limit()) {
+                uae_u16 first_op = DO_GET_OPCODE(pc_hist[0].location);
+                compemu_raw_mov_l_ri(REG_PAR1, block_m68k_pc);
+                compemu_raw_mov_l_ri(REG_PAR2, first_op);
+                compemu_raw_call((uintptr)trace_emuneigh_entry);
+            }
+
             for (i = 0; i < blocklen && get_target() < MAX_COMPILE_PTR; i++) {
                 may_raise_exception = false;
                 cpuop_func** cputbl;
@@ -4336,6 +4581,19 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 uae_u32 opcode = DO_GET_OPCODE(pc_hist[i].location);
                 needed_flags = (liveflags[i + 1] & prop[opcode].set_flags);
                 special_mem = pc_hist[i].specmem;
+                {
+                    uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
+                    trace_flagflow_block_pc = block_m68k_pc;
+                    trace_flagflow_pc = op_m68k_pc;
+                    trace_flagflow_op = (uae_u16)opcode;
+                    if (optlev > 1 && trace_flagflow_opcode((uae_u16)opcode)) {
+                        uae_u16 next_op = 0xffff;
+                        if (i + 1 < blocklen)
+                            next_op = DO_GET_OPCODE(pc_hist[i + 1].location);
+                        trace_flagflow_log_opmeta((uae_u16)opcode, liveflags[i + 1], next_op);
+                        trace_flagflow_log("COMPILE_OP", liveflags[i + 1], prop[opcode].use_flags, prop[opcode].set_flags, ((uae_u32)needed_flags << 16) | next_op);
+                    }
+                }
                 if (!needed_flags && currprefs.compnf) {
 #ifdef NOFLAGS_SUPPORT_GENCOMP
                     cputbl = nfcpufunctbl;
@@ -4388,6 +4646,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     freescratch();
                     if (!(liveflags[i + 1] & FLAG_CZNV)) {
                         /* We can forget about flags */
+                        if (optlev > 1 && trace_flagflow_opcode((uae_u16)opcode))
+                            trace_flagflow_log("DROP_AFTER_OP", liveflags[i + 1], prop[opcode].use_flags, prop[opcode].set_flags);
                         dont_care_flags();
                     }
                 }
@@ -4398,6 +4658,19 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         flush(1);
                         was_comp = 0;
                     }
+                    if (trace_emulopflow_env() && trace_emulopflow_opcode((uae_u16)opcode) && trace_emulopflow_count < trace_emulopflow_limit()) {
+                        uae_u16 next_op = (i + 1 < blocklen) ? DO_GET_OPCODE(pc_hist[i + 1].location) : 0xffff;
+                        fprintf(stderr,
+                            "EMUFLOW %lu COMPILE block=%08x pc=%08x op=%04x next=%04x was_comp=%d live=%08x needed=%08x\n",
+                            ++trace_emulopflow_count,
+                            (unsigned)block_m68k_pc,
+                            (unsigned)(block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location)),
+                            (unsigned)opcode,
+                            (unsigned)next_op,
+                            was_comp ? 1 : 0,
+                            (unsigned)liveflags[i + 1],
+                            (unsigned)needed_flags);
+                    }
                     compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)opcode);
                     compemu_raw_mov_l_rr(REG_PAR2, R_REGSTRUCT);
                     compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
@@ -4406,6 +4679,14 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     // raw_cputbl_count[] is indexed with plain opcode (in m68k order)
                     compemu_raw_inc_opcount(opcode);
 #endif
+                    if (trace_emulopflow_env() && trace_emulopflow_opcode((uae_u16)opcode)) {
+                        uae_u32 next_pc = 0xffffffff;
+                        if (i + 1 < blocklen)
+                            next_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i + 1].location - (uintptr)pc_hist[0].location);
+                        compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)opcode);
+                        compemu_raw_mov_l_ri(REG_PAR2, next_pc);
+                        compemu_raw_call((uintptr)trace_emulop_resume);
+                    }
 
                     if (jit_force_interpreter_barrier_opcode((uae_u16)opcode)) {
                         /* Full-SR interpreter fallbacks can switch stack banks,
@@ -4464,6 +4745,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                        Then mark flags as unimportant so successor blocks benefit
                        from not needing to restore them. flush(1) will see
                        flags_on_stack==VALID and skip the redundant save. */
+                    trace_flagflow_pc = block_m68k_pc;
+                    trace_flagflow_op = 0xffff;
+                    trace_flagflow_log("JOIN_DROP", bi1->needed_flags, bi2->needed_flags, x, next_pc_p);
                     flush_flags();
                     dont_care_flags();
                 }

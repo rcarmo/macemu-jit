@@ -67,6 +67,64 @@ static bool trace_irqseq_env()
 	return cached != 0;
 }
 
+static bool trace_irqmanaged_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_IRQMANAGED") && *getenv("B2_TRACE_IRQMANAGED") && strcmp(getenv("B2_TRACE_IRQMANAGED"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool irq_snapshot_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_IRQ_SNAPSHOT") && *getenv("B2_IRQ_SNAPSHOT") && strcmp(getenv("B2_IRQ_SNAPSHOT"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool trace_emulopflow_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_EMULOPFLOW") && *getenv("B2_TRACE_EMULOPFLOW") && strcmp(getenv("B2_TRACE_EMULOPFLOW"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static unsigned long trace_emulopflow_limit()
+{
+	static unsigned long value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_EMULOPFLOW_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 4000;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned long trace_emulopflow_count = 0;
+
+static bool trace_emulopflow_opcode(uint16 opcode)
+{
+	return (opcode & 0xff00) == 0x7100;
+}
+
+static const char *trace_emulopflow_name(uint16 opcode)
+{
+	switch (opcode) {
+		case M68K_EXEC_RETURN: return "EXEC_RETURN";
+		case M68K_EMUL_BREAK: return "EMUL_BREAK";
+		case M68K_EMUL_OP_CLKNOMEM: return "CLKNOMEM";
+		case M68K_EMUL_OP_DISK_PRIME: return "DISK_PRIME";
+		case M68K_EMUL_OP_ADBOP: return "ADBOP";
+		case M68K_EMUL_OP_SCSI_DISPATCH: return "SCSI_DISPATCH";
+		case M68K_EMUL_OP_IRQ: return "IRQ";
+		case M68K_EMUL_OP_CHECKLOAD: return "CHECKLOAD";
+		default: return "EMULOP";
+	}
+}
+
 void PlayStartupSound();
 
 /*
@@ -76,6 +134,23 @@ void PlayStartupSound();
 void EmulOp(uint16 opcode, M68kRegisters *r)
 {
 	D(bug("EmulOp %04x\n", opcode));
+	const bool trace_emulopflow = trace_emulopflow_env() && trace_emulopflow_opcode(opcode) && trace_emulopflow_count < trace_emulopflow_limit();
+	if (trace_emulopflow) {
+		fprintf(stderr,
+			"EMUFLOW %lu EMULOP_ENTER op=%04x name=%s sr=%04x spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x ticks=%08x\n",
+			++trace_emulopflow_count,
+			(unsigned)opcode,
+			trace_emulopflow_name(opcode),
+			(unsigned)r->sr,
+			(unsigned)regs.spcflags,
+			(unsigned)r->d[0],
+			(unsigned)r->d[1],
+			(unsigned)r->d[2],
+			(unsigned)r->a[0],
+			(unsigned)r->a[1],
+			(unsigned)r->a[7],
+			(unsigned)ReadMacInt32(0x16a));
+	}
 	switch (opcode) {
 		case M68K_EMUL_BREAK: {				// Breakpoint
 			printf("*** Breakpoint\n");
@@ -465,18 +540,36 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			break;
 		}
 
-		case M68K_EMUL_OP_IRQ:			// Level 1 interrupt
+		case M68K_EMUL_OP_IRQ: {			// Level 1 interrupt
 			r->d[0] = 0;
+			const bool use_deferred_irq = UseDeferredInterruptModel();
+			const bool use_irq_snapshot = !use_deferred_irq && irq_snapshot_env();
+			uint32 pending_flags = use_deferred_irq ? ConsumeDeferredInterruptFlags() : (use_irq_snapshot ? ConsumeInterruptFlags() : InterruptFlags);
+			if (use_deferred_irq && pending_flags == 0)
+				pending_flags = ConsumeInterruptFlags();
 			if (trace_irqseq_env()) {
 				static unsigned long irq_count = 0;
 				if (irq_count < 2000) {
-					fprintf(stderr, "IRQ %lu enter flags=%08x sr=%04x ticks=%08x\n",
-						++irq_count, (unsigned)InterruptFlags, (unsigned)r->sr, (unsigned)ReadMacInt32(0x16a));
+					fprintf(stderr, "IRQ %lu enter flags=%08x pending=%08x snapshot=%d deferred=%d sr=%04x ticks=%08x\n",
+						++irq_count, (unsigned)InterruptFlags, (unsigned)pending_flags, use_irq_snapshot ? 1 : 0, use_deferred_irq ? 1 : 0, (unsigned)r->sr, (unsigned)ReadMacInt32(0x16a));
+				}
+			}
+			if (use_deferred_irq && trace_irqmanaged_env()) {
+				static unsigned long managed_irq_count = 0;
+				if (managed_irq_count < 4000) {
+					fprintf(stderr, "IRQM emulirq enter %lu sr=%04x pending=%08x live=%08x d0=%08x ticks=%08x\n",
+						++managed_irq_count,
+						(unsigned)r->sr,
+						(unsigned)pending_flags,
+						(unsigned)InterruptFlags,
+						(unsigned)r->d[0],
+						(unsigned)ReadMacInt32(0x16a));
 				}
 			}
 
-			if (InterruptFlags & INTFLAG_60HZ) {
-				ClearInterruptFlag(INTFLAG_60HZ);
+			if (pending_flags & INTFLAG_60HZ) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_60HZ);
 
 				// Increment Ticks variable
 				WriteMacInt32(0x16a, ReadMacInt32(0x16a) + 1);
@@ -505,8 +598,9 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 				}
 			}
 
-			if (InterruptFlags & INTFLAG_1HZ) {
-				ClearInterruptFlag(INTFLAG_1HZ);
+			if (pending_flags & INTFLAG_1HZ) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_1HZ);
 				if (HasMacStarted()) {
 					SonyInterrupt();
 					DiskInterrupt();
@@ -514,38 +608,57 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 				}
 			}
 
-			if (InterruptFlags & INTFLAG_SERIAL) {
-				ClearInterruptFlag(INTFLAG_SERIAL);
+			if (pending_flags & INTFLAG_SERIAL) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_SERIAL);
 				SerialInterrupt();
 			}
 
-			if (InterruptFlags & INTFLAG_ETHER) {
-				ClearInterruptFlag(INTFLAG_ETHER);
+			if (pending_flags & INTFLAG_ETHER) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_ETHER);
 				EtherInterrupt();
 			}
 #if PRECISE_TIMING
-			if (InterruptFlags & INTFLAG_TIMER) {
-				ClearInterruptFlag(INTFLAG_TIMER);
+			if (pending_flags & INTFLAG_TIMER) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_TIMER);
 				TimerInterrupt();
 			}
 #endif
-			if (InterruptFlags & INTFLAG_AUDIO) {
-				ClearInterruptFlag(INTFLAG_AUDIO);
+			if (pending_flags & INTFLAG_AUDIO) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_AUDIO);
 				AudioInterrupt();
 			}
 
-			if (InterruptFlags & INTFLAG_ADB) {
-				ClearInterruptFlag(INTFLAG_ADB);
+			if (pending_flags & INTFLAG_ADB) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_ADB);
 				if (HasMacStarted())
 					ADBInterrupt();
 			}
 
-			if (InterruptFlags & INTFLAG_NMI) {
-				ClearInterruptFlag(INTFLAG_NMI);
+			if (pending_flags & INTFLAG_NMI) {
+				if (!use_irq_snapshot && !use_deferred_irq)
+					ClearInterruptFlag(INTFLAG_NMI);
 				if (HasMacStarted())
 					TriggerNMI();
 			}
+			if (use_deferred_irq && trace_irqmanaged_env()) {
+				static unsigned long managed_irq_exit_count = 0;
+				if (managed_irq_exit_count < 4000) {
+					fprintf(stderr, "IRQM emulirq exit %lu sr=%04x pending=%08x live=%08x d0=%08x ticks=%08x\n",
+						++managed_irq_exit_count,
+						(unsigned)r->sr,
+						(unsigned)pending_flags,
+						(unsigned)InterruptFlags,
+						(unsigned)r->d[0],
+						(unsigned)ReadMacInt32(0x16a));
+				}
+			}
 			break;
+		}
 
 		case M68K_EMUL_OP_PUT_SCRAP: {		// PutScrap() patch
 			void *scrap = Mac2HostAddr(ReadMacInt32(r->a[7] + 4));
@@ -640,5 +753,21 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 #endif
 			QuitEmulator();
 			break;
+	}
+	if (trace_emulopflow && trace_emulopflow_count < trace_emulopflow_limit()) {
+		fprintf(stderr,
+			"EMUFLOW %lu EMULOP_EXIT op=%04x name=%s sr=%04x spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x ticks=%08x\n",
+			++trace_emulopflow_count,
+			(unsigned)opcode,
+			trace_emulopflow_name(opcode),
+			(unsigned)r->sr,
+			(unsigned)regs.spcflags,
+			(unsigned)r->d[0],
+			(unsigned)r->d[1],
+			(unsigned)r->d[2],
+			(unsigned)r->a[0],
+			(unsigned)r->a[1],
+			(unsigned)r->a[7],
+			(unsigned)ReadMacInt32(0x16a));
 	}
 }

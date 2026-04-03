@@ -32,11 +32,21 @@
 #include "newcpu.h"
 #include "compiler/compemu.h"
 
+#include <string.h>
+
 static bool trace_d6_enabled_glue()
 {
 	static int cached = -1;
 	if (cached < 0)
 		cached = (getenv("B2_TRACE_D6") && *getenv("B2_TRACE_D6")) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool trace_irqmanaged_env_glue()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_IRQMANAGED") && *getenv("B2_TRACE_IRQMANAGED") && strcmp(getenv("B2_TRACE_IRQMANAGED"), "0") != 0) ? 1 : 0;
 	return cached != 0;
 }
 
@@ -62,6 +72,21 @@ uintptr MEMBaseDiff;		// Global offset between a Mac address and its Host equiva
 #if USE_JIT
 bool UseJIT = false;
 #endif
+
+static bool deferred_irq_env()
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *managed = getenv("B2_JIT_MANAGED_IRQ");
+		const char *deferred = getenv("B2_JIT_DEFER_IRQ");
+		cached = ((managed && *managed && strcmp(managed, "0") != 0) ||
+			(deferred && *deferred && strcmp(deferred, "0") != 0)) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static uint32 deferred_irq_flags = 0;
+static bool deferred_irq_active = false;
 
 // #if defined(ENABLE_EXCLUSIVE_SPCFLAGS) && !defined(HAVE_HARDWARE_LOCKS)
 B2_mutex *spcflags_lock = NULL;
@@ -168,6 +193,21 @@ void TriggerInterrupt(void)
 {
 	idle_resume();
 	SPCFLAGS_SET( SPCFLAG_INT );
+	if (UseDeferredInterruptModel() && trace_irqmanaged_env_glue()) {
+		static unsigned long trace_count = 0;
+		if (trace_count < 4000) {
+			MakeSR();
+			fprintf(stderr, "IRQM trigger %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x latched=%08x active=%d\n",
+				++trace_count,
+				(unsigned)m68k_getpc(),
+				(unsigned)regs.sr,
+				(unsigned)regs.intmask,
+				(unsigned)regs.spcflags,
+				(unsigned)InterruptFlags,
+				(unsigned)deferred_irq_flags,
+				deferred_irq_active ? 1 : 0);
+		}
+	}
 }
 
 void TriggerNMI(void)
@@ -176,6 +216,38 @@ void TriggerNMI(void)
 	// SPCFLAGS_SET( SPCFLAG_BRK ); // use _BRK for NMI
 }
 
+bool UseDeferredInterruptModel(void)
+{
+#if USE_JIT
+	return UseJIT && deferred_irq_env();
+#else
+	return false;
+#endif
+}
+
+uint32 ConsumeDeferredInterruptFlags(void)
+{
+	uint32 flags = deferred_irq_flags;
+	deferred_irq_flags = 0;
+	deferred_irq_active = false;
+	if (trace_irqmanaged_env_glue()) {
+		static unsigned long trace_count = 0;
+		if (trace_count < 4000) {
+			MakeSR();
+			fprintf(stderr, "IRQM consume %lu pc=%08x sr=%04x intmask=%u spc=%08x take=%08x live=%08x\n",
+				++trace_count,
+				(unsigned)m68k_getpc(),
+				(unsigned)regs.sr,
+				(unsigned)regs.intmask,
+				(unsigned)regs.spcflags,
+				(unsigned)flags,
+				(unsigned)InterruptFlags);
+		}
+	}
+	if (InterruptFlags)
+		SPCFLAGS_SET(SPCFLAG_INT);
+	return flags;
+}
 
 /*
  *  Get 68k interrupt level
@@ -183,7 +255,78 @@ void TriggerNMI(void)
 
 int intlev(void)
 {
-	return InterruptFlags ? 1 : 0;
+	if (!UseDeferredInterruptModel())
+		return InterruptFlags ? 1 : 0;
+
+	if (deferred_irq_active) {
+		if (trace_irqmanaged_env_glue()) {
+			static unsigned long busy_count = 0;
+			if (busy_count < 4000) {
+				MakeSR();
+				fprintf(stderr, "IRQM intlev busy %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x latched=%08x\n",
+					++busy_count,
+					(unsigned)m68k_getpc(),
+					(unsigned)regs.sr,
+					(unsigned)regs.intmask,
+					(unsigned)regs.spcflags,
+					(unsigned)InterruptFlags,
+					(unsigned)deferred_irq_flags);
+			}
+		}
+		return 0;
+	}
+
+	if (regs.intmask >= 1) {
+		if (trace_irqmanaged_env_glue()) {
+			static unsigned long masked_count = 0;
+			if (masked_count < 4000) {
+				MakeSR();
+				fprintf(stderr, "IRQM intlev masked %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x\n",
+					++masked_count,
+					(unsigned)m68k_getpc(),
+					(unsigned)regs.sr,
+					(unsigned)regs.intmask,
+					(unsigned)regs.spcflags,
+					(unsigned)InterruptFlags);
+			}
+		}
+		return InterruptFlags ? 1 : 0;
+	}
+
+	const uint32 flags = ConsumeInterruptFlags();
+	if (trace_irqmanaged_env_glue()) {
+		static unsigned long sample_count = 0;
+		if (sample_count < 4000) {
+			MakeSR();
+			fprintf(stderr, "IRQM intlev sample %lu pc=%08x sr=%04x intmask=%u spc=%08x sampled=%08x live_after=%08x\n",
+				++sample_count,
+				(unsigned)m68k_getpc(),
+				(unsigned)regs.sr,
+				(unsigned)regs.intmask,
+				(unsigned)regs.spcflags,
+				(unsigned)flags,
+				(unsigned)InterruptFlags);
+		}
+	}
+	if (!flags)
+		return 0;
+
+	deferred_irq_flags = flags;
+	deferred_irq_active = true;
+	if (trace_irqmanaged_env_glue()) {
+		static unsigned long accept_count = 0;
+		if (accept_count < 4000) {
+			MakeSR();
+			fprintf(stderr, "IRQM intlev accept %lu pc=%08x sr=%04x intmask=%u spc=%08x latched=%08x\n",
+				++accept_count,
+				(unsigned)m68k_getpc(),
+				(unsigned)regs.sr,
+				(unsigned)regs.intmask,
+				(unsigned)regs.spcflags,
+				(unsigned)deferred_irq_flags);
+		}
+	}
+	return 1;
 }
 
 

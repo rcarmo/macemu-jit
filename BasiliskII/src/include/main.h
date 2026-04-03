@@ -80,6 +80,9 @@ enum {
 extern uint32 InterruptFlags;									// Currently pending interrupts
 extern void SetInterruptFlag(uint32 flag);						// Set/clear interrupt flags
 extern void ClearInterruptFlag(uint32 flag);
+extern uint32 ConsumeInterruptFlags(void);						// Atomically snapshot+clear pending interrupts
+extern bool UseDeferredInterruptModel(void);					// JIT-only safe-point IRQ delivery prototype enabled?
+extern uint32 ConsumeDeferredInterruptFlags(void);			// Consume the currently delivered JIT IRQ batch
 
 // vde switch variable
 extern char* vde_sock;

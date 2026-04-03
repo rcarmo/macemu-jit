@@ -55,6 +55,41 @@ static bool trace_d6_enabled()
 	return cached != 0;
 }
 
+static bool trace_irqmanaged_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_IRQMANAGED") && *getenv("B2_TRACE_IRQMANAGED") && strcmp(getenv("B2_TRACE_IRQMANAGED"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool trace_emulopflow_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_EMULOPFLOW") && *getenv("B2_TRACE_EMULOPFLOW") && strcmp(getenv("B2_TRACE_EMULOPFLOW"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static unsigned long trace_emulopflow_limit()
+{
+	static unsigned long value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_EMULOPFLOW_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 4000;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned long trace_emulopflow_count = 0;
+
+static bool trace_emulopflow_opcode(uae_u32 opcode)
+{
+	return (opcode & 0xff00) == 0x7100;
+}
+
 static bool trace_window_enabled()
 {
 	static int cached = -1;
@@ -838,6 +873,17 @@ void Exception(int nr, uaecptr oldpc)
 
 static void Interrupt(int nr)
 {
+    if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+        static unsigned long trace_pre_count = 0;
+        if (trace_pre_count < 4000) {
+            MakeSR();
+            fprintf(stderr, "IRQM interrupt pre %lu pc=%08x nr=%d sr=%04x intmask=%u spc=%08x live=%08x\n",
+                ++trace_pre_count,
+                (unsigned)m68k_getpc(), nr, (unsigned)regs.sr,
+                (unsigned)regs.intmask, (unsigned)regs.spcflags,
+                (unsigned)InterruptFlags);
+        }
+    }
     assert(nr < 8 && nr >= 0);
     Exception(nr+24, 0);
 
@@ -845,6 +891,17 @@ static void Interrupt(int nr)
     // why the hell the SPCFLAG_INT is to be set??? (joy)
     // regs.spcflags |= SPCFLAG_INT; (disabled by joy)
     SPCFLAGS_SET( SPCFLAG_INT );
+    if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+        static unsigned long trace_post_count = 0;
+        if (trace_post_count < 4000) {
+            MakeSR();
+            fprintf(stderr, "IRQM interrupt post %lu pc=%08x nr=%d sr=%04x intmask=%u spc=%08x live=%08x\n",
+                ++trace_post_count,
+                (unsigned)m68k_getpc(), nr, (unsigned)regs.sr,
+                (unsigned)regs.intmask, (unsigned)regs.spcflags,
+                (unsigned)InterruptFlags);
+        }
+    }
 }
 
 #if 0
@@ -1293,6 +1350,7 @@ void m68k_emulop(uae_u32 opcode)
 #else
 	struct M68kRegisters r = {};
 	int i;
+	uae_u32 old_pc = m68k_getpc();
 
 	for (i=0; i<8; i++) {
 		r.d[i] = m68k_dreg(regs, i);
@@ -1302,9 +1360,41 @@ void m68k_emulop(uae_u32 opcode)
 	r.sr = regs.sr;
 	if (trace_d6_enabled())
 		fprintf(stderr, "TRACE_D6 m68k_emulop enter opcode=%04x pc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[4], r.a[5]);
+	if (trace_emulopflow_env() && trace_emulopflow_opcode(opcode) && trace_emulopflow_count < trace_emulopflow_limit()) {
+		fprintf(stderr,
+			"EMUFLOW %lu M68K_EMULOP_ENTER op=%04x pc=%08x sr=%04x spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
+			++trace_emulopflow_count,
+			(unsigned)opcode,
+			(unsigned)old_pc,
+			(unsigned)r.sr,
+			(unsigned)regs.spcflags,
+			(unsigned)r.d[0],
+			(unsigned)r.d[1],
+			(unsigned)r.d[2],
+			(unsigned)r.a[0],
+			(unsigned)r.a[1],
+			(unsigned)r.a[7]);
+	}
 	EmulOp(opcode, &r);
 	if (trace_d6_enabled())
 		fprintf(stderr, "TRACE_D6 m68k_emulop leave opcode=%04x pc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[4], r.a[5]);
+	if (trace_emulopflow_env() && trace_emulopflow_opcode(opcode) && trace_emulopflow_count < trace_emulopflow_limit()) {
+		fprintf(stderr,
+			"EMUFLOW %lu M68K_EMULOP_LEAVE op=%04x oldpc=%08x hostpc=%08x sr=%04x spc=%08x quit=%d d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
+			++trace_emulopflow_count,
+			(unsigned)opcode,
+			(unsigned)old_pc,
+			(unsigned)m68k_getpc(),
+			(unsigned)r.sr,
+			(unsigned)regs.spcflags,
+			quit_program,
+			(unsigned)r.d[0],
+			(unsigned)r.d[1],
+			(unsigned)r.d[2],
+			(unsigned)r.a[0],
+			(unsigned)r.a[1],
+			(unsigned)r.a[7]);
+	}
 	for (i=0; i<8; i++) {
 		m68k_dreg(regs, i) = r.d[i];
 		m68k_areg(regs, i) = r.a[i];
@@ -1637,10 +1727,34 @@ int m68k_do_specialties(void)
 		// give unused time slices back to OS when STOP instruction is executing
 		SleepAndWait();
 		if (SPCFLAGS_TEST( SPCFLAG_INT | SPCFLAG_DOINT )){
+			if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+				static unsigned long stop_pre_count = 0;
+				if (stop_pre_count < 4000) {
+					MakeSR();
+					fprintf(stderr, "IRQM spec-stop pre %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x\n",
+						++stop_pre_count,
+						(unsigned)m68k_getpc(), (unsigned)regs.sr,
+						(unsigned)regs.intmask, (unsigned)regs.spcflags,
+						(unsigned)InterruptFlags);
+				}
+			}
 			SPCFLAGS_CLEAR( SPCFLAG_INT | SPCFLAG_DOINT );
 			int intr = intlev ();
+			if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+				static unsigned long stop_post_count = 0;
+				if (stop_post_count < 4000) {
+					MakeSR();
+					fprintf(stderr, "IRQM spec-stop post %lu pc=%08x sr=%04x intmask=%u spc=%08x intr=%d live=%08x\n",
+						++stop_post_count,
+						(unsigned)m68k_getpc(), (unsigned)regs.sr,
+						(unsigned)regs.intmask, (unsigned)regs.spcflags,
+						intr, (unsigned)InterruptFlags);
+				}
+			}
 			if (intr != -1 && intr > regs.intmask) {
 				Interrupt (intr);
+				if (UseDeferredInterruptModel())
+					SPCFLAGS_CLEAR( SPCFLAG_INT | SPCFLAG_DOINT );
 				regs.stopped = 0;
 				SPCFLAGS_CLEAR( SPCFLAG_STOP );
 			}
@@ -1670,15 +1784,50 @@ int m68k_do_specialties(void)
 	}
 */
 	if (SPCFLAGS_TEST( SPCFLAG_DOINT )) {
+		if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+			static unsigned long doint_pre_count = 0;
+			if (doint_pre_count < 4000) {
+				MakeSR();
+				fprintf(stderr, "IRQM spec-doint pre %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x\n",
+					++doint_pre_count,
+					(unsigned)m68k_getpc(), (unsigned)regs.sr,
+					(unsigned)regs.intmask, (unsigned)regs.spcflags,
+					(unsigned)InterruptFlags);
+			}
+		}
 		SPCFLAGS_CLEAR( SPCFLAG_DOINT );
 		int intr = intlev ();
+		if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+			static unsigned long doint_post_count = 0;
+			if (doint_post_count < 4000) {
+				MakeSR();
+				fprintf(stderr, "IRQM spec-doint post %lu pc=%08x sr=%04x intmask=%u spc=%08x intr=%d live=%08x\n",
+					++doint_post_count,
+					(unsigned)m68k_getpc(), (unsigned)regs.sr,
+					(unsigned)regs.intmask, (unsigned)regs.spcflags,
+					intr, (unsigned)InterruptFlags);
+			}
+		}
 		if (intr != -1 && intr > regs.intmask) {
 			Interrupt (intr);
+			if (UseDeferredInterruptModel())
+				SPCFLAGS_CLEAR( SPCFLAG_INT | SPCFLAG_DOINT );
 			regs.stopped = 0;
 		}
 	}
 
 	if (SPCFLAGS_TEST( SPCFLAG_INT )) {
+		if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
+			static unsigned long promote_count = 0;
+			if (promote_count < 4000) {
+				MakeSR();
+				fprintf(stderr, "IRQM spec-promote %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x\n",
+					++promote_count,
+					(unsigned)m68k_getpc(), (unsigned)regs.sr,
+					(unsigned)regs.intmask, (unsigned)regs.spcflags,
+					(unsigned)InterruptFlags);
+			}
+		}
 		SPCFLAGS_CLEAR( SPCFLAG_INT );
 		SPCFLAGS_SET( SPCFLAG_DOINT );
 	}
