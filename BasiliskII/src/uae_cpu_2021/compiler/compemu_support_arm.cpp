@@ -378,6 +378,14 @@ static unsigned long trace_emuneigh_count = 0;
 
 static inline bool trace_emuneigh_target(uae_u32 pc)
 {
+	/* When B2_TRACE_REGCHECK=1, trace ALL block entries for register
+	   state comparison between L1 and L2 runs. */
+	static int regcheck = -1;
+	if (regcheck < 0) {
+		const char *env = getenv("B2_TRACE_REGCHECK");
+		regcheck = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	if (regcheck) return true;
 	return (pc >= 0x0400a3dc && pc <= 0x0400a3f2) ||
 		(pc >= 0x040b3566 && pc <= 0x040b35c8);
 }
@@ -543,6 +551,32 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 		return true;
 	if (op == 0x44df || op == 0x44fc) /* MOVE (A7)+,CCR / MOVE #imm,CCR */
 		return true;
+
+	/* Env-configurable family barrier for L2 codegen debugging.
+	   B2_JIT_BARRIER_FAMILIES="0,1,2,3" forces those top-nibble families
+	   through interpreter even if they have compiled handlers. */
+	{
+		static int families[16] = {-1};
+		if (families[0] == -1) {
+			for (int i = 0; i < 16; i++) families[i] = 0;
+			const char *env = getenv("B2_JIT_BARRIER_FAMILIES");
+			if (env && *env) {
+				const char *p = env;
+				while (*p) {
+					while (*p == ',' || *p == ' ') p++;
+					if (*p) {
+						int v = (int)strtol(p, (char**)&p, 16);
+						if (v >= 0 && v < 16) families[v] = 1;
+					}
+				}
+				fprintf(stderr, "JIT: barrier families:");
+				for (int i = 0; i < 16; i++) if (families[i]) fprintf(stderr, " %x", i);
+				fprintf(stderr, "\n");
+			}
+		}
+		if (families[(op >> 12) & 0xf])
+			return true;
+	}
 
 	return false;
 }
@@ -4694,6 +4728,18 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         if (optlev > 1 && trace_flagflow_opcode((uae_u16)opcode))
                             trace_flagflow_log("DROP_AFTER_OP", liveflags[i + 1], prop[cft_map(opcode)].use_flags, prop[cft_map(opcode)].set_flags);
                         dont_care_flags();
+                    }
+
+                    /* Check spcflags between compiled instructions.
+                       Without this, interrupts and special conditions are
+                       delayed until block exit, causing timing differences
+                       between L1 (checked every instruction) and L2. */
+                    if (i < blocklen - 1) {
+                        compemu_raw_mov_l_rm(0, (uintptr)specflags);
+#if defined(USE_DATA_BUFFER)
+                        data_check_end(8, 64);
+#endif
+                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
                     }
                 }
 
