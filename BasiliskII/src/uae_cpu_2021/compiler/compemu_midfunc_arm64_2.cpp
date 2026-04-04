@@ -56,6 +56,7 @@ const uae_u32 ARM_CCR_MAP[] = { 0, ARM_C_FLAG, // 1 C
       CSET_xc(x, NATIVE_CC_CC);     \
     else                            \
       CSET_xc(x, NATIVE_CC_CS);     \
+    LSL_wwi(x, x, 29);              \
     unlock2(x);                     \
   }
 

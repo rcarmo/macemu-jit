@@ -61,6 +61,14 @@ static void sync_jit_prefs(uae_prefs &p)
 	p.comp_hardflush = !PrefsFindBool("jitlazyflush");
 	p.comp_constjump = PrefsFindBool("jitinline");
 	p.compnf = true;
+	/* Allow disabling flag optimization for debugging */
+	{
+		const char *env = getenv("B2_JIT_NO_FLAG_OPT");
+		if (env && *env == '1') {
+			p.compnf = false;
+			fprintf(stderr, "JIT: flag optimization DISABLED (B2_JIT_NO_FLAG_OPT=1)\n");
+		}
+	}
 	p.m68k_speed = -1;
 	p.cpu_model = pref_cpu_to_model(PrefsFindInt32("cpu"));
 	p.cpu_level = pref_cpu_to_level(p.cpu_model);

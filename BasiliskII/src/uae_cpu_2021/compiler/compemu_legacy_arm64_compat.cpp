@@ -243,12 +243,12 @@ void test_l_ri(RR4 d, uae_s32 i)
 	flags_carry_inverted = false;
 }
 
-void adc_b(RW1 d, RR1 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_ADDX_b(d, s); else jnf_ADDX_b(d, s); }
-void adc_w(RW2 d, RR2 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_ADDX_w(d, s); else jnf_ADDX_w(d, s); }
-void adc_l(RW4 d, RR4 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_ADDX_l(d, s); else jnf_ADDX_l(d, s); }
-void sbb_b(RW1 d, RR1 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_SUBX_b(d, s); else jnf_SUBX_b(d, s); }
-void sbb_w(RW2 d, RR2 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_SUBX_w(d, s); else jnf_SUBX_w(d, s); }
-void sbb_l(RW4 d, RR4 s) { legacy_copy_carry_to_flagx(); if (legacy_needflags_enabled()) jff_SUBX_l(d, s); else jnf_SUBX_l(d, s); }
+void adc_b(RW1 d, RR1 s) { if (legacy_needflags_enabled()) jff_ADDX_b(d, s); else jnf_ADDX_b(d, s); }
+void adc_w(RW2 d, RR2 s) { if (legacy_needflags_enabled()) jff_ADDX_w(d, s); else jnf_ADDX_w(d, s); }
+void adc_l(RW4 d, RR4 s) { if (legacy_needflags_enabled()) jff_ADDX_l(d, s); else jnf_ADDX_l(d, s); }
+void sbb_b(RW1 d, RR1 s) { if (legacy_needflags_enabled()) jff_SUBX_b(d, s); else jnf_SUBX_b(d, s); }
+void sbb_w(RW2 d, RR2 s) { if (legacy_needflags_enabled()) jff_SUBX_w(d, s); else jnf_SUBX_w(d, s); }
+void sbb_l(RW4 d, RR4 s) { if (legacy_needflags_enabled()) jff_SUBX_l(d, s); else jnf_SUBX_l(d, s); }
 
 static inline void legacy_load_rr4_to_work(int work_reg, RR4 r)
 {
@@ -541,6 +541,23 @@ void execute_normal(void)
 		start_pc_p = regs.pc_oldp;
 		start_pc = regs.pc;
 #if defined(CPU_AARCH64)
+		{
+			static unsigned long pctrace_count = 0;
+			static unsigned long pctrace_limit = 0;
+			static bool pctrace_init = false;
+			if (!pctrace_init) {
+				const char *env = getenv("B2_JIT_PCTRACE");
+				pctrace_limit = env ? strtoul(env, NULL, 10) : 0;
+				pctrace_init = true;
+			}
+			if (pctrace_limit && pctrace_count < pctrace_limit) {
+				uae_u32 pc = m68k_getpc();
+				fprintf(stderr, "PCTRACE %lu %08x d0=%08x a7=%08x\n",
+					pctrace_count++, pc, regs.regs[0], regs.regs[15]);
+			}
+		}
+#endif
+#if defined(CPU_AARCH64)
 		/* Inhibit one_tick() during block tracing. The tick thread's
 		   one_tick() has side effects (incrementing Ticks, SDL events)
 		   that happen during interpreter tracing but NOT during native
@@ -556,7 +573,16 @@ void execute_normal(void)
 			(*cpufunctbl[opcode])(opcode);
 			cpu_check_ticks();
 			total_cycles += 4 * CYCLE_UNIT;
-			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= MAXRUN) {
+			int maxrun_limit = MAXRUN;
+			{
+				static int env_maxrun = -1;
+				if (env_maxrun < 0) {
+					const char *env = getenv("B2_JIT_MAXRUN");
+					env_maxrun = (env && *env) ? atoi(env) : MAXRUN;
+				}
+				maxrun_limit = env_maxrun;
+			}
+			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
 #if defined(CPU_AARCH64)
 				tick_inhibit = false;
 #endif

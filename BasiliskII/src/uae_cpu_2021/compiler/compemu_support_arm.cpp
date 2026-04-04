@@ -4706,6 +4706,21 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             (unsigned)(uintptr)pc_hist[i].location - (unsigned)(uintptr)ROMBaseHost + ROMBaseMac,
                             opcode, _before, _after, (long)(_after - _before));
                     }
+                    /* Dump first 3 blocks' native code to file for disassembly */
+                    {
+                        static int dump_count = 0;
+                        if (dump_count < 3 && getenv("B2_JIT_DUMP") && (_after - _before) > 0) {
+                            char fname[256];
+                            snprintf(fname, sizeof(fname), "/workspace/tmp/jitdump/block%d_op%04x.bin", dump_count, opcode);
+                            FILE *f = fopen(fname, "wb");
+                            if (f) {
+                                fwrite(_before, 1, _after - _before, f);
+                                fclose(f);
+                                fprintf(stderr, "JIT_DUMP: wrote %ld bytes to %s\n", (long)(_after - _before), fname);
+                                dump_count++;
+                            }
+                        }
+                    }
 #endif
                     if (jit_force_runtime_pc_endblock) {
                         /* Runtime helper barriers can change guest PC/state in
