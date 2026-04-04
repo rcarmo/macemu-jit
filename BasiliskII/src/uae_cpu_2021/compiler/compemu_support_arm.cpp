@@ -509,25 +509,21 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 		return true;
 	if ((op & 0xfb80) == 0x4880) /* MOVEM */
 		return true;
-	if ((op & 0xf000) == 0xa000) /* A-line traps / EmulOps */
+	if ((op & 0xf000) == 0xa000) /* A-line traps */
+		return true;
+	if ((op & 0xff00) == 0x7100) /* EmulOps (BasiliskII extended opcodes 0x7100-0x71FF) */
+		return true;
+	/* CCR/SR state modifiers — always need interpreter barriers */
+	if (op == 0x023c) /* ANDI to CCR */
+		return true;
+	if (op == 0x40e7 || op == 0x40c1) /* MOVE SR,-(A7) / MOVE SR,D1 */
+		return true;
+	if (op == 0x44df || op == 0x44fc) /* MOVE (A7)+,CCR / MOVE #imm,CCR */
 		return true;
 	/* Exact-opcode semantic gates below this point.
 	   B2_JIT_L2_ONLY / B2_JIT_DISABLE_HARDCODED_OPTLEV1 disables only these. */
 	if (jit_disable_hardcoded_optlev1())
 		return false;
-	if ((op & 0xf000) == 0xa000) /* A-line traps / EmulOps */
-		return true;
-	/* Early optlev=2 runs still hit boot-sensitive system/stack instructions.
-	   Keep them at optlev=1 while narrowing the first safe native subset. */
-	if (op == 0x023c) /* immediate to CCR */
-		return true;
-	if (op == 0x40e7 || op == 0x40c1) /* remaining SR readout stack/reg transfers */
-		return true;
-	/* Remaining early-boot failures still include privileged CCR/SR writes in the
-	   surviving optlev=2 subset. Keep these interpreter-side while narrowing the
-	   first stable native opcode core. */
-	if (op == 0x44df || op == 0x44fc)
-		return true;
 	/* After collapsing the 0x000F* helper cluster, the first reproducible
 	   semantic win on the remaining frontier is the exact MOVEQ pair
 	   moveq #0,d0 / moveq #1,d0. Neither opcode alone is sufficient, but the
@@ -4232,6 +4228,37 @@ void build_comp(void)
         if (compfunctbl[cft_map(opcode)])
             count++;
     }
+
+#if defined(CPU_AARCH64)
+    /* ARM64: NULL out compiled handlers for instruction families whose
+       L2 native codegen is known to be buggy. These will always go through
+       the interpreter fallback path even at optlev=2. */
+    {
+        int nulled = 0;
+        for (opcode = 0; opcode < 65536; opcode++) {
+            uae_u16 lop = (uae_u16)opcode; /* logical opcode */
+            bool needs_null = false;
+            /* Shifts/rotates: confirmed ARM64 codegen issues */
+            if (table68k[opcode].mnemo == i_ASL || table68k[opcode].mnemo == i_ASR ||
+                table68k[opcode].mnemo == i_LSL || table68k[opcode].mnemo == i_LSR ||
+                table68k[opcode].mnemo == i_ROL || table68k[opcode].mnemo == i_ROR ||
+                table68k[opcode].mnemo == i_ROXL || table68k[opcode].mnemo == i_ROXR ||
+                table68k[opcode].mnemo == i_ASLW || table68k[opcode].mnemo == i_ASRW ||
+                table68k[opcode].mnemo == i_LSLW || table68k[opcode].mnemo == i_LSRW ||
+                table68k[opcode].mnemo == i_ROLW || table68k[opcode].mnemo == i_RORW ||
+                table68k[opcode].mnemo == i_ROXLW || table68k[opcode].mnemo == i_ROXRW)
+                needs_null = true;
+            if (needs_null && compfunctbl[cft_map(opcode)]) {
+                compfunctbl[cft_map(opcode)] = NULL;
+                nfcompfunctbl[cft_map(opcode)] = NULL;
+                nulled++;
+            }
+        }
+        if (nulled > 0)
+            jit_log("<JIT compiler> : nulled %d ARM64-buggy shift/rotate compiled handlers", nulled);
+    }
+#endif
+
     jit_log("<JIT compiler> : supposedly %d compileable opcodes!", count);
 
 	/* Initialise state */
@@ -4533,11 +4560,26 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     optlev = 0;
                     break;
                 }
-                if (optlev > 1 && jit_force_optlev1_opcode(_op)) {
-                    optlev = 1;
-                    break;
+                if (optlev > 1) {
+                    bool gate = jit_force_optlev1_opcode(_op);
+                    if (_i == 0 || gate)
+                            (unsigned)block_m68k_pc, _i, (unsigned)_op, optlev, gate ? 1 : 0);
+                    if (gate) {
+                        optlev = 1;
+                        break;
+                    }
                 }
             }
+        }
+#endif
+#if defined(CPU_AARCH64)
+        /* ARM64: if L2_ONLY disabled the semantic gates but L2 native codegen
+           is not yet fully correct, cap at optlev=1 so blocks use interpreter
+           fallback reliably. The structural control-flow gates above still
+           create correct block boundaries. */
+        if (optlev > 1 && jit_disable_hardcoded_optlev1()) {
+            fprintf(stderr, "OPTLEV_CAP: %d -> 1 (l2only=%d)\n", optlev, jit_disable_hardcoded_optlev1() ? 1 : 0);
+            optlev = 1;
         }
 #endif
         if (optlev == 0) { /* No need to actually translate */
