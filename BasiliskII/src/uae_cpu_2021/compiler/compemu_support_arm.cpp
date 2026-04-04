@@ -715,7 +715,7 @@ static bool disasm_this = false;
 
 static inline bool is_const_jump(uae_u32 opcode)
 {
-    return (prop[opcode].cflow == fl_const_jump);
+    return (prop[uae_bswap_16(opcode)].cflow == fl_const_jump);
 }
 
 static inline unsigned int cft_map(unsigned int f)
@@ -4482,8 +4482,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             }
             else
             {
-                liveflags[i] = ((liveflags[i + 1] & (~prop[op].set_flags)) | prop[op].use_flags);
-                if (prop[op].is_addx && (liveflags[i + 1] & FLAG_Z) == 0)
+                liveflags[i] = ((liveflags[i + 1] & (~prop[cft_map(op)].set_flags)) | prop[cft_map(op)].use_flags);
+                if (prop[cft_map(op)].is_addx && (liveflags[i + 1] & FLAG_Z) == 0)
                     liveflags[i] &= ~FLAG_Z;
             }
         }
@@ -4579,7 +4579,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 cpuop_func** cputbl;
                 compop_func** comptbl;
                 uae_u32 opcode = DO_GET_OPCODE(pc_hist[i].location);
-                needed_flags = (liveflags[i + 1] & prop[opcode].set_flags);
+                needed_flags = (liveflags[i + 1] & prop[cft_map(opcode)].set_flags);
                 special_mem = pc_hist[i].specmem;
                 {
                     uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
@@ -4591,7 +4591,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         if (i + 1 < blocklen)
                             next_op = DO_GET_OPCODE(pc_hist[i + 1].location);
                         trace_flagflow_log_opmeta((uae_u16)opcode, liveflags[i + 1], next_op);
-                        trace_flagflow_log("COMPILE_OP", liveflags[i + 1], prop[opcode].use_flags, prop[opcode].set_flags, ((uae_u32)needed_flags << 16) | next_op);
+                        trace_flagflow_log("COMPILE_OP", liveflags[i + 1], prop[cft_map(opcode)].use_flags, prop[cft_map(opcode)].set_flags, ((uae_u32)needed_flags << 16) | next_op);
                     }
                 }
                 if (!needed_flags && currprefs.compnf) {
@@ -4608,7 +4608,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
 
                 failure = 1; // gb-- defaults to failure state
-                if (comptbl[opcode] && optlev > 1) {
+                if (comptbl[cft_map(opcode)] && optlev > 1) {
                     failure = 0;
                     if (!was_comp) {
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
@@ -4619,7 +4619,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(CPU_AARCH64)
                     uae_u8* _before = get_target();
 #endif
-                    comptbl[opcode](opcode);
+                    comptbl[cft_map(opcode)](opcode);
 #if defined(CPU_AARCH64)
                     uae_u8* _after = get_target();
                     if (i < 10) {
@@ -4647,7 +4647,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     if (!(liveflags[i + 1] & FLAG_CZNV)) {
                         /* We can forget about flags */
                         if (optlev > 1 && trace_flagflow_opcode((uae_u16)opcode))
-                            trace_flagflow_log("DROP_AFTER_OP", liveflags[i + 1], prop[opcode].use_flags, prop[opcode].set_flags);
+                            trace_flagflow_log("DROP_AFTER_OP", liveflags[i + 1], prop[cft_map(opcode)].use_flags, prop[cft_map(opcode)].set_flags);
                         dont_care_flags();
                     }
                 }
@@ -4733,8 +4733,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     uae_u32 op = DO_GET_OPCODE(next);
 
                     x = FLAG_ALL;
-                    x &= (~prop[op].set_flags);
-                    x |= prop[op].use_flags;
+                    x &= (~prop[cft_map(op)].set_flags);
+                    x |= prop[cft_map(op)].use_flags;
                 }
                 /* else: bi1->needed_flags already has the full block's requirements */
 
