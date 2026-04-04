@@ -1626,9 +1626,10 @@ dnl -fno-exceptions/-fno-rtti since we don't use C++ exceptions or RTTI.
 if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_AARCH64" = "xyes" ]]; then
   CFLAGS="`echo $CFLAGS | sed 's/-O2/-O3/'`"
   CXXFLAGS="`echo $CXXFLAGS | sed 's/-O2/-O3/'`"
-  CFLAGS="$CFLAGS -fomit-frame-pointer -flto=auto"
-  CXXFLAGS="$CXXFLAGS -fomit-frame-pointer -fno-exceptions -fno-rtti -flto=auto"
-  LDFLAGS="$LDFLAGS -flto=auto"
+  CFLAGS="$CFLAGS -fomit-frame-pointer"
+  CXXFLAGS="$CXXFLAGS -fomit-frame-pointer -fno-exceptions -fno-rtti"
+  dnl LTO disabled on AArch64: it strips JIT gate checks and inline functions
+  dnl that the JIT compile loop depends on at runtime.
 fi
 if [[ "x$HAVE_GCC27" = "xyes" -a "x$HAVE_ARM" = "xyes" ]]; then
   CFLAGS="`echo $CFLAGS | sed 's/-O2/-O3/'`"
