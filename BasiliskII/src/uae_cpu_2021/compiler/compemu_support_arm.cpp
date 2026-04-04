@@ -187,11 +187,12 @@ static inline int jit_max_optlev(void)
 	static int value = -1;
 	if (value < 0) {
 		const char *env = getenv("B2_JIT_MAX_OPTLEV");
-		value = env && *env ? atoi(env) : 1;
+		value = env && *env ? atoi(env) : 2; /* Default to L2 on ARM64 */
 		if (value < 0)
 			value = 0;
 		if (value > 2)
 			value = 2;
+		fprintf(stderr, "JIT: max_optlev=%d (env=%s)\n", value, env ? env : "(not set)");
 	}
 	return value;
 }
@@ -496,9 +497,24 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
 	if (jit_force_optlev1_env_opcode(op))
 		return true;
-	/* Control-flow gates: these create essential block boundaries that
-	   the JIT framework requires for correct execution. Keep these
-	   even in L2_ONLY mode. */
+	/* All structural and semantic gates moved to
+	   jit_force_interpreter_barrier_opcode() as per-instruction barriers.
+	   Blocks stay at optlev=2; only the specific control-flow instruction
+	   falls back to interpreter and ends the block. */
+	return false;
+}
+
+static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
+{
+	/* Instructions that must go through interpreter AND end the block.
+	   The block stays at optlev=2 so instructions BEFORE this one
+	   compile natively. Only this instruction uses interpreter fallback. */
+
+	/* MV2SR.W: changes supervisor state via MakeFromSR() */
+	if (table68k[op].mnemo == i_MV2SR && table68k[op].size == sz_word)
+		return true;
+
+	/* Control-flow: changes PC, needs fresh block entry */
 	if ((op & 0xf000) == 0x6000) /* BRA/BSR/Bcc */
 		return true;
 	if ((op & 0xffc0) == 0x4e80) /* JSR */
@@ -507,69 +523,29 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 		return true;
 	if (op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e76 || op == 0x4e77) /* RTE/RTD/RTS/TRAPV/RTR */
 		return true;
-	if ((op & 0xfb80) == 0x4880) /* MOVEM */
+
+	/* MOVEM: complex multi-register load/store */
+	if ((op & 0xfb80) == 0x4880)
 		return true;
-	if ((op & 0xf000) == 0xa000) /* A-line traps */
+
+	/* A-line traps */
+	if ((op & 0xf000) == 0xa000)
 		return true;
-	if ((op & 0xff00) == 0x7100) /* EmulOps (BasiliskII extended opcodes 0x7100-0x71FF) */
+
+	/* EmulOps (BasiliskII extended opcodes 0x7100-0x71FF) */
+	if ((op & 0xff00) == 0x7100)
 		return true;
-	/* CCR/SR state modifiers — always need interpreter barriers */
+
+	/* CCR/SR state modifiers */
 	if (op == 0x023c) /* ANDI to CCR */
 		return true;
 	if (op == 0x40e7 || op == 0x40c1) /* MOVE SR,-(A7) / MOVE SR,D1 */
 		return true;
 	if (op == 0x44df || op == 0x44fc) /* MOVE (A7)+,CCR / MOVE #imm,CCR */
 		return true;
-	/* Exact-opcode semantic gates below this point.
-	   B2_JIT_L2_ONLY / B2_JIT_DISABLE_HARDCODED_OPTLEV1 disables only these. */
-	if (jit_disable_hardcoded_optlev1())
-		return false;
-	/* After collapsing the 0x000F* helper cluster, the first reproducible
-	   semantic win on the remaining frontier is the exact MOVEQ pair
-	   moveq #0,d0 / moveq #1,d0. Neither opcode alone is sufficient, but the
-	   pair repeatedly restores the long-soak late-startup baseline. */
-	if (op == 0x7000 || op == 0x7001)
-		return true;
-	/* Further narrowing shows a second safe/improving MOVEQ subset: #0x28,
-	   #0x29 and #0x30 into D0. */
-	if (op == 0x7128 || op == 0x7129 || op == 0x7130)
-		return true;
-	/* The remaining MOVEQ-into-D0 quartet (#0x04, #0x11, #0x23, #0x2c) also
-	   proves safe when gated as an exact semantic cluster, even though some of
-	   these values were noisy or misleading when tested in isolation. */
-	if (op == 0x7104 || op == 0x7111 || op == 0x7123 || op == 0x712c)
-		return true;
-	/* Past the MOVEQ cluster, the next reproducible semantic win is a tiny pair
-	   spanning a repeated MOVE.W store and its replacement wave: 0x3140 and
-	   0x301f only help together, not alone. */
-	if (op == 0x3140 || op == 0x301f)
-		return true;
-	/* Two more exact semantic clusters proved safe after the 0x3140/0x301f gate:
-	   - memory-test / clear wave: TST.L / CLR.L variants at 0x4a80, 0x4290,
-	     0x4aa9, 0x4278, 0x4ab8
-	   - absolute/displacement source moves at 0x1030, 0x2038, 0x2069, 0x2078
-	   Each cluster survives the full long-soak run and shrinks the remaining
-	   optlev=2 frontier without reintroducing early hangs. */
-	if (op == 0x4a80 || op == 0x4290 || op == 0x4aa9 || op == 0x4278 || op == 0x4ab8)
-		return true;
-	if (op == 0x1030 || op == 0x2038 || op == 0x2069 || op == 0x2078)
-		return true;
-	/* With the above clusters hard-gated, MOVE.L (A7)+,D0 (0x201f) becomes the
-	   next clean singleton win: it removes itself from the surviving optlev=2
-	   surface without spawning replacement-wave regressions. */
-	if (op == 0x201f)
-		return true;
+
 	return false;
 }
-
-static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
-{
-	/* Word-sized MV2SR still changes supervisor state and stack banks via
-	   MakeFromSR(). When routed through the legacy/interpreter path, always
-	   terminate the current native block afterward. */
-	return table68k[op].mnemo == i_MV2SR && table68k[op].size == sz_word;
-}
-
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 {
 	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
@@ -4560,25 +4536,15 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     optlev = 0;
                     break;
                 }
-                if (optlev > 1) {
-                    bool gate = jit_force_optlev1_opcode(_op);
-                    if (_i == 0 || gate)
-                            (unsigned)block_m68k_pc, _i, (unsigned)_op, optlev, gate ? 1 : 0);
-                    if (gate) {
-                        optlev = 1;
-                        break;
-                    }
+                if (optlev > 1 && jit_force_optlev1_opcode(_op)) {
+                    optlev = 1;
+                    break;
                 }
             }
         }
 #endif
-#if defined(CPU_AARCH64)
-        /* ARM64: if L2_ONLY disabled the semantic gates but L2 native codegen
-           is not yet fully correct, cap at optlev=1 so blocks use interpreter
-           fallback reliably. The structural control-flow gates above still
-           create correct block boundaries. */
+#if 0 /* Removed: all gates now use per-instruction barriers, blocks always stay at optlev=2 */
         if (optlev > 1 && jit_disable_hardcoded_optlev1()) {
-            fprintf(stderr, "OPTLEV_CAP: %d -> 1 (l2only=%d)\n", optlev, jit_disable_hardcoded_optlev1() ? 1 : 0);
             optlev = 1;
         }
 #endif
@@ -4656,6 +4622,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 failure = 1; // gb-- defaults to failure state
                 /* ARM64 L2 bisection: only allow native codegen for specific families */
                 bool allow_l2 = true;
+#if defined(CPU_AARCH64)
+                /* Per-instruction interpreter barrier: force specific instructions
+                   through interpreter even if they have compiled handlers.
+                   This prevents L2 native codegen for control-flow, MOVEM, etc. */
+                if (jit_force_interpreter_barrier_opcode((uae_u16)opcode))
+                    allow_l2 = false;
+#endif
 #if defined(CPU_AARCH64)
                 {
                     static int l2_bisect = -1;

@@ -195,6 +195,19 @@ static void vnc_keyboard_callback(rfbBool down, rfbKeySym key, rfbClientPtr)
 
 static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 {
+	/* VNC sends coordinates in framebuffer space (Mac logical resolution).
+	   SDL_PushEvent expects window-space coordinates, which SDL then maps
+	   back to logical space via SDL_RenderSetLogicalSize. When the SDL
+	   window is larger than the logical size, this double-mapping causes
+	   a coordinate scaling error. Compensate by converting VNC coords
+	   from logical to window space. */
+	SDL_Window *win = SDL_GetWindowFromID(1);
+	if (win && vnc_width > 0 && vnc_height > 0) {
+		int ww, wh;
+		SDL_GetWindowSize(win, &ww, &wh);
+		x = x * ww / vnc_width;
+		y = y * wh / vnc_height;
+	}
 	vnc_push_pointer_motion(x, y);
 
 	const int previous = vnc_pointer_buttons;
