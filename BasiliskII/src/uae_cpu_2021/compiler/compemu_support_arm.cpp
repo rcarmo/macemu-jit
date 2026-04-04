@@ -4745,12 +4745,53 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         dont_care_flags();
                     }
 
-                    /* Lightweight spcflags check between compiled instructions.
-                       When spcflags are set (interrupt pending), we must exit the
-                       block with correct guest state. We emit the flush code inline
-                       behind a conditional branch so the hot path (spcflags==0)
-                       has zero overhead beyond the test+branch. */
+                    /* Deterministic tick + spcflags check between compiled instructions.
+                       The interpreter calls cpu_check_ticks() after every instruction,
+                       which decrements emulated_ticks and fires the 60Hz callback when
+                       it reaches zero. Without this, compiled blocks never decrement
+                       the tick counter, making interrupt timing wall-clock dependent
+                       instead of instruction-count dependent. */
                     if (i < blocklen - 1) {
+                        /* Decrement emulated_ticks; if <= 0, call cpu_do_check_ticks.
+                           This mirrors what cpu_check_ticks() does inline. */
+                        LOAD_U64(REG_WORK3, (uintptr)&emulated_ticks);
+                        LDR_wXi(REG_WORK1, REG_WORK3, 0);
+                        SUB_wwi(REG_WORK1, REG_WORK1, 1);
+                        STR_wXi(REG_WORK1, REG_WORK3, 0);
+                        uae_u32* branch_tick_ok = (uae_u32*)get_target();
+                        CBNZ_wi(REG_WORK1, 0);  /* if ticks > 0, skip tick call */
+                        /* Ticks reached 0: save all caller-saved regs, call
+                           cpu_do_check_ticks (may set SPCFLAG_INT), restore regs.
+                           This is rare (~every 1000 instructions). */
+                        /* Save x0-x17 + NZCV to stack */
+                        STP_xxXpre(0, 1, RSP_INDEX, -16);
+                        STP_xxXpre(2, 3, RSP_INDEX, -16);
+                        STP_xxXpre(4, 5, RSP_INDEX, -16);
+                        STP_xxXpre(6, 7, RSP_INDEX, -16);
+                        STP_xxXpre(8, 9, RSP_INDEX, -16);
+                        STP_xxXpre(10, 11, RSP_INDEX, -16);
+                        STP_xxXpre(12, 13, RSP_INDEX, -16);
+                        STP_xxXpre(14, 15, RSP_INDEX, -16);
+                        STP_xxXpre(16, 17, RSP_INDEX, -16);
+                        MRS_NZCV_x(REG_WORK1);
+                        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
+                        compemu_raw_call((uintptr)cpu_do_check_ticks);
+                        /* Restore NZCV + x0-x17 */
+                        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
+                        MSR_NZCV_x(REG_WORK1);
+                        LDP_xxXpost(16, 17, RSP_INDEX, 16);
+                        LDP_xxXpost(14, 15, RSP_INDEX, 16);
+                        LDP_xxXpost(12, 13, RSP_INDEX, 16);
+                        LDP_xxXpost(10, 11, RSP_INDEX, 16);
+                        LDP_xxXpost(8, 9, RSP_INDEX, 16);
+                        LDP_xxXpost(6, 7, RSP_INDEX, 16);
+                        LDP_xxXpost(4, 5, RSP_INDEX, 16);
+                        LDP_xxXpost(2, 3, RSP_INDEX, 16);
+                        LDP_xxXpost(0, 1, RSP_INDEX, 16);
+                        /* Patch tick skip branch */
+                        write_jmp_target((uae_u32*)branch_tick_ok, (uintptr)get_target());
+
+                        /* Now check spcflags (may have been set by cpu_do_check_ticks) */
                         uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
                         LDR_wXi(REG_WORK1, R_REGSTRUCT, idx_spc);
                         uae_u32* branch_skip = (uae_u32*)get_target();
