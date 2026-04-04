@@ -81,7 +81,8 @@ Packages are automatically uploaded to GitHub Releases when a version tag is pus
 #### BasiliskII
 ```
 macOS     x86_64 JIT / arm64 non-JIT
-Linux x86 x86_64 JIT / arm64 non-JIT
+Linux x86 x86_64 JIT
+Linux arm64      JIT (experimental — see below)
 MinGW x86        JIT
 ```
 #### SheepShaver
@@ -148,6 +149,75 @@ $ cd macemu/BasiliskII/src/Unix
 $ ./autogen.sh
 $ make
 ```
+
+#### Linux AArch64 with JIT (experimental)
+
+This fork includes an experimental AArch64 JIT backend. The JIT translates
+68k instructions to native ARM64 code at runtime for significantly faster
+emulation.
+
+**Prerequisites:**
+```bash
+sudo apt install build-essential autoconf automake libsdl2-dev \
+  libmpfr-dev libgmp-dev libvncserver-dev libpng-dev
+```
+
+**Build:**
+```bash
+cd macemu/BasiliskII/src/Unix
+ac_cv_have_asm_extended_signals=yes ./configure --enable-aarch64-jit-experimental
+make -j$(nproc)
+```
+
+The build produces `BasiliskII` in `src/Unix/`.
+
+**Key build notes:**
+- LTO (`-flto=auto`) is intentionally disabled on AArch64 — it strips JIT
+  gate checks that the compiler determines are "dead code" but are actually
+  needed at runtime.
+- The default JIT optimization level is L2 (native ARM64 codegen). Set
+  `B2_JIT_MAX_OPTLEV=1` to fall back to interpreter-only JIT dispatch.
+
+**Running:**
+```bash
+./BasiliskII --config /path/to/prefs
+```
+
+**Useful environment variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `B2_JIT_MAX_OPTLEV` | `2` | Max JIT optimization level (0=interpreter, 1=JIT dispatch, 2=native codegen) |
+| `B2_JIT_MANAGED_IRQ` | `0` | Enable managed IRQ delivery model (recommended: `1`) |
+
+**VNC server:**
+
+Add to your prefs file for remote access:
+```
+vncserver true
+vncport 5900
+```
+
+#### AArch64 JIT Status
+
+The AArch64 JIT backend is under active development. Current status:
+
+- ✅ Boots to Mac OS Finder desktop at JIT optlev=1 (interpreter dispatch)
+- ✅ Speedometer 4.02 Graphics benchmark runs (score: 210.368 vs Mac Classic = 1.0)
+- ✅ VNC server with correct coordinate mapping
+- ✅ Managed IRQ delivery for stable interrupt handling
+- ✅ Byte-order fixes for opcode extraction, dispatch, and flag metadata
+- ⚠️ Native ARM64 codegen (optlev=2) compiles 99%+ of blocks but has remaining
+  semantic bugs in data instruction implementations that prevent boot
+
+**Bugs fixed in this fork:**
+1. IRQ deliverability bug — latching pending interrupts while masked
+2. `HAVE_GET_WORD_UNSWAPPED` extraction mismatch in compiled handlers
+3. Interpreter fallback dispatch byte-order bug (`cpufunctbl` indexing)
+4. Flag liveness metadata byte-order bug (`prop[]` indexing)
+5. L2 compiled handler dispatch byte-order bug (`comptbl[]` indexing)
+6. LTO stripping JIT gate checks
+7. VNC mouse coordinate scaling with SDL logical size
 
 #### MinGW32/MSYS2
 preparation:
