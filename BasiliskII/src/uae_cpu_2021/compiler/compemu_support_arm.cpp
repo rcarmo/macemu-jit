@@ -496,11 +496,9 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
 	if (jit_force_optlev1_env_opcode(op))
 		return true;
-	if (jit_disable_hardcoded_optlev1())
-		return false;
-	/* First optlev=2 stability pass: keep native opcode codegen away from
-	   branch/call/return and stack-heavy MOVEM blocks that are currently the
-	   most likely source of guest A7 / control-flow corruption. */
+	/* Control-flow gates: these create essential block boundaries that
+	   the JIT framework requires for correct execution. Keep these
+	   even in L2_ONLY mode. */
 	if ((op & 0xf000) == 0x6000) /* BRA/BSR/Bcc */
 		return true;
 	if ((op & 0xffc0) == 0x4e80) /* JSR */
@@ -511,6 +509,12 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 		return true;
 	if ((op & 0xfb80) == 0x4880) /* MOVEM */
 		return true;
+	if ((op & 0xf000) == 0xa000) /* A-line traps / EmulOps */
+		return true;
+	/* Exact-opcode semantic gates below this point.
+	   B2_JIT_L2_ONLY / B2_JIT_DISABLE_HARDCODED_OPTLEV1 disables only these. */
+	if (jit_disable_hardcoded_optlev1())
+		return false;
 	if ((op & 0xf000) == 0xa000) /* A-line traps / EmulOps */
 		return true;
 	/* Early optlev=2 runs still hit boot-sensitive system/stack instructions.
@@ -4608,7 +4612,33 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
 
                 failure = 1; // gb-- defaults to failure state
-                if (comptbl[cft_map(opcode)] && optlev > 1) {
+                /* ARM64 L2 bisection: only allow native codegen for specific families */
+                bool allow_l2 = true;
+#if defined(CPU_AARCH64)
+                {
+                    static int l2_bisect = -1;
+                    if (l2_bisect < 0) {
+                        const char *env = getenv("B2_JIT_L2_BISECT");
+                        l2_bisect = env && *env ? atoi(env) : 0;
+                    }
+                    if (l2_bisect > 0) {
+                        /* Force interpreter for families NOT in the bisect set */
+                        uae_u16 lop = (uae_u16)opcode; /* logical opcode */
+                        uae_u16 top = (lop >> 12) & 0xf;
+                        if (l2_bisect == 1) allow_l2 = (top <= 0x3); /* only ORI..MOVE */
+                        else if (l2_bisect == 2) allow_l2 = (top >= 0x4 && top <= 0x7); /* misc+Bcc+MOVEQ */
+                        else if (l2_bisect == 3) allow_l2 = (top >= 0x8); /* arith+shifts */
+                        else if (l2_bisect == 4) allow_l2 = (top <= 0x3 || top >= 0x8); /* skip misc/Bcc */
+                        else if (l2_bisect == 5) allow_l2 = (top != 0xe); /* skip shifts only */
+                        else if (l2_bisect == 6) allow_l2 = (top == 0xe); /* shifts ONLY */
+                        else if (l2_bisect == 7) allow_l2 = (top >= 0x4 && top <= 0x5); /* misc only */
+                        else if (l2_bisect == 8) allow_l2 = (top == 0x4); /* 4xxx only */
+                        else if (l2_bisect == 9) allow_l2 = (top == 0x6); /* Bcc only */
+                        else if (l2_bisect == 10) allow_l2 = false; /* nothing - pure L1 */
+                    }
+                }
+#endif
+                if (comptbl[cft_map(opcode)] && optlev > 1 && allow_l2) {
                     failure = 0;
                     if (!was_comp) {
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
