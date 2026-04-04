@@ -1,16 +1,5 @@
 #if defined(JIT)
 #include "sysdeps.h"
-
-/* ARM64 JIT byte-order fix: the generated opcode handlers below use
-   HAVE_GET_WORD_UNSWAPPED conditionals to extract register/immediate
-   fields from the opcode word.  On ARM64, DO_GET_OPCODE() returns the
-   byte-swapped (logical m68k) opcode, NOT the raw unswapped host word.
-   So we must use the non-HAVE_GET_WORD_UNSWAPPED extraction formulas
-   that expect logical big-endian m68k opcodes. */
-#if defined(CPU_AARCH64) || defined(CPU_aarch64)
-#undef HAVE_GET_WORD_UNSWAPPED
-#endif
-
 #include "m68k.h"
 #include "memory.h"
 #include "readcpu.h"
