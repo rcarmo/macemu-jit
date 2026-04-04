@@ -4745,16 +4745,61 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         dont_care_flags();
                     }
 
-                    /* Check spcflags between compiled instructions.
-                       Without this, interrupts and special conditions are
-                       delayed until block exit, causing timing differences
-                       between L1 (checked every instruction) and L2. */
+                    /* Lightweight spcflags check between compiled instructions.
+                       When spcflags are set (interrupt pending), we must exit the
+                       block with correct guest state. We emit the flush code inline
+                       behind a conditional branch so the hot path (spcflags==0)
+                       has zero overhead beyond the test+branch. */
                     if (i < blocklen - 1) {
-                        compemu_raw_mov_l_rm(0, (uintptr)specflags);
-#if defined(USE_DATA_BUFFER)
-                        data_check_end(8, 64);
-#endif
-                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
+                        uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
+                        LDR_wXi(REG_WORK1, R_REGSTRUCT, idx_spc);
+                        uae_u32* branch_skip = (uae_u32*)get_target();
+                        CBZ_wi(REG_WORK1, 0);  /* → skip (patched below) */
+
+                        /* Cold path: save all dirty registers to memory WITHOUT
+                           modifying the compile-time allocator state. */
+                        for (int j = 0; j <= FLAGTMP; j++) {
+                            if (live.state[j].status == DIRTY && live.state[j].realreg >= 0) {
+                                int rr = live.state[j].realreg;
+                                if (j == FLAGX) {
+                                    /* Convert X from JIT 0/1 format to interpreter bit-29 */
+                                    LSL_wwi(REG_WORK2, rr, 29);
+                                    compemu_raw_mov_l_mr((uintptr)live.state[j].mem, REG_WORK2);
+                                } else {
+                                    compemu_raw_mov_l_mr((uintptr)live.state[j].mem, rr);
+                                }
+                            } else if (live.state[j].status == ISCONST && j != PC_P) {
+                                if (j == FLAGX) {
+                                    uae_u32 val = (live.state[j].val & 1) << 29;
+                                    compemu_raw_mov_l_mi((uintptr)live.state[j].mem, val);
+                                } else {
+                                    compemu_raw_mov_l_mi((uintptr)live.state[j].mem, live.state[j].val);
+                                }
+                            }
+                        }
+                        /* Flush flags (NZCV) to regflags.nzcv if valid in ARM64 NZCV */
+                        if (live.flags_in_flags == VALID) {
+                            MRS_NZCV_x(REG_WORK2);
+                            if (flags_carry_inverted) {
+                                EOR_xxCflag(REG_WORK2, REG_WORK2);
+                            }
+                            LOAD_U64(REG_WORK3, (uintptr)&(regflags.nzcv));
+                            STR_wXi(REG_WORK2, REG_WORK3, 0);
+                        }
+                        /* Sync PC to the NEXT instruction */
+                        compemu_raw_set_pc_i((uintptr)pc_hist[i + 1].location);
+                        /* Subtract cycles and exit */
+                        LOAD_U64(REG_WORK3, (uintptr)&countdown);
+                        LDR_wXi(REG_WORK2, REG_WORK3, 0);
+                        LOAD_U32(REG_WORK1, scaled_cycles(totcycles));
+                        SUB_www(REG_WORK2, REG_WORK2, REG_WORK1);
+                        STR_wXi(REG_WORK2, REG_WORK3, 0);
+                        uae_u32* branch_exit = (uae_u32*)get_target();
+                        B_i(0); /* → popall_do_nothing (patched below) */
+                        write_jmp_target(branch_exit, (uintptr)popall_do_nothing);
+
+                        /* Patch skip branch to here (hot path continues) */
+                        write_jmp_target((uae_u32*)branch_skip, (uintptr)get_target());
                     }
                 }
 
