@@ -7,11 +7,11 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **11 bugs** that prevented L2 from booting Mac OS, bringing 9 of 15 opcode families to fully working native codegen. Block-level trace analysis has identified the root cause for the remaining 6 families.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **13 bugs** that prevented or destabilized L2 boot, bringing 9 of 15 opcode families to fully working native codegen. The remaining all-native failure has been narrowed substantially: it is **not** explained by the original byte-order bugs, not by verified per-instruction semantics, and not solely by masked interrupt/tick timing. The unresolved piece now appears to live in fully-native block execution/dispatch/cache behavior.
 
 ### Hardware
 
-- **Board**: Orange Pi 5 Plus (CIX P1 SoC, 12 cores)
+- **Board**: Orange Pi 6 Plus (CIX P1 SoC, 12 cores)
 - **Arch**: AArch64, little-endian
 - **OS**: Debian Trixie
 - **Runtime**: Bun + Xvfb for headless testing
@@ -176,6 +176,22 @@ The ARM64 JIT inherited code from the x86 backend where `HAVE_GET_WORD_UNSWAPPED
 
 **Fix**: Changed `COPY_CARRY()` to `regflags.x = regflags.nzcv & FLAGVAL_C`, masking to only the carry bit (bit 29). Also added UBFX normalization at compiled section entry (`init_comp`) to convert from bit-29 format to the JIT's 0/1 format, and LSL conversion in `tomem()`/`writeback_const()` to convert back.
 
+### Bug 12: Masked IRQs Still Split Compiled Blocks (2026-04-05)
+
+**Symptom**: Even with `sr=2708` / `regs.intmask=7` (level-1 interrupts masked), the async 60Hz path could still knock the JIT out of native execution at block-shape-dependent points.
+
+**Root cause**: `TriggerInterrupt()` unconditionally set `SPCFLAG_INT`. Compiled code treats any `spcflags` bit as a block-break condition, so masked interrupts were still creating non-architectural exits from native blocks. The CPU only discovered the IRQ was masked later in `m68k_do_specialties()`/`intlev()`.
+
+**Fix**: In managed/deferred JIT mode, `TriggerInterrupt()` now raises `SPCFLAG_INT` only when level-1 is actually deliverable (`regs.intmask < 1`). Pending masked ticks remain in `InterruptFlags`. `MakeFromSR()` now re-raises `SPCFLAG_INT` when an SR/intmask change makes a pending level-1 interrupt deliverable.
+
+### Bug 13: Partial JIT Exits Charged Full-Block Cycles (2026-04-05)
+
+**Symptom**: Mid-block exits (inter-instruction spcflags check, interpreter barrier exit, exception exit, runtime helper barrier) charged the entire block's `scaled_cycles(totcycles)` even when only a prefix of the block had retired.
+
+**Root cause**: The cold exit paths used the block total instead of the retired prefix, making countdown/timing depend on block shape even when the exit point was earlier in the block.
+
+**Fix**: All mid-block exits now charge `scaled_cycles((i + 1) * 4 * CYCLE_UNIT)`, i.e. only the retired instruction prefix.
+
 ## Block-Level Trace Analysis
 
 The comprehensive block-level trace comparison was the key diagnostic that identified bugs 11 and the remaining memory divergence. The technique:
@@ -185,18 +201,26 @@ The comprehensive block-level trace comparison was the key diagnostic that ident
 3. **Sequence alignment**: Match traces by PC value, skipping block-boundary differences
 4. **First-divergence detection**: Find the earliest point where registers differ at matching PCs
 
-### Key Finding: Memory Content Divergence
+### Key Findings: Semantics Verified, Structural Failure Remains
 
-With all 11 bugs fixed, the trace analysis shows:
+The trace and verification work now shows two things simultaneously:
 
-- All 16 registers + NZCV + X match **perfectly** at 274 consecutive matched PCs
-- At PC `040b34dc` (a byte-copy loop exit), D1/D2 diverge despite **identical** inputs at the loop entry (`040b34cc`)
-- The loop code runs through the **interpreter** (not compiled) in both configurations
-- The divergence can only come from **different guest memory content** — an earlier compiled instruction wrote a wrong value to the Mac OS low-memory globals area
+- All 16 registers + NZCV + X match for hundreds of aligned trace points across good-vs-all-native comparisons
+- L1-vs-L2 register comparison found **zero divergences** across 2000 trace samples
+- Family-d runtime tracing and memory-write verification found **zero mismatches** in compiled register/flag results and guest memory writes for the instructions instrumented
+- A real low-memory content divergence still shows up later in the boot path, but it is no longer well-explained by a simple single-instruction semantic bug
 
-### Suspected Root Cause
+In other words: the earlier byte-order / flag / handler bugs were real and are fixed, but the remaining failure mode behaves like a **structural all-native execution problem** rather than a straightforward per-opcode arithmetic or addressing bug.
 
-The `ADDA.L (d16,A3),A3` instruction (opcode `0xd7eb`) from family d is the primary suspect. Early in the trace, the block containing this instruction showed a **4-byte PC offset** at block exit (`0x0404b0c8` instead of the expected `0x0404b0c4`), suggesting the compiled handler consumed 10 bytes of instruction stream instead of 6. This could indicate a memory write to a wrong address, corrupting the low-memory area that the byte-copy loop later reads.
+### Current Working Hypothesis
+
+The remaining all-native failure likely involves one or more of:
+
+- direct block chaining / next-handler selection
+- cache-tag or checksum/invalidation behavior that only appears in the fully-native graph
+- a block-layout-dependent control-flow issue that does not show up in isolated per-instruction verification
+
+The earlier `ADDA.L (d16,A3),A3` suspicion remains a useful breadcrumb, but is no longer treated as a proven root cause.
 
 ## Structural Changes
 
@@ -214,6 +238,8 @@ Instructions before the barrier compile natively; the barrier instruction itself
 ### Managed IRQ Delivery (`B2_JIT_MANAGED_IRQ=1`)
 
 Replaced the SIGUSR1-based async interrupt injection with a deferred safe-point model (similar to the original x86 JIT). Interrupts are consumed at block boundaries via `spcflags` checks rather than asynchronous signal delivery.
+
+A later fix tightened this further: in managed mode, **masked** level-1 interrupts no longer set `SPCFLAG_INT` immediately. They remain pending in `InterruptFlags` until SR/intmask changes make them deliverable. This removes a real block-boundary side-channel, although it did not fully solve the all-native stall.
 
 ### Lightweight Inter-Instruction Spcflags Check
 
@@ -258,6 +284,7 @@ Added `--enable-aarch64-jit-experimental` to the autoconf build system, enabling
 | `B2_JIT_FLUSH_BETWEEN=1` | Reset register allocator between compiled instructions |
 | `B2_JIT_PCTRACE=N` | Log first N block entry PCs with register state |
 | `B2_JIT_VERIFY_LIMIT=N` | Per-instruction runtime verification (compare compiled vs interpreter) |
+| `B2_JIT_SYNC_TICKS=1` | Experimental synchronous tick model driven from JIT dispatch returns |
 | `B2_JIT_L2_ONLY=1` | Force all blocks to optlev=2 |
 | `B2_JIT_MAX_OPTLEV=N` | Cap maximum optimization level |
 
@@ -276,12 +303,12 @@ The `B2_JIT_BARRIER_FAMILIES` variable allows testing each opcode family indepen
 
 | Family | Instructions | Boot Status |
 |--------|-------------|-------------|
-| 0 | ORI/ANDI/SUBI/ADDI/CMPI/BTST/BCHG/BCLR/BSET | ⏳ Memory divergence |
-| 1 | MOVE.B | ⏳ Memory divergence |
-| 2 | MOVE.L | ⏳ Memory divergence |
-| 3 | MOVE.W | ⏳ Memory divergence |
+| 0 | ORI/ANDI/SUBI/ADDI/CMPI/BTST/BCHG/BCLR/BSET | ⏳ All-native structural stall |
+| 1 | MOVE.B | ⏳ All-native structural stall |
+| 2 | MOVE.L | ⏳ All-native structural stall |
+| 3 | MOVE.W | ⏳ All-native structural stall |
 | 4 | CLR/NEG/NOT/TST/PEA/LEA/EXT/SWAP/LINK/UNLK | ✅ Boots |
-| 5 | ADDQ/SUBQ/Scc/DBcc | ⏳ Memory divergence |
+| 5 | ADDQ/SUBQ/Scc/DBcc | ⏳ All-native structural stall |
 | 6 | Bcc/BRA/BSR | ✅ Boots (barriers) |
 | 7 | MOVEQ | ✅ Boots |
 | 8 | OR/DIV/SBCD | ✅ Boots |
@@ -289,7 +316,7 @@ The `B2_JIT_BARRIER_FAMILIES` variable allows testing each opcode family indepen
 | a | A-line traps | ✅ Boots (barriers) |
 | b | CMP/CMPA/EOR | ✅ Boots |
 | c | AND/MUL/ABCD/EXG | ✅ Boots |
-| d | ADD/ADDA/ADDX | ⏳ Memory divergence |
+| d | ADD/ADDA/ADDX | ⏳ All-native structural stall |
 | e | Shifts/Rotates | ✅ Boots |
 
 ### Boot Progress Metrics
@@ -321,20 +348,23 @@ With the 9 working opcode families (4,6,7,8,9,a,b,c,e) compiling natively:
 - VNC remote display functional
 - Managed IRQ delivery stable
 
-### Remaining Issue: Guest Memory Divergence
+### Remaining Issue: All-Native Stall After Early Native Graph Build
 
-The 6 remaining families (0,1,2,3,5,d) cause boot failure due to **guest memory content divergence**, not a register or flag computation error. Block-level trace analysis with all 11 bugs fixed confirms:
+The 6 remaining families (0,1,2,3,5,d) still prevent a fully-native boot, but the diagnosis is now narrower than “memory divergence from a bad instruction.” Latest results:
 
-- **274 consecutive matched PCs** with identical register state (all 16 regs + NZCV + X)
-- First divergence at a **byte-copy loop** where identical register inputs produce different D1/D2 outputs
-- The loop runs through the **interpreter** in both configs — the divergence comes from earlier compiled code that wrote a wrong value to guest memory
-- The `ADDA.L (d16,A3),A3` instruction (opcode `0xd7eb`) is the primary suspect: its compiled block exits at a PC 4 bytes past the expected address, suggesting a memory addressing bug in the handler
+- Good gated config (`B2_JIT_BARRIER_FAMILIES="0,1,2,3,5,d,f"`) still reaches healthy boot progress: `DiskStatus=42`, `SCSIGet=14`
+- All-native managed-IRQ config still stalls very early with no disk progress: `DiskStatus=0`, `SCSIGet=0`, after only ~174 compiled L2 blocks
+- Experimental synchronous ticks (`B2_JIT_SYNC_TICKS=1`) do **not** resolve the stall; the all-native run still stops around ~181 compiled L2 blocks
+- Fixing masked IRQ exits (bug 12) and exact partial-exit accounting (bug 13) was necessary cleanup, but did **not** restore all-native boot
+
+This strongly suggests the remaining problem is inside the fully-native block graph itself: dispatch, chaining, cache tags, checksum/invalidation, or some other structural behavior that only appears when the last 6 families are allowed to participate natively.
 
 ### Diagnosis Path Forward
 
-1. **Instrument memory writes**: Add tracing to `writemem_real`/`writemem_special` for writes to the low-memory globals area (`0x000-0x2000`)
-2. **Compare memory snapshots**: Dump guest memory at the byte-copy loop entry point in both configs and diff
-3. **Verify ADDA handler**: Disassemble the native code for `op_d1e8` (ADDA.L with d16 addressing) and verify the address calculation emits correct `comp_get_iword` displacement
+1. **Instrument direct block chaining**: Log `get_handler()` / `cache_tags` targets around the first all-native stall (~L2 block 174)
+2. **Compare block-manager state**: Diff `blockinfo`, checksum state, and cache-tag ownership between good and all-native runs
+3. **Capture first divergent native transition**: Record block entry PC, chosen successor handler, and resolved next PC for the earliest all-native-only control-flow split
+4. **Only then revisit specific opcode families**: Treat individual family handlers as suspects only if the block-management layer checks out
 
 ## Build Instructions
 
@@ -364,6 +394,7 @@ B2_JIT_MANAGED_IRQ=1 ./BasiliskII --config /path/to/prefs
 ## Appendix: Commit History
 
 ```
+defad98a aarch64 jit: gate masked IRQ exits and charge partial exits exactly
 63341c97 aarch64 jit: fix COPY_CARRY to mask carry bit only (bug 11)
 b81dae11 aarch64 jit: fix FLAGX format conversion at interpreter/JIT boundary
 37ee2faa aarch64 jit: simplify inter-instruction check (remove incorrect tick code)
