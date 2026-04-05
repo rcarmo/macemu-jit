@@ -441,6 +441,131 @@ static void trace_emulop_resume(uae_u32 opcode, uae_u32 next_pc)
 		(unsigned)m68k_areg(regs, 7));
 }
 
+static inline bool jit_verify_target_pc(uae_u32 pc)
+{
+	static int initialized = 0;
+	static int range_count = 0;
+	static struct {
+		uae_u32 start;
+		uae_u32 end;
+	} ranges[64];
+	if (!initialized) {
+		const char *env = getenv("B2_JIT_VERIFY_PCS");
+		initialized = 1;
+		if (env && *env) {
+			const char *p = env;
+			while (*p && range_count < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
+				while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+					p++;
+				if (!*p)
+					break;
+				char *endp = NULL;
+				unsigned long start = strtoul(p, &endp, 0);
+				unsigned long end = start;
+				if (endp == p)
+					break;
+				p = endp;
+				if (*p == '-') {
+					p++;
+					end = strtoul(p, &endp, 0);
+					if (endp == p)
+						end = start;
+					p = endp;
+				}
+				ranges[range_count].start = (uae_u32)start;
+				ranges[range_count].end = (uae_u32)end;
+				range_count++;
+			}
+		}
+	}
+	for (int i = 0; i < range_count; i++) {
+		if (pc >= ranges[i].start && pc <= ranges[i].end)
+			return true;
+	}
+	return false;
+}
+
+struct jit_verify_snapshot {
+	regstruct regs;
+	flag_struct flags;
+	uae_u32 mem_a2_addr;
+	uae_u32 mem_a2_p400_addr;
+	uae_u8 mem_a2_byte;
+	uae_u8 mem_a2_p400_byte;
+};
+
+static jit_verify_snapshot jit_verify_pre_state;
+static bool jit_verify_pre_valid = false;
+static unsigned long jit_verify_log_count = 0;
+
+static void jit_verify_pre(uae_u32 pc, uae_u32 opcode)
+{
+	(void)pc;
+	(void)opcode;
+	memcpy(&jit_verify_pre_state.regs, &regs, sizeof(regs));
+	memcpy(&jit_verify_pre_state.flags, &regflags, sizeof(regflags));
+	jit_verify_pre_state.mem_a2_addr = regs.regs[10];
+	jit_verify_pre_state.mem_a2_p400_addr = regs.regs[10] + 0x400;
+	jit_verify_pre_state.mem_a2_byte = get_byte(jit_verify_pre_state.mem_a2_addr);
+	jit_verify_pre_state.mem_a2_p400_byte = get_byte(jit_verify_pre_state.mem_a2_p400_addr);
+	jit_verify_pre_valid = true;
+}
+
+static void jit_verify_post(uae_u32 pc, uae_u32 opcode)
+{
+	if (!jit_verify_pre_valid)
+		return;
+	jit_verify_snapshot compiled_post;
+	memcpy(&compiled_post.regs, &regs, sizeof(regs));
+	memcpy(&compiled_post.flags, &regflags, sizeof(regflags));
+	compiled_post.mem_a2_addr = jit_verify_pre_state.mem_a2_addr;
+	compiled_post.mem_a2_p400_addr = jit_verify_pre_state.mem_a2_p400_addr;
+	compiled_post.mem_a2_byte = get_byte(compiled_post.mem_a2_addr);
+	compiled_post.mem_a2_p400_byte = get_byte(compiled_post.mem_a2_p400_addr);
+
+	memcpy(&regs, &jit_verify_pre_state.regs, sizeof(regs));
+	memcpy(&regflags, &jit_verify_pre_state.flags, sizeof(regflags));
+	put_byte(jit_verify_pre_state.mem_a2_addr, jit_verify_pre_state.mem_a2_byte);
+	put_byte(jit_verify_pre_state.mem_a2_p400_addr, jit_verify_pre_state.mem_a2_p400_byte);
+	(*cpufunctbl[opcode])(opcode);
+
+	const uae_u8 interp_mem_a2 = get_byte(jit_verify_pre_state.mem_a2_addr);
+	const uae_u8 interp_mem_a2_p400 = get_byte(jit_verify_pre_state.mem_a2_p400_addr);
+	bool mismatch = false;
+	if (regs.regs[0] != compiled_post.regs.regs[0] ||
+		regs.regs[1] != compiled_post.regs.regs[1] ||
+		regs.regs[2] != compiled_post.regs.regs[2] ||
+		regs.regs[3] != compiled_post.regs.regs[3] ||
+		regs.regs[12] != compiled_post.regs.regs[12] ||
+		regs.regs[13] != compiled_post.regs.regs[13] ||
+		regflags.nzcv != compiled_post.flags.nzcv ||
+		regflags.x != compiled_post.flags.x ||
+		interp_mem_a2 != compiled_post.mem_a2_byte ||
+		interp_mem_a2_p400 != compiled_post.mem_a2_p400_byte)
+		mismatch = true;
+
+	if (mismatch && jit_verify_log_count < 400) {
+		fprintf(stderr,
+			"JITVERIFY pc=%08x op=%04x interp:d0=%08x d1=%08x d2=%08x d3=%08x a4=%08x a5=%08x nzcv=%08x x=%08x m[a2]=%02x m[a2+400]=%02x compiled:d0=%08x d1=%08x d2=%08x d3=%08x a4=%08x a5=%08x nzcv=%08x x=%08x m[a2]=%02x m[a2+400]=%02x\n",
+			(unsigned)pc, (unsigned)opcode,
+			(unsigned)regs.regs[0], (unsigned)regs.regs[1], (unsigned)regs.regs[2], (unsigned)regs.regs[3],
+			(unsigned)regs.regs[12], (unsigned)regs.regs[13], regflags.nzcv, regflags.x,
+			(unsigned)interp_mem_a2, (unsigned)interp_mem_a2_p400,
+			(unsigned)compiled_post.regs.regs[0], (unsigned)compiled_post.regs.regs[1],
+			(unsigned)compiled_post.regs.regs[2], (unsigned)compiled_post.regs.regs[3],
+			(unsigned)compiled_post.regs.regs[12], (unsigned)compiled_post.regs.regs[13],
+			compiled_post.flags.nzcv, compiled_post.flags.x,
+			(unsigned)compiled_post.mem_a2_byte, (unsigned)compiled_post.mem_a2_p400_byte);
+		jit_verify_log_count++;
+	}
+
+	memcpy(&regs, &compiled_post.regs, sizeof(regs));
+	memcpy(&regflags, &compiled_post.flags, sizeof(regflags));
+	put_byte(compiled_post.mem_a2_addr, compiled_post.mem_a2_byte);
+	put_byte(compiled_post.mem_a2_p400_addr, compiled_post.mem_a2_p400_byte);
+	jit_verify_pre_valid = false;
+}
+
 static unsigned long trace_flagflow_count = 0;
 static uae_u32 trace_flagflow_block_pc = 0;
 static uae_u32 trace_flagflow_pc = 0;
@@ -2018,6 +2143,13 @@ static inline void log_visused(int r)
 
 STATIC_INLINE void do_load_reg(int n, int r)
 {
+#if defined(CPU_AARCH64)
+    if (r == FLAGX) {
+        compemu_raw_mov_l_rm(n, (uintptr)live.state[r].mem);
+        UBFX_xxii(n, n, 29, 1); /* interpreter bit-29 format -> JIT 0/1 */
+        return;
+    }
+#endif
     compemu_raw_mov_l_rm(n, (uintptr)live.state[r].mem);
 }
 
@@ -4663,8 +4795,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 uae_u32 opcode = DO_GET_OPCODE(pc_hist[i].location);
                 needed_flags = (liveflags[i + 1] & prop[cft_map(opcode)].set_flags);
                 special_mem = pc_hist[i].specmem;
+                const uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
                 {
-                    uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
                     trace_flagflow_block_pc = block_m68k_pc;
                     trace_flagflow_pc = op_m68k_pc;
                     trace_flagflow_op = (uae_u16)opcode;
@@ -4729,38 +4861,39 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     if (!was_comp) {
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
                         init_comp();
-#if defined(CPU_AARCH64)
-                        /* Normalize FLAGX from interpreter bit-29 format to JIT 0/1.
-                           Done via raw memory ops to avoid allocator side effects. */
-                        LOAD_U64(REG_WORK3, (uintptr)&(regflags.x));
-                        LDR_wXi(REG_WORK1, REG_WORK3, 0);
-                        UBFX_xxii(REG_WORK1, REG_WORK1, 29, 1);
-                        STR_wXi(REG_WORK1, REG_WORK3, 0);
-#endif
                     }
                     was_comp = 1;
 
 #if defined(CPU_AARCH64)
                     uae_u8* _before = get_target();
+                    const bool _verify_this_op = jit_verify_target_pc(op_m68k_pc);
+                    if (_verify_this_op) {
+                        flush(1);
+                        compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
+                        compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
+                        compemu_raw_mov_l_ri(REG_PAR2, opcode);
+                        compemu_raw_call((uintptr)jit_verify_pre);
+                        comp_pc_p = (uae_u8*)pc_hist[i].location;
+                        init_comp();
+                    }
 #endif
                     comptbl[cft_map(opcode)](opcode);
 #if defined(CPU_AARCH64)
                     /* Trace compiled family-d instructions at runtime */
-                    if ((((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) ||
+                    if (_verify_this_op ||
+                        (((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) ||
                         false /* watch_mem removed */) {
                         uae_u32 pc_val = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
-                        /* Save all caller-saved regs around the trace call */
+                        /* Save all caller-saved regs around the trace/verify call */
                         flush(1);
                         compemu_raw_mov_l_ri(REG_PAR1, pc_val);
                         compemu_raw_mov_l_ri(REG_PAR2, opcode);
-                        compemu_raw_call((uintptr)jit_trace_add);
+                        if (_verify_this_op)
+                            compemu_raw_call((uintptr)jit_verify_post);
+                        else
+                            compemu_raw_call((uintptr)jit_trace_add);
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
                         init_comp();
-                        /* Normalize FLAGX after re-init */
-                        LOAD_U64(REG_WORK3, (uintptr)&(regflags.x));
-                        LDR_wXi(REG_WORK1, REG_WORK3, 0);
-                        UBFX_xxii(REG_WORK1, REG_WORK1, 29, 1);
-                        STR_wXi(REG_WORK1, REG_WORK3, 0);
                         was_comp = 0; /* force re-init for next instruction */
                     }
 #endif
