@@ -498,6 +498,7 @@ static void op_fullsr_eorsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode);
 static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode);
 static void op_move_l_reg_d16an_comp_ff(uae_u32 opcode);
+extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode);
 static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
@@ -4727,6 +4728,25 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #endif
                     comptbl[cft_map(opcode)](opcode);
 #if defined(CPU_AARCH64)
+                    /* Trace compiled family-d instructions at runtime */
+                    if (((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) {
+                        uae_u32 pc_val = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
+                        /* Save all caller-saved regs around the trace call */
+                        flush(1);
+                        compemu_raw_mov_l_ri(REG_PAR1, pc_val);
+                        compemu_raw_mov_l_ri(REG_PAR2, opcode);
+                        compemu_raw_call((uintptr)jit_trace_add);
+                        comp_pc_p = (uae_u8*)pc_hist[i].location;
+                        init_comp();
+                        /* Normalize FLAGX after re-init */
+                        LOAD_U64(REG_WORK3, (uintptr)&(regflags.x));
+                        LDR_wXi(REG_WORK1, REG_WORK3, 0);
+                        UBFX_xxii(REG_WORK1, REG_WORK1, 29, 1);
+                        STR_wXi(REG_WORK1, REG_WORK3, 0);
+                        was_comp = 0; /* force re-init for next instruction */
+                    }
+#endif
+#if defined(CPU_AARCH64)
                     uae_u8* _after = get_target();
                     if (i < 10) {
                         fprintf(stderr, "JIT_CODEGEN pc=0x%08x op=0x%04x jit_range=[%p,%p] size=%ld\n",
@@ -4852,6 +4872,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_mov_l_rr(REG_PAR2, R_REGSTRUCT);
                     compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
                     compemu_raw_call((uintptr)cputbl[cft_map(opcode)]);
+                    /* Trace interpreter-executed family-d instructions */
+                    if (((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) {
+                        uae_u32 pc_val = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
+                        compemu_raw_mov_l_ri(REG_PAR1, pc_val);
+                        compemu_raw_mov_l_ri(REG_PAR2, opcode);
+                        compemu_raw_call((uintptr)jit_trace_add);
+                    }
 #ifdef PROFILE_UNTRANSLATED_INSNS
                     // raw_cputbl_count[] is indexed with plain opcode (in m68k order)
                     compemu_raw_inc_opcount(opcode);

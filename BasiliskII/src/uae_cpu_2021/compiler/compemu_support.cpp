@@ -108,9 +108,14 @@ void m68k_do_compile_execute(void)
 		{
 			static unsigned long memdump_count = 0;
 			uae_u32 pc = m68k_getpc();
-			if ((pc == 0x040b34dc || pc == 0x040b34cc) && memdump_count < 20) {
-				fprintf(stderr, "MEMDUMP[%lu] pc=%08x d1=%08x d5=%08x a0=%08x mem@1e0=",
-					memdump_count++, pc, regs.regs[1], regs.regs[5], regs.regs[8]);
+			if (memdump_count < 50 &&
+			    (pc == 0x040b34dc || pc == 0x040b34cc ||
+			     pc == 0x040b34ba || pc == 0x0400c6b2 ||
+			     pc == 0x0400c5b4 || pc == 0x0400c5d8 ||
+			     pc == 0x0404b0c0 || pc == 0x0404b0c4 || pc == 0x0404b0c8 || pc == 0x0400ca10 || pc == 0x0400ca14 || pc == 0x0400ca16)) {
+				fprintf(stderr, "MEMDUMP[%lu] pc=%08x d0=%08x d1=%08x d2=%08x d3=%08x d5=%08x a0=%08x a3=%08x mem@1e0=",
+					memdump_count++, pc, regs.regs[0], regs.regs[1], regs.regs[2],
+					regs.regs[3], regs.regs[5], regs.regs[8], regs.regs[11]);
 				for (int b = 0; b < 16; b++)
 					fprintf(stderr, "%02x", (unsigned)get_byte(0x1e0 + b));
 				fprintf(stderr, "\n");
@@ -5641,4 +5646,16 @@ setjmpagain:
 #endif /* non-AArch64 compemu_support.cpp */
 #endif /* JIT */
 
+#endif
+
+#if defined(CPU_AARCH64)
+extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode)
+{
+    static unsigned long tc = 0;
+    if (tc < 100) {
+        fprintf(stderr, "JIT_ADD[%lu] pc=%08x op=%04x d0=%08x d1=%08x d2=%08x a3=%08x x=%08x\n",
+            tc++, pc, opcode,
+            regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[11], regflags.x);
+    }
+}
 #endif
