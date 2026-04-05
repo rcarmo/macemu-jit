@@ -485,7 +485,7 @@ struct flag_struct {
 #define IOR_CZNV(X)		(regflags.nzcv |= (X))
 #define SET_CZNV(X)		(regflags.nzcv = (X))
 
-#define COPY_CARRY()	(regflags.x = regflags.nzcv >> (FLAGBIT_C - FLAGBIT_X))
+#define COPY_CARRY()	(regflags.x = regflags.nzcv & FLAGVAL_C)
 
 extern struct flag_struct regflags __asm__ ("regflags");
 
@@ -781,7 +781,7 @@ struct flag_struct {
 #define IOR_CZNV(X)		(regflags.nzcv |= (X))
 #define SET_CZNV(X)		(regflags.nzcv = (X))
 
-#define COPY_CARRY()	(regflags.x = regflags.nzcv >> (FLAGBIT_C - FLAGBIT_X))
+#define COPY_CARRY()	(regflags.x = regflags.nzcv & FLAGVAL_C)
 
 extern struct flag_struct regflags __asm__ ("regflags");
 
