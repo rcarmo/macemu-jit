@@ -7,7 +7,7 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **13 bugs** that prevented or destabilized L2 boot, bringing 9 of 15 opcode families to fully working native codegen. The remaining all-native failure has been narrowed substantially: it is **not** explained by the original byte-order bugs, not by verified per-instruction semantics, and not solely by masked interrupt/tick timing. The unresolved piece now appears to live in fully-native block execution/dispatch/cache behavior.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **14 bugs** that prevented or destabilized L2 boot, bringing 9 of 15 opcode families to fully working native codegen. The remaining all-native failure has been narrowed substantially: it is no longer explained by the original byte-order bugs, by the first masked-IRQ/tick timing issues, or by the first native BTST/MOVEA divergence. The unresolved piece now sits deeper in the transformed helper path that feeds the `0x040b34dc` copy/compare loop.
 
 ### Hardware
 
@@ -192,6 +192,24 @@ The ARM64 JIT inherited code from the x86 backend where `HAVE_GET_WORD_UNSWAPPED
 
 **Fix**: All mid-block exits now charge `scaled_cycles((i + 1) * 4 * CYCLE_UNIT)`, i.e. only the retired instruction prefix.
 
+### Bug 14: Legacy `adc/sbb` Helpers Used FLAGX Instead of Carry (2026-04-05)
+
+**Symptom**: The first hard all-native semantic divergence appeared in the ROM table-walk loop at `0x0400091e` / `0x04000922`, involving:
+
+- `MOVEA.W (A2)+,A3`
+- `BTST.L D3,D0`
+
+The all-native run took the wrong path through the table while the gated run took the correct path.
+
+**Root cause**: The ARM64 legacy compat layer incorrectly mapped x86-style helper names:
+
+- `adc_* -> ADDX_*`
+- `sbb_* -> SUBX_*`
+
+That is wrong. The generated JIT uses legacy `adc/sbb` both for true carry/borrow chains and for bit-test idioms like `bt_l_rr(...); sbb_l(s,s);`. These helpers must consume the **native carry flag**, not the m68k X flag (`FLAGX`). Using ADDX/SUBX silently substituted X-flag semantics where x86 carry semantics were required.
+
+**Fix**: Replaced the aliases with real ARM64 carry-based implementations in `compemu_legacy_arm64_compat.cpp` using `ADCS` / `SBCS`, including correct handling of the JIT's `flags_carry_inverted` convention.
+
 ## Block-Level Trace Analysis
 
 The comprehensive block-level trace comparison was the key diagnostic that identified bugs 11 and the remaining memory divergence. The technique:
@@ -201,26 +219,29 @@ The comprehensive block-level trace comparison was the key diagnostic that ident
 3. **Sequence alignment**: Match traces by PC value, skipping block-boundary differences
 4. **First-divergence detection**: Find the earliest point where registers differ at matching PCs
 
-### Key Findings: Semantics Verified, Structural Failure Remains
+### Key Findings: Semantics Verified, Then Deeper Semantic Bugs Found
 
-The trace and verification work now shows two things simultaneously:
+The trace and verification work now shows a layered picture:
 
-- All 16 registers + NZCV + X match for hundreds of aligned trace points across good-vs-all-native comparisons
-- L1-vs-L2 register comparison found **zero divergences** across 2000 trace samples
+- All 16 registers + NZCV + X matched for hundreds of aligned trace points across earlier good-vs-all-native comparisons
+- L1-vs-L2 register comparison found **zero divergences** across 2000 trace samples for the instruction subsets instrumented
 - Family-d runtime tracing and memory-write verification found **zero mismatches** in compiled register/flag results and guest memory writes for the instructions instrumented
-- A real low-memory content divergence still shows up later in the boot path, but it is no longer well-explained by a simple single-instruction semantic bug
+- Despite that, a real semantic divergence was later found in the early ROM table-walk loop at `0x0400091e` / `0x04000922`, and was fixed by bug 14 (`adc/sbb` carry semantics)
+- After bug 14, the all-native run gets further, and the next first matched-PC divergence moves deeper into the transformed helper path feeding `0x040b34dc`
 
-In other words: the earlier byte-order / flag / handler bugs were real and are fixed, but the remaining failure mode behaves like a **structural all-native execution problem** rather than a straightforward per-opcode arithmetic or addressing bug.
+So the remaining issue is no longer the original “everything is structurally wrong” hypothesis. At least one more genuine semantic bug existed after the first 13 fixes, and the next failure now appears to be in a narrower transformed-helper region rather than in generic interrupt timing.
 
 ### Current Working Hypothesis
 
-The remaining all-native failure likely involves one or more of:
+The current hottest area is the transformed helper path around `0x040b3566..0x040b3636`, which feeds the later divergence at `0x040b34dc`. That region includes byte-oriented transforms and `ADDX.B` operations (`0x040b3622`, `0x040b3624`) and appears to participate in producing the wrong final byte pattern before the `MOVE.L (A3)+,D0 / SUB.L (A3)+,D0` check at `0x040b34dc`.
 
-- direct block chaining / next-handler selection
-- cache-tag or checksum/invalidation behavior that only appears in the fully-native graph
-- a block-layout-dependent control-flow issue that does not show up in isolated per-instruction verification
+Potential remaining causes now include:
 
-The earlier `ADDA.L (d16,A3),A3` suspicion remains a useful breadcrumb, but is no longer treated as a proven root cause.
+- another carry/X/flag interaction inside the transformed helper loop
+- a semantic bug in the transformed byte/rotate/addx path
+- less likely, a deeper block-management issue that only manifests after the bug-14 fix lets execution reach this later region
+
+The earlier `ADDA.L (d16,A3),A3` suspicion remains historical context, but is no longer the primary lead.
 
 ## Structural Changes
 
@@ -353,18 +374,19 @@ With the 9 working opcode families (4,6,7,8,9,a,b,c,e) compiling natively:
 The 6 remaining families (0,1,2,3,5,d) still prevent a fully-native boot, but the diagnosis is now narrower than “memory divergence from a bad instruction.” Latest results:
 
 - Good gated config (`B2_JIT_BARRIER_FAMILIES="0,1,2,3,5,d,f"`) still reaches healthy boot progress: `DiskStatus=42`, `SCSIGet=14`
-- All-native managed-IRQ config still stalls very early with no disk progress: `DiskStatus=0`, `SCSIGet=0`, after only ~174 compiled L2 blocks
-- Experimental synchronous ticks (`B2_JIT_SYNC_TICKS=1`) do **not** resolve the stall; the all-native run still stops around ~181 compiled L2 blocks
-- Fixing masked IRQ exits (bug 12) and exact partial-exit accounting (bug 13) was necessary cleanup, but did **not** restore all-native boot
+- After bug 14, the all-native managed-IRQ config gets measurably further: from ~174 compiled L2 blocks to ~189 compiled L2 blocks in the same headless test window
+- The early `0x0400091e / 0x04000922` divergence is gone after the legacy `adc/sbb` carry-semantics fix
+- Experimental synchronous ticks (`B2_JIT_SYNC_TICKS=1`) still do **not** resolve the remaining stall
+- The next first matched-PC divergence is now later at `0x040b34dc`, where the good run has `D1=D2=0x4c` and the all-native run still produces a different transformed value
 
-This strongly suggests the remaining problem is inside the fully-native block graph itself: dispatch, chaining, cache tags, checksum/invalidation, or some other structural behavior that only appears when the last 6 families are allowed to participate natively.
+This means the bringup is now in a deeper phase: one real semantic bug has been removed, and the next remaining bug is in the helper/transform path that prepares the data checked at `0x040b34dc`.
 
 ### Diagnosis Path Forward
 
-1. **Instrument direct block chaining**: Log `get_handler()` / `cache_tags` targets around the first all-native stall (~L2 block 174)
-2. **Compare block-manager state**: Diff `blockinfo`, checksum state, and cache-tag ownership between good and all-native runs
-3. **Capture first divergent native transition**: Record block entry PC, chosen successor handler, and resolved next PC for the earliest all-native-only control-flow split
-4. **Only then revisit specific opcode families**: Treat individual family handlers as suspects only if the block-management layer checks out
+1. **Trace the transformed helper path** around `0x040b3566..0x040b3636`, especially the byte-oriented loop using `ADDX.B`
+2. **Compare helper outputs at `0x040b34dc`** between good and all-native runs to identify the first wrong transformed byte/word result
+3. **Test targeted optlev1 barriers inside the helper** to isolate which transformed operation changes the final `D1/D2` pair
+4. **If helper semantics check out, return to deeper structure**: direct chaining, cache tags, or checksum/invalidation beyond this point
 
 ## Build Instructions
 
@@ -394,6 +416,7 @@ B2_JIT_MANAGED_IRQ=1 ./BasiliskII --config /path/to/prefs
 ## Appendix: Commit History
 
 ```
+144e8a4d aarch64 jit: implement legacy adc/sbb with carry semantics
 defad98a aarch64 jit: gate masked IRQ exits and charge partial exits exactly
 63341c97 aarch64 jit: fix COPY_CARRY to mask carry bit only (bug 11)
 b81dae11 aarch64 jit: fix FLAGX format conversion at interpreter/JIT boundary
