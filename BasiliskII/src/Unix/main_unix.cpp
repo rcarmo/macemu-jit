@@ -1905,3 +1905,8 @@ bool ChoiceAlert(const char *text, const char *pos, const char *neg)
 	printf(GetString(STR_SHELL_WARNING_PREFIX), text);
 	return false;	//!!
 }
+
+void jit_one_tick(void)
+{
+    one_tick();
+}

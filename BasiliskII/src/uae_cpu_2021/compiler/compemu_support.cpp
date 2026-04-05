@@ -95,30 +95,42 @@ static bool ensure_aarch64_jit_runtime_ready(void)
 	return pushall_call_handler != nullptr;
 }
 
+extern void jit_one_tick(void);
+
 void m68k_do_compile_execute(void)
 {
 	if (!ensure_aarch64_jit_runtime_ready())
 		jit_abort("ARM64 JIT dispatcher stubs were not initialized before compiled execution");
 	static unsigned long _dc = 0;
+#if defined(CPU_AARCH64)
+	extern bool tick_inhibit;
+	/* Synchronous tick model: inhibit the async tick thread and drive
+	   one_tick() from this dispatch loop. This makes interrupt delivery
+	   deterministic based on block execution count rather than wall-clock. */
+	static bool use_sync_ticks = false;
+	static bool sync_ticks_init = false;
+	if (!sync_ticks_init) {
+		use_sync_ticks = getenv("B2_JIT_SYNC_TICKS") && getenv("B2_JIT_SYNC_TICKS")[0] == '1';
+		if (use_sync_ticks)
+			fprintf(stderr, "JIT: synchronous tick model enabled\n");
+		sync_ticks_init = true;
+	}
+	unsigned long tick_counter = 0;
+	const unsigned long tick_interval = 8000; /* ~60Hz at typical block dispatch rate */
+#endif
 	for (;;) {
+#if defined(CPU_AARCH64)
+		if (use_sync_ticks)
+			tick_inhibit = true;
+#endif
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
 #if defined(CPU_AARCH64)
-		/* Memory dump at byte-copy loop boundary for divergence analysis */
-		{
-			static unsigned long memdump_count = 0;
-			uae_u32 pc = m68k_getpc();
-			if (memdump_count < 50 &&
-			    (pc == 0x040b34dc || pc == 0x040b34cc ||
-			     pc == 0x040b34ba || pc == 0x0400c6b2 ||
-			     pc == 0x0400c5b4 || pc == 0x0400c5d8 ||
-			     pc == 0x0404b0c0 || pc == 0x0404b0c4 || pc == 0x0404b0c8 || pc == 0x0400ca10 || pc == 0x0400ca14 || pc == 0x0400ca16)) {
-				fprintf(stderr, "MEMDUMP[%lu] pc=%08x d0=%08x d1=%08x d2=%08x d3=%08x d5=%08x a0=%08x a3=%08x mem@1e0=",
-					memdump_count++, pc, regs.regs[0], regs.regs[1], regs.regs[2],
-					regs.regs[3], regs.regs[5], regs.regs[8], regs.regs[11]);
-				for (int b = 0; b < 16; b++)
-					fprintf(stderr, "%02x", (unsigned)get_byte(0x1e0 + b));
-				fprintf(stderr, "\n");
+		if (use_sync_ticks) {
+			tick_inhibit = false;
+			if (++tick_counter >= tick_interval) {
+				tick_counter = 0;
+				jit_one_tick();
 			}
 		}
 #endif
