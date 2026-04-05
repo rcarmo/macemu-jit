@@ -111,7 +111,7 @@ static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
    32-bit LDR/STR and checks bit 31 for sign. With a uint16, the high 16
    bits are garbage from adjacent memory, making the countdown sign check
    unpredictable. Use a dedicated int32 variable instead. */
-int32 jit_countdown = 100000;
+int32 jit_countdown = 10000;
 #define countdown jit_countdown
 
 #if defined(CPU_AARCH64)
@@ -4761,7 +4761,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     /* Dump first 3 blocks' native code to file for disassembly */
                     {
                         static int dump_count = 0;
-                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0xd280 || opcode == 0xd241)) {
+                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0x31c0 || opcode == 0x11df || opcode == 0x1203 || opcode == 0x3000)) {
                             char fname[256];
                             snprintf(fname, sizeof(fname), "/workspace/tmp/jitdump/block%d_op%04x.bin", dump_count, opcode);
                             FILE *f = fopen(fname, "wb");

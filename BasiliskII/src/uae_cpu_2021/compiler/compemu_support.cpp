@@ -126,12 +126,18 @@ void m68k_do_compile_execute(void)
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
 #if defined(CPU_AARCH64)
+		if ((_dc % 1000000) == 0) {
+			fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a7=%08x spc=%08x ti=%d\n",
+				_dc, m68k_getpc(), regs.regs[0], regs.regs[15], regs.spcflags, (int)tick_inhibit);
+		}
+#endif
+#if defined(CPU_AARCH64)
 		if (use_sync_ticks) {
 			tick_inhibit = false;
 			/* Fire one_tick when countdown forced return to C */
 			extern int32 jit_countdown;
 			if (jit_countdown < 0) {
-				jit_countdown = 100000;
+				jit_countdown = 10000;
 				jit_one_tick();
 			}
 		}
@@ -150,7 +156,7 @@ void m68k_do_compile_execute(void)
 		   dispatches before the next forced return. */
 		extern int32 jit_countdown;
 		if (jit_countdown < 0)
-			jit_countdown = 100000;
+			jit_countdown = 10000;
 #endif
 	}
 }
@@ -4838,7 +4844,7 @@ void compiler_dumpstate(void)
 	jit_log("### Host addresses");
 	jit_log("MEM_BASE    : %lx", (unsigned long)MEMBaseDiff);
 	jit_log("PC_P        : %p", &regs.pc_p);
-	jit_log("SPCFLAGS    : %p", &regs.spcflags);
+	jit_log("SPCFLAGS    : %p", &regs.spcflags, (int)tick_inhibit);
 	jit_log("D0-D7       : %p-%p", &regs.regs[0], &regs.regs[7]);
 	jit_log("A0-A7       : %p-%p", &regs.regs[8], &regs.regs[15]);
 	jit_log(" ");
