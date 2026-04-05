@@ -581,7 +581,7 @@ void execute_normal(void)
 			   in cpu_do_check_ticks causes non-deterministic timing
 			   that varies with block structure, making the boot
 			   sensitive to which families compile natively. */
-			// cpu_check_ticks();
+			cpu_check_ticks();
 			total_cycles += 4 * CYCLE_UNIT;
 			int maxrun_limit = MAXRUN;
 			{

@@ -507,6 +507,7 @@ extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode);
 static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
 extern "C" void jit_watch_mem(uae_u32 pc, uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
+extern "C" void jit_mem_save_pre(uae_u32 pc, uae_u32 opcode);
 
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
 {
@@ -558,6 +559,17 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 		return true;
 	if (op == 0x44df || op == 0x44fc) /* MOVE (A7)+,CCR / MOVE #imm,CCR */
 		return true;
+
+	/* MOVE.B/MOVE.W with memory destination: force through interpreter.
+	   The register-only variants (dst mode 000) compile natively. */
+	if (getenv("B2_JIT_BARRIER_MOVE_MEM") && getenv("B2_JIT_BARRIER_MOVE_MEM")[0] == '1') {
+		uae_u16 fam = (op >> 12) & 0xf;
+		if (fam == 1 || fam == 2 || fam == 3) { /* MOVE.B, MOVE.L, MOVE.W */
+			uae_u16 dst_mode = (op >> 6) & 7;
+			if (dst_mode != 0 && dst_mode != 1) /* memory destination */
+				return true;
+		}
+	}
 
 	/* Env-configurable family barrier for L2 codegen debugging.
 	   B2_JIT_BARRIER_FAMILIES="0,1,2,3" forces those top-nibble families
@@ -4732,11 +4744,32 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(CPU_AARCH64)
                     uae_u8* _before = get_target();
 #endif
+#if defined(CPU_AARCH64)
+                    /* Memory verification: save pre-state before compiled handler */
+                    if ((((opcode >> 12) & 0xf) == 0x1 || ((opcode >> 12) & 0xf) == 0x3) && getenv("B2_JIT_WATCH_MEM")) {
+                        uae_u32 dst_mode_pre = (opcode >> 6) & 7;
+                        if (dst_mode_pre != 0 && dst_mode_pre != 1) {
+                            uae_u32 pc_val_pre = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
+                            flush(1);
+                            compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
+                            compemu_raw_mov_l_ri(REG_PAR1, pc_val_pre);
+                            compemu_raw_mov_l_ri(REG_PAR2, opcode);
+                            compemu_raw_call((uintptr)jit_mem_save_pre);
+                            comp_pc_p = (uae_u8*)pc_hist[i].location;
+                            init_comp();
+                            LOAD_U64(REG_WORK3, (uintptr)&(regflags.x));
+                            LDR_wXi(REG_WORK1, REG_WORK3, 0);
+                            UBFX_xxii(REG_WORK1, REG_WORK1, 29, 1);
+                            STR_wXi(REG_WORK1, REG_WORK3, 0);
+                            was_comp = 1;
+                        }
+                    }
+#endif
                     comptbl[cft_map(opcode)](opcode);
 #if defined(CPU_AARCH64)
                     /* Trace compiled family-d instructions at runtime */
                     if ((((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) ||
-                        ((((opcode >> 12) & 0xf) == 0x1 || ((opcode >> 12) & 0xf) == 0x3) && getenv("B2_JIT_WATCH_MEM"))) {
+                        ((((opcode >> 12) & 0xf) == 0x1 || ((opcode >> 12) & 0xf) == 0x3) && getenv("B2_JIT_WATCH_MEM") && ((opcode >> 6) & 7) > 1)) {
                         uae_u32 pc_val = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
                         /* Save all caller-saved regs around the trace call */
                         flush(1);
