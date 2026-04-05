@@ -103,6 +103,20 @@ void m68k_do_compile_execute(void)
 	for (;;) {
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
+#if defined(CPU_AARCH64)
+		/* Memory dump at byte-copy loop boundary for divergence analysis */
+		{
+			static unsigned long memdump_count = 0;
+			uae_u32 pc = m68k_getpc();
+			if ((pc == 0x040b34dc || pc == 0x040b34cc) && memdump_count < 20) {
+				fprintf(stderr, "MEMDUMP[%lu] pc=%08x d1=%08x d5=%08x a0=%08x mem@1e0=",
+					memdump_count++, pc, regs.regs[1], regs.regs[5], regs.regs[8]);
+				for (int b = 0; b < 16; b++)
+					fprintf(stderr, "%02x", (unsigned)get_byte(0x1e0 + b));
+				fprintf(stderr, "\n");
+			}
+		}
+#endif
 		if (0) {
 			fprintf(stderr, "D %lu %08x", _dc, (unsigned)m68k_getpc()); if (_dc >= 11710 && _dc <= 11720) { MakeSR(); fprintf(stderr, " sr=%04x d0=%08x d1=%08x a3=%08x", (unsigned)regs.sr, (unsigned)m68k_dreg(regs,0), (unsigned)m68k_dreg(regs,1), (unsigned)m68k_areg(regs,3)); } fprintf(stderr, "\n");
 		}
@@ -5513,6 +5527,19 @@ void exec_nostats(void)
 		uae_u32 opcode = GET_OPCODE;
 #if FLIGHT_RECORDER
 		m68k_record_step(m68k_getpc(), cft_map(opcode));
+#endif
+#if defined(CPU_AARCH64)
+		/* Targeted trace for byte-copy loop divergence analysis */
+		{
+			static unsigned long loop_trace_count = 0;
+			uae_u32 pc = m68k_getpc();
+			if (pc >= 0x040b34cc && pc <= 0x040b34dc && loop_trace_count < 200) {
+				fprintf(stderr, "LOOPTRACE %lu pc=%08x op=%04x d1=%08x d5=%08x a0=%08x nzcv=%08x x=%08x\n",
+					loop_trace_count++, pc, opcode,
+					regs.regs[1], regs.regs[5], regs.regs[8],
+					regflags.nzcv, regflags.x);
+			}
+		}
 #endif
 		(*cpufunctbl[opcode])(opcode);
 		cpu_check_ticks();

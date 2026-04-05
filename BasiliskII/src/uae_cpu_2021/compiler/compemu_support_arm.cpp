@@ -4736,7 +4736,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     /* Dump first 3 blocks' native code to file for disassembly */
                     {
                         static int dump_count = 0;
-                        if (dump_count < 3 && getenv("B2_JIT_DUMP") && (_after - _before) > 0) {
+                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0xd280 || opcode == 0xd241)) {
                             char fname[256];
                             snprintf(fname, sizeof(fname), "/workspace/tmp/jitdump/block%d_op%04x.bin", dump_count, opcode);
                             FILE *f = fopen(fname, "wb");
