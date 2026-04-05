@@ -128,8 +128,10 @@ void m68k_do_compile_execute(void)
 #if defined(CPU_AARCH64)
 		if (use_sync_ticks) {
 			tick_inhibit = false;
-			if (++tick_counter >= tick_interval) {
-				tick_counter = 0;
+			/* Fire one_tick when countdown forced return to C */
+			extern int32 jit_countdown;
+			if (jit_countdown < 0) {
+				jit_countdown = 100000;
 				jit_one_tick();
 			}
 		}
@@ -141,6 +143,15 @@ void m68k_do_compile_execute(void)
 			if (m68k_do_specialties())
 				return;
 		}
+#if defined(CPU_AARCH64)
+		/* Reset JIT countdown after returning to C dispatch.
+		   The endblock code decrements jit_countdown and returns here
+		   when it goes negative. Reset to allow ~1000 more block
+		   dispatches before the next forced return. */
+		extern int32 jit_countdown;
+		if (jit_countdown < 0)
+			jit_countdown = 100000;
+#endif
 	}
 }
 

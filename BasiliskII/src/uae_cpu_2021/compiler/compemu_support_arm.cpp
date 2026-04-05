@@ -107,7 +107,12 @@ static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
 
 #include "../compemu_prefs.cpp"
 
-#define countdown emulated_ticks
+/* BUG 13 fix: emulated_ticks is uint16 but the JIT's endblock code uses
+   32-bit LDR/STR and checks bit 31 for sign. With a uint16, the high 16
+   bits are garbage from adjacent memory, making the countdown sign check
+   unpredictable. Use a dedicated int32 variable instead. */
+int32 jit_countdown = 100000;
+#define countdown jit_countdown
 
 #if defined(CPU_AARCH64)
 #include <signal.h>
