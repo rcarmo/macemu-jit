@@ -7,7 +7,7 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **14 bugs** that prevented or destabilized L2 boot, bringing 9 of 15 opcode families to fully working native codegen. The remaining all-native failure has been narrowed substantially: it is no longer explained by the original byte-order bugs, by the first masked-IRQ/tick timing issues, or by the first native BTST/MOVEA divergence. The unresolved piece now sits deeper in the transformed helper path that feeds the `0x040b34dc` copy/compare loop.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **15 bugs** that prevented or destabilized L2 boot, bringing 9 of 15 opcode families to fully working native codegen. The remaining all-native failure has been narrowed substantially: it is no longer explained by the original byte-order bugs, by the first masked-IRQ/tick timing issues, by the first native BTST/MOVEA divergence, or by the FLAGX-in-memory normalization bug. The unresolved piece still sits deeper in the transformed helper path that feeds the `0x040b34dc` copy/compare loop.
 
 ### Hardware
 
@@ -210,6 +210,14 @@ That is wrong. The generated JIT uses legacy `adc/sbb` both for true carry/borro
 
 **Fix**: Replaced the aliases with real ARM64 carry-based implementations in `compemu_legacy_arm64_compat.cpp` using `ADCS` / `SBCS`, including correct handling of the JIT's `flags_carry_inverted` convention.
 
+### Bug 15: FLAGX Memory Normalization Corrupted Interpreter Boundaries (2026-04-05)
+
+**Symptom**: After bug 14, targeted runtime verification of the transform helper block at `0x040b3566` showed that the compiled/native result matched the interpreter for registers and flags, but `regflags.x` could still be left in raw JIT `0/1` format in memory instead of the interpreter's bit-29 format.
+
+**Root cause**: At compiled-section entry, the ARM64 bringup code normalized `regflags.x` in memory from interpreter format (bit 29) to JIT format (`0/1`). If a compiled block subsequently **read** X but never dirtied/wrote it back, the block could exit to interpreter/C code with `regflags.x` still in JIT format. Later interpreter/helper code that expected bit-29 X then consumed the wrong value.
+
+**Fix**: Removed the eager in-memory normalization of `regflags.x` and instead taught register loads of `FLAGX` to decode bit 29 into JIT `0/1` on load (`do_load_reg()` special case). This keeps memory permanently in interpreter format and only uses JIT format in native registers.
+
 ## Block-Level Trace Analysis
 
 The comprehensive block-level trace comparison was the key diagnostic that identified bugs 11 and the remaining memory divergence. The technique:
@@ -304,7 +312,8 @@ Added `--enable-aarch64-jit-experimental` to the autoconf build system, enabling
 | `B2_JIT_NO_FLAG_OPT=1` | Disable flag liveness optimization |
 | `B2_JIT_FLUSH_BETWEEN=1` | Reset register allocator between compiled instructions |
 | `B2_JIT_PCTRACE=N` | Log first N block entry PCs with register state |
-| `B2_JIT_VERIFY_LIMIT=N` | Per-instruction runtime verification (compare compiled vs interpreter) |
+| `B2_JIT_VERIFY_LIMIT=N` | Historical/legacy per-instruction verification knob |
+| `B2_JIT_VERIFY_PCS=pc[-pc],...` | Targeted native-vs-interpreter verification for selected compiled instruction PCs |
 | `B2_JIT_SYNC_TICKS=1` | Experimental synchronous tick model driven from JIT dispatch returns |
 | `B2_JIT_L2_ONLY=1` | Force all blocks to optlev=2 |
 | `B2_JIT_MAX_OPTLEV=N` | Cap maximum optimization level |
@@ -374,18 +383,19 @@ With the 9 working opcode families (4,6,7,8,9,a,b,c,e) compiling natively:
 The 6 remaining families (0,1,2,3,5,d) still prevent a fully-native boot, but the diagnosis is now narrower than “memory divergence from a bad instruction.” Latest results:
 
 - Good gated config (`B2_JIT_BARRIER_FAMILIES="0,1,2,3,5,d,f"`) still reaches healthy boot progress: `DiskStatus=42`, `SCSIGet=14`
-- After bug 14, the all-native managed-IRQ config gets measurably further: from ~174 compiled L2 blocks to ~189 compiled L2 blocks in the same headless test window
+- After bug 14, the all-native managed-IRQ config got measurably further: from ~174 compiled L2 blocks to ~189 compiled L2 blocks in the same headless test window
 - The early `0x0400091e / 0x04000922` divergence is gone after the legacy `adc/sbb` carry-semantics fix
+- Bug 15 fixed another real boundary issue: `FLAGX` now stays in interpreter format in memory, and targeted verification of the compiled block at `0x040b3566` no longer shows `X`-format mismatches
 - Experimental synchronous ticks (`B2_JIT_SYNC_TICKS=1`) still do **not** resolve the remaining stall
-- The next first matched-PC divergence is now later at `0x040b34dc`, where the good run has `D1=D2=0x4c` and the all-native run still produces a different transformed value
+- The next first matched-PC divergence is still later at `0x040b34dc`, but the transformed value changed again after bug 15, which confirms the remaining issue is still inside the same helper/transform family of code
 
-This means the bringup is now in a deeper phase: one real semantic bug has been removed, and the next remaining bug is in the helper/transform path that prepares the data checked at `0x040b34dc`.
+This means the bringup is now in a deeper phase: two additional real semantic/boundary bugs have been removed, and the next remaining bug is in the helper/transform path that prepares the data checked at `0x040b34dc`.
 
 ### Diagnosis Path Forward
 
-1. **Trace the transformed helper path** around `0x040b3566..0x040b3636`, especially the byte-oriented loop using `ADDX.B`
+1. **Use targeted verification (`B2_JIT_VERIFY_PCS`)** on the remaining compiled helper-entry blocks feeding the transform path (for example `0x0404b0be..0x0404b0cc` and nearby dispatch/setup blocks)
 2. **Compare helper outputs at `0x040b34dc`** between good and all-native runs to identify the first wrong transformed byte/word result
-3. **Test targeted optlev1 barriers inside the helper** to isolate which transformed operation changes the final `D1/D2` pair
+3. **Test targeted optlev1 barriers inside the helper/dispatch path** to isolate which remaining compiled operation changes the final `D1/D2` pair
 4. **If helper semantics check out, return to deeper structure**: direct chaining, cache tags, or checksum/invalidation beyond this point
 
 ## Build Instructions
@@ -416,6 +426,7 @@ B2_JIT_MANAGED_IRQ=1 ./BasiliskII --config /path/to/prefs
 ## Appendix: Commit History
 
 ```
+9acb53b0 aarch64 jit: keep FLAGX in interpreter format in memory
 144e8a4d aarch64 jit: implement legacy adc/sbb with carry semantics
 defad98a aarch64 jit: gate masked IRQ exits and charge partial exits exactly
 63341c97 aarch64 jit: fix COPY_CARRY to mask carry bit only (bug 11)
