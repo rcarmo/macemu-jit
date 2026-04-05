@@ -7,7 +7,7 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **10 bugs** that prevented L2 from booting Mac OS, bringing 9 of 15 opcode families to fully working native codegen.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **11 bugs** that prevented L2 from booting Mac OS, bringing 9 of 15 opcode families to fully working native codegen. Block-level trace analysis has identified the root cause for the remaining 6 families.
 
 ### Hardware
 
@@ -168,6 +168,36 @@ The ARM64 JIT inherited code from the x86 backend where `HAVE_GET_WORD_UNSWAPPED
 
 **Fix**: Removed `legacy_copy_carry_to_flagx()` from `adc_b/w/l` wrappers. The ADDX handler correctly reads X from `regflags.x` via `readreg(FLAGX)`.
 
+### Bug 11: COPY_CARRY Stores Garbage in X Flag (2026-04-05)
+
+**Symptom**: Block-level trace comparison showed identical register inputs at a byte-copy loop entry, but different D1/D2 outputs. The X flag contained values like `0x80000000` (N bit) or `0x90000000` (N+V bits) instead of valid `0` or `0x20000000` (carry bit).
+
+**Root cause**: `COPY_CARRY()` was defined as `regflags.x = regflags.nzcv >> (FLAGBIT_C - FLAGBIT_X)`. Since `FLAGBIT_C == FLAGBIT_X == 29`, the shift was 0, copying the **entire** NZCV value (including N, Z, V garbage) into `regflags.x`. While the interpreter's `GET_XFLG()` correctly extracted only bit 29, the JIT's `readreg(FLAGX)` read the raw value and used it as an arithmetic addend in ADDX/SUBX.
+
+**Fix**: Changed `COPY_CARRY()` to `regflags.x = regflags.nzcv & FLAGVAL_C`, masking to only the carry bit (bit 29). Also added UBFX normalization at compiled section entry (`init_comp`) to convert from bit-29 format to the JIT's 0/1 format, and LSL conversion in `tomem()`/`writeback_const()` to convert back.
+
+## Block-Level Trace Analysis
+
+The comprehensive block-level trace comparison was the key diagnostic that identified bugs 11 and the remaining memory divergence. The technique:
+
+1. **Full register trace**: Log all 16 registers + SR + NZCV + X at every `execute_normal()` entry via `B2_JIT_PCTRACE=N`
+2. **Dual-trace comparison**: Run identical configs except for the family under test
+3. **Sequence alignment**: Match traces by PC value, skipping block-boundary differences
+4. **First-divergence detection**: Find the earliest point where registers differ at matching PCs
+
+### Key Finding: Memory Content Divergence
+
+With all 11 bugs fixed, the trace analysis shows:
+
+- All 16 registers + NZCV + X match **perfectly** at 274 consecutive matched PCs
+- At PC `040b34dc` (a byte-copy loop exit), D1/D2 diverge despite **identical** inputs at the loop entry (`040b34cc`)
+- The loop code runs through the **interpreter** (not compiled) in both configurations
+- The divergence can only come from **different guest memory content** — an earlier compiled instruction wrote a wrong value to the Mac OS low-memory globals area
+
+### Suspected Root Cause
+
+The `ADDA.L (d16,A3),A3` instruction (opcode `0xd7eb`) from family d is the primary suspect. Early in the trace, the block containing this instruction showed a **4-byte PC offset** at block exit (`0x0404b0c8` instead of the expected `0x0404b0c4`), suggesting the compiled handler consumed 10 bytes of instruction stream instead of 6. This could indicate a memory write to a wrong address, corrupting the low-memory area that the byte-copy loop later reads.
+
 ## Structural Changes
 
 ### Per-Instruction Interpreter Barriers
@@ -246,12 +276,12 @@ The `B2_JIT_BARRIER_FAMILIES` variable allows testing each opcode family indepen
 
 | Family | Instructions | Boot Status |
 |--------|-------------|-------------|
-| 0 | ORI/ANDI/SUBI/ADDI/CMPI/BTST/BCHG/BCLR/BSET | ⏳ Timing |
-| 1 | MOVE.B | ⏳ Timing |
-| 2 | MOVE.L | ⏳ Timing |
-| 3 | MOVE.W | ⏳ Timing |
+| 0 | ORI/ANDI/SUBI/ADDI/CMPI/BTST/BCHG/BCLR/BSET | ⏳ Memory divergence |
+| 1 | MOVE.B | ⏳ Memory divergence |
+| 2 | MOVE.L | ⏳ Memory divergence |
+| 3 | MOVE.W | ⏳ Memory divergence |
 | 4 | CLR/NEG/NOT/TST/PEA/LEA/EXT/SWAP/LINK/UNLK | ✅ Boots |
-| 5 | ADDQ/SUBQ/Scc/DBcc | ⏳ Timing |
+| 5 | ADDQ/SUBQ/Scc/DBcc | ⏳ Memory divergence |
 | 6 | Bcc/BRA/BSR | ✅ Boots (barriers) |
 | 7 | MOVEQ | ✅ Boots |
 | 8 | OR/DIV/SBCD | ✅ Boots |
@@ -259,7 +289,7 @@ The `B2_JIT_BARRIER_FAMILIES` variable allows testing each opcode family indepen
 | a | A-line traps | ✅ Boots (barriers) |
 | b | CMP/CMPA/EOR | ✅ Boots |
 | c | AND/MUL/ABCD/EXG | ✅ Boots |
-| d | ADD/ADDA/ADDX | ⏳ Timing |
+| d | ADD/ADDA/ADDX | ⏳ Memory divergence |
 | e | Shifts/Rotates | ✅ Boots |
 
 ### Boot Progress Metrics
@@ -291,19 +321,20 @@ With the 9 working opcode families (4,6,7,8,9,a,b,c,e) compiling natively:
 - VNC remote display functional
 - Managed IRQ delivery stable
 
-### Remaining Issue: Interrupt Timing Sensitivity
+### Remaining Issue: Guest Memory Divergence
 
-The 6 remaining families produce **correct computation** (verified by PC trace comparison showing identical register values at matching guest PCs). The boot failure is caused by **different interrupt delivery timing**:
+The 6 remaining families (0,1,2,3,5,d) cause boot failure due to **guest memory content divergence**, not a register or flag computation error. Block-level trace analysis with all 11 bugs fixed confirms:
 
-- Different block boundaries → different spcflags check points → different interrupt windows
-- A7 (stack pointer) diverges by 24 bytes (6 exception frames) late in boot
-- MAXRUN sweep confirms non-monotonic timing sensitivity: MAXRUN=1,2,3 fail; 5 works; 10 fails; 20+ work
+- **274 consecutive matched PCs** with identical register state (all 16 regs + NZCV + X)
+- First divergence at a **byte-copy loop** where identical register inputs produce different D1/D2 outputs
+- The loop runs through the **interpreter** in both configs — the divergence comes from earlier compiled code that wrote a wrong value to guest memory
+- The `ADDA.L (d16,A3),A3` instruction (opcode `0xd7eb`) is the primary suspect: its compiled block exits at a PC 4 bytes past the expected address, suggesting a memory addressing bug in the handler
 
-This is an interrupt delivery model issue, not a codegen bug. Potential fixes:
+### Diagnosis Path Forward
 
-1. **Synchronize interrupt delivery** at block entry to match all-barrier timing
-2. **Decouple Mac OS boot from interrupt timing** by adjusting the 60Hz tick mechanism
-3. **Add deterministic interrupt scheduling** based on instruction count rather than wall-clock time
+1. **Instrument memory writes**: Add tracing to `writemem_real`/`writemem_special` for writes to the low-memory globals area (`0x000-0x2000`)
+2. **Compare memory snapshots**: Dump guest memory at the byte-copy loop entry point in both configs and diff
+3. **Verify ADDA handler**: Disassemble the native code for `op_d1e8` (ADDA.L with d16 addressing) and verify the address calculation emits correct `comp_get_iword` displacement
 
 ## Build Instructions
 
@@ -333,6 +364,11 @@ B2_JIT_MANAGED_IRQ=1 ./BasiliskII --config /path/to/prefs
 ## Appendix: Commit History
 
 ```
+63341c97 aarch64 jit: fix COPY_CARRY to mask carry bit only (bug 11)
+b81dae11 aarch64 jit: fix FLAGX format conversion at interpreter/JIT boundary
+37ee2faa aarch64 jit: simplify inter-instruction check (remove incorrect tick code)
+d4a4e8a4 aarch64 jit: add deterministic tick counting between compiled instructions
+3936ec36 docs: add comprehensive AArch64 JIT bringup document
 62cbcbea aarch64 jit: lightweight spcflags check between compiled instructions
 a1fe6e01 aarch64 jit: fix X flag bugs (9-10) + DUPLICACTE_CARRY bit-29 format
 6899bef7 aarch64 jit: add inter-instruction spcflags check, barrier families env
