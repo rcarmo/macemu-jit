@@ -162,7 +162,7 @@ void m68k_do_compile_execute(void)
 			/* Fire one_tick when countdown forced return to C */
 			extern int32 jit_countdown;
 			if (jit_countdown < 0) {
-				jit_countdown = 10000;
+				jit_countdown = 16000;
 				jit_one_tick();
 			}
 		}
@@ -181,7 +181,7 @@ void m68k_do_compile_execute(void)
 		   dispatches before the next forced return. */
 		extern int32 jit_countdown;
 		if (jit_countdown < 0)
-			jit_countdown = 10000;
+			jit_countdown = 16000;
 #endif
 	}
 }

@@ -4676,6 +4676,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         trace_flagflow_log("COMPILE_OP", liveflags[i + 1], prop[cft_map(opcode)].use_flags, prop[cft_map(opcode)].set_flags, ((uae_u32)needed_flags << 16) | next_op);
                     }
                 }
+                const int retired_cycles = scaled_cycles((i + 1) * 4 * CYCLE_UNIT);
                 if (!needed_flags && currprefs.compnf) {
 #ifdef NOFLAGS_SUPPORT_GENCOMP
                     cputbl = nfcpufunctbl;
@@ -4795,9 +4796,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(USE_DATA_BUFFER)
                         data_check_end(12, 64);
 #endif
-                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
+                        compemu_raw_maybe_do_nothing(retired_cycles);
                         compemu_raw_mov_l_rm(REG_PC_TMP, (uintptr)&regs.pc_p);
-                        compemu_raw_endblock_pc_inreg(REG_PC_TMP, scaled_cycles(totcycles));
+                        compemu_raw_endblock_pc_inreg(REG_PC_TMP, retired_cycles);
                         forced_interpreter_barrier = true;
                         break;
                     }
@@ -4851,10 +4852,10 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         }
                         /* Sync PC to the NEXT instruction */
                         compemu_raw_set_pc_i((uintptr)pc_hist[i + 1].location);
-                        /* Subtract cycles and exit */
+                        /* Subtract only the cycles retired up to this point. */
                         LOAD_U64(REG_WORK3, (uintptr)&countdown);
                         LDR_wXi(REG_WORK2, REG_WORK3, 0);
-                        LOAD_U32(REG_WORK1, scaled_cycles(totcycles));
+                        LOAD_U32(REG_WORK1, retired_cycles);
                         SUB_www(REG_WORK2, REG_WORK2, REG_WORK1);
                         STR_wXi(REG_WORK2, REG_WORK3, 0);
                         uae_u32* branch_exit = (uae_u32*)get_target();
@@ -4918,9 +4919,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(USE_DATA_BUFFER)
                         data_check_end(12, 64);
 #endif
-                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
+                        compemu_raw_maybe_do_nothing(retired_cycles);
                         compemu_raw_mov_l_rm(REG_PC_TMP, (uintptr)&regs.pc_p);
-                        compemu_raw_endblock_pc_inreg(REG_PC_TMP, scaled_cycles(totcycles));
+                        compemu_raw_endblock_pc_inreg(REG_PC_TMP, retired_cycles);
                         forced_interpreter_barrier = true;
                         break;
                     }
@@ -4932,13 +4933,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(USE_DATA_BUFFER)
                         data_check_end(8, 64);
 #endif
-                        compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
+                        compemu_raw_maybe_do_nothing(retired_cycles);
                     }
                 } else if (may_raise_exception) {
 #if defined(USE_DATA_BUFFER)
                     data_check_end(8, 64);
 #endif
-                    compemu_raw_handle_except(scaled_cycles(totcycles));
+                    compemu_raw_handle_except(retired_cycles);
                     may_raise_exception = false;
                 }
             }

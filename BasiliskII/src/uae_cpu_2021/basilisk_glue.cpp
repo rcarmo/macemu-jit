@@ -192,7 +192,13 @@ void Start680x0(void)
 void TriggerInterrupt(void)
 {
 	idle_resume();
-	SPCFLAGS_SET( SPCFLAG_INT );
+	/* In managed/deferred JIT mode, masked level-1 interrupts must stay
+	   pending without forcing an immediate exit from compiled code.
+	   Otherwise async 60Hz ticks split native blocks at non-architectural
+	   points purely as a function of block shape. Surface SPCFLAG_INT only
+	   when level 1 is actually deliverable. */
+	if (!UseDeferredInterruptModel() || regs.intmask < 1)
+		SPCFLAGS_SET(SPCFLAG_INT);
 	if (UseDeferredInterruptModel() && trace_irqmanaged_env_glue()) {
 		static unsigned long trace_count = 0;
 		if (trace_count < 4000) {

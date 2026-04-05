@@ -666,8 +666,12 @@ void MakeFromSR (void)
 	    }
 	}
 
-    // SPCFLAGS_SET( SPCFLAG_INT );
-    SPCFLAGS_SET( SPCFLAG_INT );
+    /* Re-check pending IRQ work after SR/intmask changes, but in the
+       managed/deferred JIT model only force a specialty pass when a
+       pending level-1 interrupt is actually deliverable. Masked ticks stay
+       in InterruptFlags and no longer split compiled blocks. */
+    if (!UseDeferredInterruptModel() || (InterruptFlags && regs.intmask < 1))
+        SPCFLAGS_SET(SPCFLAG_INT);
     if (regs.t1 || regs.t0)
 	SPCFLAGS_SET( SPCFLAG_TRACE );
     else
