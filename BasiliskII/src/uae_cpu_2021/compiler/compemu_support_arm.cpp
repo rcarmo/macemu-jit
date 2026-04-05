@@ -2069,6 +2069,19 @@ static void tomem(int r)
     int rr = live.state[r].realreg;
 
     if (live.state[r].status == DIRTY) {
+#if defined(CPU_AARCH64)
+        /* Convert FLAGX from JIT 0/1 format to interpreter bit-29 format.
+           The JIT stores X as 0 or 1 (from CSET in DUPLICACTE_CARRY).
+           The interpreter expects X at bit 29 (via COPY_CARRY/GET_XFLG).
+           Use a work register to avoid modifying the live native register
+           (which the hot path of the spcflags check may still need). */
+        if (r == FLAGX) {
+            LSL_wwi(REG_WORK2, rr, 29);
+            compemu_raw_mov_l_mr((uintptr)live.state[r].mem, REG_WORK2);
+            set_status(r, CLEAN);
+            return;
+        }
+#endif
         compemu_raw_mov_l_mr((uintptr)live.state[r].mem, live.state[r].realreg);
         set_status(r, CLEAN);
     }
@@ -2097,6 +2110,12 @@ static inline void writeback_const(int r)
            store path (LOAD_U64 + STR_xXi) instead of compemu_raw_mov_l_mi
            which truncates to 32 bits via its IM32 parameter. */
         compemu_raw_set_pc_i(live.state[r].val);
+#if defined(CPU_AARCH64)
+    } else if (r == FLAGX) {
+        /* Convert from JIT 0/1 to interpreter bit-29 format */
+        uae_u32 val = (live.state[r].val & 1) << 29;
+        compemu_raw_mov_l_mi((uintptr)live.state[r].mem, val);
+#endif
     } else {
         compemu_raw_mov_l_mi((uintptr)live.state[r].mem, live.state[r].val);
     }
@@ -4692,6 +4711,14 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     if (!was_comp) {
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
                         init_comp();
+#if defined(CPU_AARCH64)
+                        /* Normalize FLAGX from interpreter bit-29 format to JIT 0/1.
+                           Done via raw memory ops to avoid allocator side effects. */
+                        LOAD_U64(REG_WORK3, (uintptr)&(regflags.x));
+                        LDR_wXi(REG_WORK1, REG_WORK3, 0);
+                        UBFX_xxii(REG_WORK1, REG_WORK1, 29, 1);
+                        STR_wXi(REG_WORK1, REG_WORK3, 0);
+#endif
                     }
                     was_comp = 1;
 
