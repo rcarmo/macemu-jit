@@ -14,6 +14,7 @@ static inline void legacy_copy_carry_to_flagx(void)
 		CSET_xc(x, NATIVE_CC_CC);
 	else
 		CSET_xc(x, NATIVE_CC_CS);
+	LSL_wwi(x, x, 29);
 	unlock2(x);
 }
 
@@ -552,8 +553,13 @@ void execute_normal(void)
 			}
 			if (pctrace_limit && pctrace_count < pctrace_limit) {
 				uae_u32 pc = m68k_getpc();
-				fprintf(stderr, "PCTRACE %lu %08x d0=%08x a7=%08x\n",
-					pctrace_count++, pc, regs.regs[0], regs.regs[15]);
+				fprintf(stderr, "PCTRACE %lu %08x d0=%08x d1=%08x d2=%08x d3=%08x d4=%08x d5=%08x d6=%08x d7=%08x a0=%08x a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x sr=%04x nzcv=%08x x=%08x\n",
+					pctrace_count++, pc,
+					regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[3],
+					regs.regs[4], regs.regs[5], regs.regs[6], regs.regs[7],
+					regs.regs[8], regs.regs[9], regs.regs[10], regs.regs[11],
+					regs.regs[12], regs.regs[13], regs.regs[14], regs.regs[15],
+					(unsigned)regs.sr, regflags.nzcv, regflags.x);
 			}
 		}
 #endif
