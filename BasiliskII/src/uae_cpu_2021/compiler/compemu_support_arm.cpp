@@ -505,6 +505,7 @@ static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode);
 static void op_move_l_reg_d16an_comp_ff(uae_u32 opcode);
 extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode);
 static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
+extern "C" void jit_watch_mem(uae_u32 pc, uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
@@ -4734,13 +4735,14 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     comptbl[cft_map(opcode)](opcode);
 #if defined(CPU_AARCH64)
                     /* Trace compiled family-d instructions at runtime */
-                    if (((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) {
+                    if ((((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) ||
+                        ((((opcode >> 12) & 0xf) == 0x1 || ((opcode >> 12) & 0xf) == 0x3) && getenv("B2_JIT_WATCH_MEM"))) {
                         uae_u32 pc_val = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
                         /* Save all caller-saved regs around the trace call */
                         flush(1);
                         compemu_raw_mov_l_ri(REG_PAR1, pc_val);
                         compemu_raw_mov_l_ri(REG_PAR2, opcode);
-                        compemu_raw_call((uintptr)jit_trace_add);
+                        compemu_raw_call(getenv("B2_JIT_WATCH_MEM") ? (uintptr)jit_watch_mem : (uintptr)jit_trace_add);
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
                         init_comp();
                         /* Normalize FLAGX after re-init */
@@ -4761,7 +4763,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     /* Dump first 3 blocks' native code to file for disassembly */
                     {
                         static int dump_count = 0;
-                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0x31c0 || opcode == 0x11df || opcode == 0x1203 || opcode == 0x3000)) {
+                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0x11df || opcode == 0x11d8 || opcode == 0x31c0)) {
                             char fname[256];
                             snprintf(fname, sizeof(fname), "/workspace/tmp/jitdump/block%d_op%04x.bin", dump_count, opcode);
                             FILE *f = fopen(fname, "wb");
@@ -4882,7 +4884,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         uae_u32 pc_val = (uae_u32)((uintptr)pc_hist[i].location - (uintptr)ROMBaseHost + ROMBaseMac);
                         compemu_raw_mov_l_ri(REG_PAR1, pc_val);
                         compemu_raw_mov_l_ri(REG_PAR2, opcode);
-                        compemu_raw_call((uintptr)jit_trace_add);
+                        compemu_raw_call(getenv("B2_JIT_WATCH_MEM") ? (uintptr)jit_watch_mem : (uintptr)jit_trace_add);
                     }
 #ifdef PROFILE_UNTRANSLATED_INSNS
                     // raw_cputbl_count[] is indexed with plain opcode (in m68k order)

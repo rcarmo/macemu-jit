@@ -577,7 +577,11 @@ void execute_normal(void)
 			pc_hist[blocklen++].location = (uae_u16 *)regs.pc_p;
 			uae_u32 opcode = GET_OPCODE;
 			(*cpufunctbl[opcode])(opcode);
-			cpu_check_ticks();
+			/* Skip cpu_check_ticks during block tracing. The usleep()
+			   in cpu_do_check_ticks causes non-deterministic timing
+			   that varies with block structure, making the boot
+			   sensitive to which families compile natively. */
+			// cpu_check_ticks();
 			total_cycles += 4 * CYCLE_UNIT;
 			int maxrun_limit = MAXRUN;
 			{

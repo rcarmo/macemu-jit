@@ -130,6 +130,31 @@ void m68k_do_compile_execute(void)
 			fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a7=%08x spc=%08x ti=%d\n",
 				_dc, m68k_getpc(), regs.regs[0], regs.regs[15], regs.spcflags, (int)tick_inhibit);
 		}
+		/* Watchpoint: detect writes to address 0x3214 */
+		{
+			static uae_u8 watched_val = 0;
+			static int watch_logged = 0;
+			uae_u8 cur = get_byte(0x3214);
+			if (cur != watched_val && _dc >= 24095 && watch_logged < 30) {
+				fprintf(stderr, "WATCHPOINT addr=3214 old=%02x new=%02x pc=%08x d0=%08x d1=%08x a0=%08x a7=%08x _dc=%lu\n",
+					watched_val, cur, m68k_getpc(),
+					regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[15], _dc);
+				watched_val = cur;
+				watch_logged++;
+			}
+		}
+		/* Log the first time we enter the memory test loop to see what A0 points to */
+		{
+			static int memtest_logged = 0;
+			uae_u32 pc = m68k_getpc();
+			if ((pc == 0x0400e1b8 || pc == 0x0400e1cc) && memtest_logged < 100) {
+				uae_u32 a0 = regs.regs[8];
+				uae_u32 a1 = regs.regs[9];
+				uae_u32 d1 = regs.regs[1];
+				fprintf(stderr, "MEMTEST[%d] a0=%08x a1=%08x d1=%08x byte_at_a0=%02x\n",
+					memtest_logged++, a0, a1, d1, (unsigned)get_byte(a0));
+			}
+		}
 #endif
 #if defined(CPU_AARCH64)
 		if (use_sync_ticks) {
@@ -5685,6 +5710,21 @@ extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode)
         fprintf(stderr, "JIT_ADD[%lu] pc=%08x op=%04x d0=%08x d1=%08x d2=%08x a3=%08x x=%08x\n",
             tc++, pc, opcode,
             regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[11], regflags.x);
+    }
+}
+#endif
+
+#if defined(CPU_AARCH64)
+extern "C" void jit_watch_mem(uae_u32 pc, uae_u32 opcode)
+{
+    static uae_u8 watched = 0;
+    static int wcount = 0;
+    uae_u8 cur = get_byte(0x3214);
+    if (cur != watched && wcount < 20) {
+        fprintf(stderr, "MEMWATCH pc=%08x op=%04x old=%02x new=%02x d0=%08x d1=%08x a0=%08x a1=%08x\n",
+            pc, opcode, watched, cur, regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[9]);
+        watched = cur;
+        wcount++;
     }
 }
 #endif
