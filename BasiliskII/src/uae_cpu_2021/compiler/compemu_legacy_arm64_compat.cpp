@@ -244,12 +244,93 @@ void test_l_ri(RR4 d, uae_s32 i)
 	flags_carry_inverted = false;
 }
 
-void adc_b(RW1 d, RR1 s) { if (legacy_needflags_enabled()) jff_ADDX_b(d, s); else jnf_ADDX_b(d, s); }
-void adc_w(RW2 d, RR2 s) { if (legacy_needflags_enabled()) jff_ADDX_w(d, s); else jnf_ADDX_w(d, s); }
-void adc_l(RW4 d, RR4 s) { if (legacy_needflags_enabled()) jff_ADDX_l(d, s); else jnf_ADDX_l(d, s); }
-void sbb_b(RW1 d, RR1 s) { if (legacy_needflags_enabled()) jff_SUBX_b(d, s); else jnf_SUBX_b(d, s); }
-void sbb_w(RW2 d, RR2 s) { if (legacy_needflags_enabled()) jff_SUBX_w(d, s); else jnf_SUBX_w(d, s); }
-void sbb_l(RW4 d, RR4 s) { if (legacy_needflags_enabled()) jff_SUBX_l(d, s); else jnf_SUBX_l(d, s); }
+static inline void legacy_fix_inverted_carry(void)
+{
+	if (flags_carry_inverted) {
+		MRS_NZCV_x(REG_WORK4);
+		EOR_xxCflag(REG_WORK4, REG_WORK4);
+		MSR_NZCV_x(REG_WORK4);
+		flags_carry_inverted = false;
+	}
+}
+
+static inline void legacy_invert_carry_in_pstate(void)
+{
+	MRS_NZCV_x(REG_WORK4);
+	EOR_xxCflag(REG_WORK4, REG_WORK4);
+	MSR_NZCV_x(REG_WORK4);
+}
+
+void adc_b(RW1 d, RR1 s)
+{
+	legacy_fix_inverted_carry();
+	INIT_REGS_b(d, s);
+	MOV_xi(REG_WORK1, 0);
+	BFI_xxii(REG_WORK1, s, 24, 8);
+	LSL_wwi(REG_WORK3, d, 24);
+	ADCS_www(REG_WORK1, REG_WORK1, REG_WORK3);
+	BFXIL_xxii(d, REG_WORK1, 24, 8);
+	flags_carry_inverted = false;
+	EXIT_REGS(d, s);
+}
+
+void adc_w(RW2 d, RR2 s)
+{
+	legacy_fix_inverted_carry();
+	INIT_REGS_w(d, s);
+	MOV_xi(REG_WORK1, 0);
+	BFI_xxii(REG_WORK1, s, 16, 16);
+	LSL_wwi(REG_WORK3, d, 16);
+	ADCS_www(REG_WORK1, REG_WORK1, REG_WORK3);
+	BFXIL_xxii(d, REG_WORK1, 16, 16);
+	flags_carry_inverted = false;
+	EXIT_REGS(d, s);
+}
+
+void adc_l(RW4 d, RR4 s)
+{
+	legacy_fix_inverted_carry();
+	INIT_REGS_l(d, s);
+	ADCS_www(d, d, s);
+	flags_carry_inverted = false;
+	EXIT_REGS(d, s);
+}
+
+void sbb_b(RW1 d, RR1 s)
+{
+	legacy_fix_inverted_carry();
+	legacy_invert_carry_in_pstate();
+	INIT_REGS_b(d, s);
+	LSL_wwi(REG_WORK1, d, 24);
+	LSL_wwi(REG_WORK3, s, 24);
+	SBCS_www(REG_WORK1, REG_WORK1, REG_WORK3);
+	BFXIL_xxii(d, REG_WORK1, 24, 8);
+	flags_carry_inverted = true;
+	EXIT_REGS(d, s);
+}
+
+void sbb_w(RW2 d, RR2 s)
+{
+	legacy_fix_inverted_carry();
+	legacy_invert_carry_in_pstate();
+	INIT_REGS_w(d, s);
+	LSL_wwi(REG_WORK1, d, 16);
+	LSL_wwi(REG_WORK3, s, 16);
+	SBCS_www(REG_WORK1, REG_WORK1, REG_WORK3);
+	BFXIL_xxii(d, REG_WORK1, 16, 16);
+	flags_carry_inverted = true;
+	EXIT_REGS(d, s);
+}
+
+void sbb_l(RW4 d, RR4 s)
+{
+	legacy_fix_inverted_carry();
+	legacy_invert_carry_in_pstate();
+	INIT_REGS_l(d, s);
+	SBCS_www(d, d, s);
+	flags_carry_inverted = true;
+	EXIT_REGS(d, s);
+}
 
 static inline void legacy_load_rr4_to_work(int work_reg, RR4 r)
 {
