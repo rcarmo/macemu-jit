@@ -666,11 +666,13 @@ void MakeFromSR (void)
 	    }
 	}
 
-    /* Re-check pending IRQ work after SR/intmask changes, but in the
-       managed/deferred JIT model only force a specialty pass when a
-       pending level-1 interrupt is actually deliverable. Masked ticks stay
-       in InterruptFlags and no longer split compiled blocks. */
-    if (!UseDeferredInterruptModel() || (InterruptFlags && regs.intmask < 1))
+    /* Re-check pending IRQ work after SR/intmask changes.
+       In the managed/deferred JIT model, TriggerInterrupt() suppresses
+       SPCFLAG_INT when intmask >= 1. So when intmask drops back to 0,
+       we must re-arm SPCFLAG_INT if there are still pending interrupts
+       in InterruptFlags. Without this, interrupts that arrived while
+       IPL was raised are silently lost. */
+    if (InterruptFlags && regs.intmask < 1)
         SPCFLAGS_SET(SPCFLAG_INT);
     if (regs.t1 || regs.t0)
 	SPCFLAGS_SET( SPCFLAG_TRACE );
@@ -1732,30 +1734,13 @@ int m68k_do_specialties(void)
 		// give unused time slices back to OS when STOP instruction is executing
 		SleepAndWait();
 		if (SPCFLAGS_TEST( SPCFLAG_INT | SPCFLAG_DOINT )){
-			if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
-				static unsigned long stop_pre_count = 0;
-				if (stop_pre_count < 4000) {
-					MakeSR();
-					fprintf(stderr, "IRQM spec-stop pre %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x\n",
-						++stop_pre_count,
-						(unsigned)m68k_getpc(), (unsigned)regs.sr,
-						(unsigned)regs.intmask, (unsigned)regs.spcflags,
-						(unsigned)InterruptFlags);
-				}
-			}
 			SPCFLAGS_CLEAR( SPCFLAG_INT | SPCFLAG_DOINT );
-			int intr = intlev ();
-			if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
-				static unsigned long stop_post_count = 0;
-				if (stop_post_count < 4000) {
-					MakeSR();
-					fprintf(stderr, "IRQM spec-stop post %lu pc=%08x sr=%04x intmask=%u spc=%08x intr=%d live=%08x\n",
-						++stop_post_count,
-						(unsigned)m68k_getpc(), (unsigned)regs.sr,
-						(unsigned)regs.intmask, (unsigned)regs.spcflags,
-						intr, (unsigned)InterruptFlags);
-				}
-			}
+			/* In the STOP handler, bypass the deferred IRQ model's
+			   intlev() which can deadlock: deferred_irq_active stays
+			   true because ConsumeDeferredInterruptFlags is only called
+			   from the A-line handler, which can't run while STOPped.
+			   Use InterruptFlags directly to check for pending work. */
+			int intr = InterruptFlags ? 1 : 0;
 			if (intr != -1 && intr > regs.intmask) {
 				Interrupt (intr);
 				if (UseDeferredInterruptModel())

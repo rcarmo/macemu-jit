@@ -441,20 +441,34 @@ static void trace_emulop_resume(uae_u32 opcode, uae_u32 next_pc)
 		(unsigned)m68k_areg(regs, 7));
 }
 
-static inline bool jit_verify_target_pc(uae_u32 pc)
+static inline bool jit_pc_in_env_ranges(const char *env_name, uae_u32 pc)
 {
-	static int initialized = 0;
-	static int range_count = 0;
-	static struct {
-		uae_u32 start;
-		uae_u32 end;
-	} ranges[64];
-	if (!initialized) {
-		const char *env = getenv("B2_JIT_VERIFY_PCS");
-		initialized = 1;
+	struct range_pair { uae_u32 start; uae_u32 end; };
+	struct cache_entry {
+		const char *name;
+		int initialized;
+		int range_count;
+		range_pair ranges[64];
+	};
+	static cache_entry caches[2] = {
+		{"B2_JIT_VERIFY_PCS", 0, 0, {}},
+		{"B2_JIT_FLUSH_OP_PCS", 0, 0, {}},
+	};
+	cache_entry *cache = NULL;
+	for (size_t ci = 0; ci < sizeof(caches) / sizeof(caches[0]); ci++) {
+		if (strcmp(caches[ci].name, env_name) == 0) {
+			cache = &caches[ci];
+			break;
+		}
+	}
+	if (!cache)
+		return false;
+	if (!cache->initialized) {
+		const char *env = getenv(env_name);
+		cache->initialized = 1;
 		if (env && *env) {
 			const char *p = env;
-			while (*p && range_count < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
+			while (*p && cache->range_count < (int)(sizeof(cache->ranges) / sizeof(cache->ranges[0]))) {
 				while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
 					p++;
 				if (!*p)
@@ -472,17 +486,27 @@ static inline bool jit_verify_target_pc(uae_u32 pc)
 						end = start;
 					p = endp;
 				}
-				ranges[range_count].start = (uae_u32)start;
-				ranges[range_count].end = (uae_u32)end;
-				range_count++;
+				cache->ranges[cache->range_count].start = (uae_u32)start;
+				cache->ranges[cache->range_count].end = (uae_u32)end;
+				cache->range_count++;
 			}
 		}
 	}
-	for (int i = 0; i < range_count; i++) {
-		if (pc >= ranges[i].start && pc <= ranges[i].end)
+	for (int i = 0; i < cache->range_count; i++) {
+		if (pc >= cache->ranges[i].start && pc <= cache->ranges[i].end)
 			return true;
 	}
 	return false;
+}
+
+static inline bool jit_verify_target_pc(uae_u32 pc)
+{
+	return jit_pc_in_env_ranges("B2_JIT_VERIFY_PCS", pc);
+}
+
+static inline bool jit_flush_target_pc(uae_u32 pc)
+{
+	return jit_pc_in_env_ranges("B2_JIT_FLUSH_OP_PCS", pc);
 }
 
 struct jit_verify_snapshot {
@@ -497,6 +521,205 @@ struct jit_verify_snapshot {
 static jit_verify_snapshot jit_verify_pre_state;
 static bool jit_verify_pre_valid = false;
 static unsigned long jit_verify_log_count = 0;
+
+struct jit_block_verify_snapshot {
+    regstruct regs;
+    flag_struct flags;
+    uae_s32 countdown;
+    uae_u32 interrupt_flags;
+    uae_u8 *mem;
+    size_t mem_size;
+};
+
+static bool jit_block_verify_reentrant = false;
+static bool jit_block_verify_compile_active = false;
+static uae_u32 jit_block_verify_compile_pc = 0xffffffffu;
+static unsigned long jit_block_verify_log_count = 0;
+static unsigned long jit_block_verify_run_count = 0;
+static jit_block_verify_snapshot jit_block_verify_entry_state = {};
+static bool jit_block_verify_entry_valid = false;
+static uae_u32 jit_block_verify_entry_pc = 0xffffffffu;
+
+typedef void (*jit_compiled_handler)(void);
+static inline unsigned int get_opcode_cft_map(unsigned int f);
+
+static void jit_block_verify_snapshot_free(jit_block_verify_snapshot *snap)
+{
+    if (snap->mem) {
+        free(snap->mem);
+        snap->mem = NULL;
+    }
+    snap->mem_size = 0;
+}
+
+static bool jit_block_verify_snapshot_capture(jit_block_verify_snapshot *snap)
+{
+    memset(snap, 0, sizeof(*snap));
+    snap->mem_size = (size_t)RAMSize + (size_t)ROMSize;
+    snap->mem = (uae_u8*)malloc(snap->mem_size);
+    if (!snap->mem)
+        return false;
+    memcpy(&snap->regs, &regs, sizeof(regs));
+    memcpy(&snap->flags, &regflags, sizeof(regflags));
+    snap->countdown = countdown;
+    snap->interrupt_flags = InterruptFlags;
+    memcpy(snap->mem, RAMBaseHost, snap->mem_size);
+    return true;
+}
+
+static void jit_block_verify_snapshot_restore(const jit_block_verify_snapshot *snap)
+{
+    memcpy(&regs, &snap->regs, sizeof(regs));
+    memcpy(&regflags, &snap->flags, sizeof(regflags));
+    countdown = snap->countdown;
+    InterruptFlags = snap->interrupt_flags;
+    memcpy(RAMBaseHost, snap->mem, snap->mem_size);
+}
+
+static void jit_block_verify_entry_reset(void)
+{
+    if (jit_block_verify_entry_valid)
+        jit_block_verify_snapshot_free(&jit_block_verify_entry_state);
+    memset(&jit_block_verify_entry_state, 0, sizeof(jit_block_verify_entry_state));
+    jit_block_verify_entry_valid = false;
+    jit_block_verify_entry_pc = 0xffffffffu;
+}
+
+static void jit_block_verify_entry_capture(uae_u32 block_pc)
+{
+    jit_block_verify_entry_reset();
+    if (!jit_block_verify_snapshot_capture(&jit_block_verify_entry_state))
+        return;
+    jit_block_verify_entry_valid = true;
+    jit_block_verify_entry_pc = block_pc;
+}
+
+static void jit_block_verify_compare(const jit_block_verify_snapshot *expected, const jit_block_verify_snapshot *actual, uae_u32 block_pc, int blocklen)
+{
+    bool mismatch = false;
+    if (memcmp(&expected->regs, &actual->regs, sizeof(regs)) != 0)
+        mismatch = true;
+    if (memcmp(&expected->flags, &actual->flags, sizeof(regflags)) != 0)
+        mismatch = true;
+    if (!mismatch && memcmp(expected->mem, actual->mem, expected->mem_size) != 0)
+        mismatch = true;
+    if (!mismatch) {
+        if (jit_block_verify_run_count <= 20)
+            fprintf(stderr, "JITBLOCKVERIFY block=%08x len=%d mismatch=0\n", (unsigned)block_pc, blocklen);
+        return;
+    }
+    if (jit_block_verify_log_count >= 20)
+        return;
+
+    fprintf(stderr, "JITBLOCKVERIFY block=%08x len=%d mismatch=1\n", (unsigned)block_pc, blocklen);
+    for (int i = 0; i < 16; i++) {
+        if (expected->regs.regs[i] != actual->regs.regs[i]) {
+            fprintf(stderr, "  reg[%d] interp=%08x native=%08x\n", i,
+                (unsigned)expected->regs.regs[i], (unsigned)actual->regs.regs[i]);
+        }
+    }
+    if (expected->regs.pc != actual->regs.pc || expected->regs.fault_pc != actual->regs.fault_pc ||
+        expected->regs.pc_p != actual->regs.pc_p || expected->regs.pc_oldp != actual->regs.pc_oldp ||
+        expected->regs.sr != actual->regs.sr || expected->regs.spcflags != actual->regs.spcflags) {
+        fprintf(stderr,
+            "  pc interp=%08x/%p/%p native=%08x/%p/%p sr interp=%04x native=%04x spc interp=%08x native=%08x\n",
+            (unsigned)expected->regs.pc, (void*)expected->regs.pc_p, (void*)expected->regs.pc_oldp,
+            (unsigned)actual->regs.pc, (void*)actual->regs.pc_p, (void*)actual->regs.pc_oldp,
+            (unsigned)expected->regs.sr, (unsigned)actual->regs.sr,
+            (unsigned)expected->regs.spcflags, (unsigned)actual->regs.spcflags);
+    }
+    if (expected->flags.nzcv != actual->flags.nzcv || expected->flags.x != actual->flags.x) {
+        fprintf(stderr, "  flags interp nzcv=%08x x=%08x native nzcv=%08x x=%08x\n",
+            (unsigned)expected->flags.nzcv, (unsigned)expected->flags.x,
+            (unsigned)actual->flags.nzcv, (unsigned)actual->flags.x);
+    }
+    int memdiffs = 0;
+    for (size_t i = 0; i < expected->mem_size && memdiffs < 16; i++) {
+        if (expected->mem[i] != actual->mem[i]) {
+            fprintf(stderr, "  mem[%08zx] interp=%02x native=%02x\n", i,
+                (unsigned)expected->mem[i], (unsigned)actual->mem[i]);
+            memdiffs++;
+        }
+    }
+    jit_block_verify_log_count++;
+}
+
+static void jit_block_verify_run(cpu_history *pc_hist, int blocklen, int total_cycles, uae_u32 block_pc)
+{
+    jit_block_verify_snapshot resume = {}, interp = {}, native = {};
+    jit_block_verify_run_count++;
+    if (!jit_block_verify_entry_valid || jit_block_verify_entry_pc != block_pc)
+        return;
+    if (!jit_block_verify_snapshot_capture(&resume)) {
+        jit_block_verify_entry_reset();
+        return;
+    }
+
+#if defined(CPU_AARCH64)
+    extern bool tick_inhibit;
+    const bool saved_tick_inhibit = tick_inhibit;
+    tick_inhibit = true;
+#endif
+
+    /* Re-run the exact interpreter block from the true entry state so the
+       verifier compares whole-block semantics, not a post-trace side state. */
+    jit_block_verify_snapshot_restore(&jit_block_verify_entry_state);
+    regs.spcflags = 0;
+    InterruptFlags = 0;
+    for (int i = 0; i < blocklen; i++) {
+        uae_u32 opcode = get_opcode_cft_map((uae_u16)*pc_hist[i].location);
+        (*cpufunctbl[opcode])(opcode);
+    }
+    if (!jit_block_verify_snapshot_capture(&interp)) {
+#if defined(CPU_AARCH64)
+        tick_inhibit = saved_tick_inhibit;
+#endif
+        jit_block_verify_snapshot_restore(&resume);
+        jit_block_verify_snapshot_free(&resume);
+        jit_block_verify_entry_reset();
+        return;
+    }
+
+    jit_block_verify_snapshot_restore(&jit_block_verify_entry_state);
+    regs.spcflags = 0;
+    InterruptFlags = 0;
+    jit_block_verify_compile_active = true;
+    jit_block_verify_compile_pc = block_pc;
+    compile_block(pc_hist, blocklen, total_cycles);
+    jit_block_verify_compile_active = false;
+    jit_block_verify_compile_pc = 0xffffffffu;
+
+    countdown = -1;
+    jit_block_verify_reentrant = true;
+    ((jit_compiled_handler)pushall_call_handler)();
+    jit_block_verify_reentrant = false;
+
+    if (jit_block_verify_snapshot_capture(&native)) {
+        jit_block_verify_compare(&interp, &native, block_pc, blocklen);
+        jit_block_verify_snapshot_free(&native);
+    }
+
+#if defined(CPU_AARCH64)
+    tick_inhibit = saved_tick_inhibit;
+#endif
+    /* Continue execution from the interpreter-established state. */
+    jit_block_verify_snapshot_restore(&resume);
+    jit_block_verify_snapshot_free(&resume);
+    jit_block_verify_snapshot_free(&interp);
+    jit_block_verify_entry_reset();
+}
+
+struct jit_flush_delta_snapshot {
+	uae_u32 regs[16];
+	uae_u32 flagx;
+	uae_u32 nzcv;
+	uae_u32 spcflags;
+	uae_u32 interrupt_flags;
+	uae_s32 countdown;
+};
+
+static jit_flush_delta_snapshot jit_flush_delta_state;
+static unsigned long jit_flush_delta_log_count = 0;
 
 static void jit_verify_pre(uae_u32 pc, uae_u32 opcode)
 {
@@ -565,6 +788,44 @@ static void jit_verify_post(uae_u32 pc, uae_u32 opcode)
 	put_byte(compiled_post.mem_a2_p400_addr, compiled_post.mem_a2_p400_byte);
 	jit_verify_pre_valid = false;
 }
+
+static void jit_flush_delta_compare(uae_u32 pc)
+{
+	if (jit_flush_delta_log_count >= 200)
+		return;
+	bool mismatch = false;
+	for (int i = 0; i < 16; i++) {
+		if (jit_flush_delta_state.regs[i] != regs.regs[i]) {
+			mismatch = true;
+			break;
+		}
+	}
+	if (jit_flush_delta_state.flagx != regflags.x ||
+		jit_flush_delta_state.nzcv != regflags.nzcv ||
+		jit_flush_delta_state.spcflags != regs.spcflags ||
+		jit_flush_delta_state.interrupt_flags != InterruptFlags ||
+		jit_flush_delta_state.countdown != countdown)
+		mismatch = true;
+	fprintf(stderr,
+		"JITFLUSHDELTA %lu pc=%08x mismatch=%d pre:d0=%08x d1=%08x d2=%08x d3=%08x a0=%08x a1=%08x a2=%08x a3=%08x a7=%08x x=%08x nzcv=%08x spc=%08x irq=%08x cd=%08x "
+		"post:d0=%08x d1=%08x d2=%08x d3=%08x a0=%08x a1=%08x a2=%08x a3=%08x a7=%08x x=%08x nzcv=%08x spc=%08x irq=%08x cd=%08x mem[a2]=%02x mem[a2+400]=%02x lm160=%02x lm162=%08x lm16a=%08x\n",
+		++jit_flush_delta_log_count,
+		(unsigned)pc,
+		mismatch ? 1 : 0,
+		jit_flush_delta_state.regs[0], jit_flush_delta_state.regs[1], jit_flush_delta_state.regs[2], jit_flush_delta_state.regs[3],
+		jit_flush_delta_state.regs[8], jit_flush_delta_state.regs[9], jit_flush_delta_state.regs[10], jit_flush_delta_state.regs[11], jit_flush_delta_state.regs[15],
+		jit_flush_delta_state.flagx, jit_flush_delta_state.nzcv, jit_flush_delta_state.spcflags, jit_flush_delta_state.interrupt_flags, (uae_u32)jit_flush_delta_state.countdown,
+		regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[3],
+		regs.regs[8], regs.regs[9], regs.regs[10], regs.regs[11], regs.regs[15],
+		regflags.x, regflags.nzcv, regs.spcflags, InterruptFlags, (uae_u32)countdown,
+		(unsigned)get_byte(regs.regs[10]),
+		(unsigned)get_byte(regs.regs[10] + 0x400),
+		(unsigned)ReadMacInt8(0x160),
+		(unsigned)ReadMacInt32(0x162),
+		(unsigned)ReadMacInt32(0x16a));
+}
+
+static void jit_emit_flush_delta_snapshot(void);
 
 static unsigned long trace_flagflow_count = 0;
 static uae_u32 trace_flagflow_block_pc = 0;
@@ -643,60 +904,93 @@ static inline bool jit_force_optlev1_opcode(uae_u16 op)
 	return false;
 }
 
+static inline bool jit_env_has_csv_token(const char *env_name, const char *token)
+{
+	const char *env = getenv(env_name);
+	if (!env || !*env)
+		return false;
+	const size_t token_len = strlen(token);
+	while (*env) {
+		while (*env == ' ' || *env == '\t' || *env == ',')
+			env++;
+		if (!*env)
+			break;
+		const char *start = env;
+		while (*env && *env != ',')
+			env++;
+		const char *end = env;
+		while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+			end--;
+		if ((size_t)(end - start) == token_len && strncmp(start, token, token_len) == 0)
+			return true;
+	}
+	return false;
+}
+
+static inline bool jit_restore_barrier(const char *token)
+{
+	return jit_env_has_csv_token("B2_JIT_RESTORE_BARRIERS", token) ||
+		jit_env_has_csv_token("B2_JIT_RESTORE_BARRIERS", "all");
+}
+
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
-	/* Instructions that must go through interpreter AND end the block.
-	   The block stays at optlev=2 so instructions BEFORE this one
-	   compile natively. Only this instruction uses interpreter fallback. */
+	/* Note: op is already in canonical M68k (big-endian) order
+	   via DO_GET_OPCODE → get_opcode_cft_map → uae_bswap_16.
+	   Hardcoded AArch64 barriers are controlled by
+	   B2_JIT_RESTORE_BARRIERS=branch,jsr,jmp,ret,movem,aline,emulop,sr,moveq,dbcc */
 
-	/* MV2SR.W: changes supervisor state via MakeFromSR() */
-	if (table68k[op].mnemo == i_MV2SR && table68k[op].size == sz_word)
+	if (jit_restore_barrier("sr")) {
+		/* MV2SR.W: changes supervisor state via MakeFromSR() */
+		if (table68k[op].mnemo == i_MV2SR && table68k[op].size == sz_word)
+			return true;
+		/* CCR/SR state modifiers */
+		if (op == 0x023c)
+			return true;
+		if (op == 0x40e7 || op == 0x40c1)
+			return true;
+		if (op == 0x44df || op == 0x44fc)
+			return true;
+	}
+
+	if ((jit_restore_barrier("branch") || jit_restore_barrier("bra") || jit_restore_barrier("braw")) && op == 0x6000)
+		return true;
+	if ((jit_restore_barrier("branch") || jit_restore_barrier("bra") || jit_restore_barrier("bral")) && op == 0x60ff)
+		return true;
+	if ((jit_restore_barrier("branch") || jit_restore_barrier("bra") || jit_restore_barrier("braq")) &&
+		(op & 0xff00) == 0x6000 && op != 0x6000 && op != 0x60ff)
+		return true;
+	if ((jit_restore_barrier("branch") || jit_restore_barrier("bsr")) && (op & 0xff00) == 0x6100)
+		return true;
+	if ((jit_restore_barrier("branch") || jit_restore_barrier("bcc")) && (op & 0xf000) == 0x6000 && (op & 0xff00) != 0x6000 && (op & 0xff00) != 0x6100)
+		return true;
+	if (jit_restore_barrier("jsr") && (op & 0xffc0) == 0x4e80)
+		return true;
+	if (jit_restore_barrier("jmp") && (op & 0xffc0) == 0x4ec0)
+		return true;
+	if (jit_restore_barrier("ret") &&
+		(op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e76 || op == 0x4e77))
+		return true;
+	if (jit_restore_barrier("movem") && (op & 0xfb80) == 0x4880)
+		return true;
+	if (jit_restore_barrier("aline") && (op & 0xf000) == 0xa000)
+		return true;
+	if (jit_restore_barrier("emulop") && (op & 0xff00) == 0x7100)
+		return true;
+	if (jit_restore_barrier("moveq") && (op & 0xf100) == 0x7000 && (op & 0xff00) != 0x7100)
 		return true;
 
-	/* Control-flow: changes PC, needs fresh block entry */
-	if ((op & 0xf000) == 0x6000) /* BRA/BSR/Bcc */
-		return true;
-	if ((op & 0xffc0) == 0x4e80) /* JSR */
-		return true;
-	if ((op & 0xffc0) == 0x4ec0) /* JMP */
-		return true;
-	if (op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e76 || op == 0x4e77) /* RTE/RTD/RTS/TRAPV/RTR */
-		return true;
-
-	/* MOVEM: complex multi-register load/store */
-	if ((op & 0xfb80) == 0x4880)
-		return true;
-
-	/* A-line traps */
-	if ((op & 0xf000) == 0xa000)
-		return true;
-
-	/* EmulOps (BasiliskII extended opcodes 0x7100-0x71FF) */
-	if ((op & 0xff00) == 0x7100)
-		return true;
-
-	/* CCR/SR state modifiers */
-	if (op == 0x023c) /* ANDI to CCR */
-		return true;
-	if (op == 0x40e7 || op == 0x40c1) /* MOVE SR,-(A7) / MOVE SR,D1 */
-		return true;
-	if (op == 0x44df || op == 0x44fc) /* MOVE (A7)+,CCR / MOVE #imm,CCR */
-		return true;
-
-	/* MOVE.B/MOVE.W with memory destination: force through interpreter.
-	   The register-only variants (dst mode 000) compile natively. */
+	/* Optional MOVE memory-destination barrier for diagnostics. */
 	if (getenv("B2_JIT_BARRIER_MOVE_MEM") && getenv("B2_JIT_BARRIER_MOVE_MEM")[0] == '1') {
 		uae_u16 fam = (op >> 12) & 0xf;
 		if (fam == 1 || fam == 2 || fam == 3) { /* MOVE.B, MOVE.L, MOVE.W */
 			uae_u16 dst_mode = (op >> 6) & 7;
-			if (dst_mode != 0 && dst_mode != 1) /* memory destination */
+			if (dst_mode != 0 && dst_mode != 1)
 				return true;
 		}
 	}
 
-	/* Env-configurable family barrier for L2 codegen debugging.
-	   B2_JIT_BARRIER_FAMILIES="0,1,2,3" forces those top-nibble families
-	   through interpreter even if they have compiled handlers. */
+	/* Optional family barrier for targeted debugging only. */
 	{
 		static int families[16] = {-1};
 		if (families[0] == -1) {
@@ -722,6 +1016,192 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 
 	return false;
 }
+static inline bool jit_flush_each_op_env(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_JIT_FLUSH_EACH_OP") && *getenv("B2_JIT_FLUSH_EACH_OP") && strcmp(getenv("B2_JIT_FLUSH_EACH_OP"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static inline bool jit_end_block_on_fallback_env(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_JIT_END_BLOCK_ON_FALLBACK") && *getenv("B2_JIT_END_BLOCK_ON_FALLBACK") && strcmp(getenv("B2_JIT_END_BLOCK_ON_FALLBACK"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static inline bool jit_force_nondirect_handler_env(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_JIT_FORCE_NONDIRECT_HANDLER") && *getenv("B2_JIT_FORCE_NONDIRECT_HANDLER") && strcmp(getenv("B2_JIT_FORCE_NONDIRECT_HANDLER"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static inline bool jit_force_execute_normal_successor_env(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_JIT_FORCE_EXECUTE_NORMAL_SUCCESSOR") && *getenv("B2_JIT_FORCE_EXECUTE_NORMAL_SUCCESSOR") && strcmp(getenv("B2_JIT_FORCE_EXECUTE_NORMAL_SUCCESSOR"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static inline bool jit_store_pcp_on_chain_env(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_JIT_STORE_PCP_ON_CHAIN");
+#if defined(CPU_AARCH64)
+		cached = (!env || !*env || strcmp(env, "0") != 0) ? 1 : 0;
+#else
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+#endif
+	}
+	return cached != 0;
+}
+
+static inline bool jit_trace_setpc_env(void)
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_JIT_TRACE_SETPC") && *getenv("B2_JIT_TRACE_SETPC") && strcmp(getenv("B2_JIT_TRACE_SETPC"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static inline uae_u32 jit_hostpc_to_macpc(uintptr hostpc)
+{
+    return get_virtual_address((uae_u8*)hostpc);
+}
+
+static inline uintptr jit_canonicalize_target_pc(uintptr pc)
+{
+    uintptr base = (uintptr)RAMBaseHost;
+    uintptr limit = base + RAMSize + ROMSize + 0x100000;
+    if (pc >= base && pc < limit)
+        return pc;
+    /* If a guest Mac PC leaked into a const-target path, convert it back
+       to the host fetch pointer expected by PC_P / blockinfo. */
+    uae_u32 guest = (uae_u32)pc;
+    if ((guest & 1) == 0 && guest < (uae_u32)(RAMSize + ROMSize + 0x100000))
+        return (uintptr)get_real_address(guest, 0, sz_word);
+    return pc;
+}
+
+static inline bool jit_target_pc_in_env_ranges(const char *env_name, uintptr hostpc)
+{
+    struct range_cache {
+        const char *env_name;
+        int initialized;
+        int range_count;
+        struct { uae_u32 start; uae_u32 end; } ranges[64];
+    };
+    static range_cache caches[] = {
+        {"B2_JIT_FORCE_NONDIRECT_TARGET_PCS", 0, 0, {}},
+        {"B2_JIT_FORCE_EXECUTE_NORMAL_TARGET_PCS", 0, 0, {}},
+    };
+    range_cache *cache = NULL;
+    for (size_t i = 0; i < sizeof(caches) / sizeof(caches[0]); i++) {
+        if (strcmp(caches[i].env_name, env_name) == 0) {
+            cache = &caches[i];
+            break;
+        }
+    }
+    if (!cache)
+        return false;
+    if (!cache->initialized) {
+        const char *env = getenv(env_name);
+        cache->initialized = 1;
+        if (env && *env) {
+            const char *p = env;
+            while (*p && cache->range_count < (int)(sizeof(cache->ranges) / sizeof(cache->ranges[0]))) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+                    p++;
+                if (!*p)
+                    break;
+                char *endp = NULL;
+                unsigned long start = strtoul(p, &endp, 0);
+                unsigned long end = start;
+                if (endp == p)
+                    break;
+                p = endp;
+                if (*p == '-') {
+                    p++;
+                    end = strtoul(p, &endp, 0);
+                    if (endp == p)
+                        end = start;
+                    p = endp;
+                }
+                cache->ranges[cache->range_count].start = (uae_u32)start;
+                cache->ranges[cache->range_count].end = (uae_u32)end;
+                cache->range_count++;
+                while (*p && *p != ',')
+                    p++;
+            }
+        }
+    }
+    const uae_u32 macpc = jit_hostpc_to_macpc(hostpc);
+    for (int i = 0; i < cache->range_count; i++) {
+        if (macpc >= cache->ranges[i].start && macpc <= cache->ranges[i].end)
+            return true;
+    }
+    return false;
+}
+
+static inline bool jit_force_nondirect_target_env(uintptr hostpc)
+{
+    return jit_target_pc_in_env_ranges("B2_JIT_FORCE_NONDIRECT_TARGET_PCS", hostpc);
+}
+
+static inline bool jit_force_execute_normal_target_env(uintptr hostpc)
+{
+    return jit_target_pc_in_env_ranges("B2_JIT_FORCE_EXECUTE_NORMAL_TARGET_PCS", hostpc);
+}
+
+static inline bool jit_verify_block_target_pc(uae_u32 pc)
+{
+    static int initialized = 0;
+    static int range_count = 0;
+    static struct { uae_u32 start; uae_u32 end; } ranges[64];
+    if (!initialized) {
+        const char *env = getenv("B2_JIT_VERIFY_BLOCKS");
+        initialized = 1;
+        if (env && *env) {
+            const char *p = env;
+            while (*p && range_count < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
+                while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+                    p++;
+                if (!*p)
+                    break;
+                char *endp = NULL;
+                unsigned long start = strtoul(p, &endp, 0);
+                unsigned long end = start;
+                if (endp == p)
+                    break;
+                p = endp;
+                if (*p == '-') {
+                    p++;
+                    end = strtoul(p, &endp, 0);
+                    if (endp == p)
+                        end = start;
+                    p = endp;
+                }
+                ranges[range_count].start = (uae_u32)start;
+                ranges[range_count].end = (uae_u32)end;
+                range_count++;
+                while (*p && *p != ',')
+                    p++;
+            }
+        }
+    }
+    for (int i = 0; i < range_count; i++) {
+        if (pc >= ranges[i].start && pc <= ranges[i].end)
+            return true;
+    }
+    return false;
+}
+
 static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 {
 	/* Diagnostic path: current BasiliskII SDL framebuffer lives in low Mac RAM
@@ -730,6 +1210,47 @@ static inline bool jit_is_framebuffer_addr(uae_u32 addr)
 	   store-path bugs from value-generation bugs. */
 	return addr >= 0x14110000 && addr < 0x14310000;
 }
+
+#if defined(CPU_AARCH64)
+static uintptr jit_last_setpc_value = 0;
+static uae_u32 jit_last_setpc_kind = 0;
+static unsigned long jit_last_setpc_seq = 0;
+
+static const char *jit_setpc_kind_name(uae_u32 kind)
+{
+    return kind == 1 ? "execute_normal_setpc" :
+        kind == 2 ? "check_checksum_setpc" :
+        kind == 3 ? "exec_nostats_setpc" :
+        kind == 4 ? "endblock_pc_inreg" :
+        kind == 5 ? "endblock_pc_isconst" :
+        kind == 6 ? "endblock_pc_isconst_slow" :
+        kind == 7 ? "mov_l_mi_pcptr" :
+        kind == 8 ? "mov_l_mr_pcptr" :
+        kind == 9 ? "raw_set_pc_i" :
+        "unknown";
+}
+
+extern "C" void jit_trace_setpc_value(uintptr value, uae_u32 kind)
+{
+    static unsigned long count = 0;
+    if (!jit_trace_setpc_env())
+        return;
+    jit_last_setpc_value = value;
+    jit_last_setpc_kind = kind;
+    jit_last_setpc_seq++;
+    uintptr base = (uintptr)RAMBaseHost;
+    uintptr limit = base + RAMSize + ROMSize + 0x100000;
+    bool suspicious = (value < base || value >= limit || (value & 1));
+    if (!suspicious && count >= 32)
+        return;
+    fprintf(stderr,
+        "JIT_SETPC[%lu] kind=%s value=%p regs.pc=%08x regs.pc_p=%p oldp=%p d0=%08x d1=%08x a0=%08x a7=%08x suspicious=%d\n",
+        ++count, jit_setpc_kind_name(kind), (void*)value,
+        (unsigned)regs.pc, (void*)regs.pc_p, (void*)regs.pc_oldp,
+        (unsigned)regs.regs[0], (unsigned)regs.regs[1], (unsigned)regs.regs[8], (unsigned)regs.regs[15],
+        suspicious ? 1 : 0);
+}
+#endif
 
 
 static inline int distrust_check(int value)
@@ -3356,6 +3877,48 @@ static void flush(int save_regs)
     }
 }
 
+static void jit_emit_flush_delta_snapshot(void)
+{
+    for (int j = 0; j < 16; j++) {
+        uintptr dst = (uintptr)&jit_flush_delta_state.regs[j];
+        if ((live.state[j].status == DIRTY || live.state[j].status == CLEAN) && live.state[j].realreg >= 0) {
+            compemu_raw_mov_l_mr(dst, live.state[j].realreg);
+        } else if (live.state[j].status == ISCONST) {
+            compemu_raw_mov_l_mi(dst, live.state[j].val);
+        } else {
+            compemu_raw_mov_l_rm(REG_WORK2, (uintptr)live.state[j].mem);
+            compemu_raw_mov_l_mr(dst, REG_WORK2);
+        }
+    }
+
+    if ((live.state[FLAGX].status == DIRTY || live.state[FLAGX].status == CLEAN) && live.state[FLAGX].realreg >= 0) {
+        LSL_wwi(REG_WORK2, live.state[FLAGX].realreg, 29);
+        compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.flagx, REG_WORK2);
+    } else if (live.state[FLAGX].status == ISCONST) {
+        compemu_raw_mov_l_mi((uintptr)&jit_flush_delta_state.flagx, (live.state[FLAGX].val & 1) << 29);
+    } else {
+        compemu_raw_mov_l_rm(REG_WORK2, (uintptr)&regflags.x);
+        compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.flagx, REG_WORK2);
+    }
+
+    if (live.flags_in_flags == VALID) {
+        MRS_NZCV_x(REG_WORK2);
+        if (flags_carry_inverted)
+            EOR_xxCflag(REG_WORK2, REG_WORK2);
+        compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.nzcv, REG_WORK2);
+    } else {
+        compemu_raw_mov_l_rm(REG_WORK2, (uintptr)&regflags.nzcv);
+        compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.nzcv, REG_WORK2);
+    }
+
+    compemu_raw_mov_l_rm(REG_WORK2, (uintptr)&regs.spcflags);
+    compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.spcflags, REG_WORK2);
+    compemu_raw_mov_l_rm(REG_WORK2, (uintptr)&InterruptFlags);
+    compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.interrupt_flags, REG_WORK2);
+    compemu_raw_mov_l_rm(REG_WORK2, (uintptr)&countdown);
+    compemu_raw_mov_l_mr((uintptr)&jit_flush_delta_state.countdown, REG_WORK2);
+}
+
 int alloc_scratch(void)
 {
     for (int i = 0; i < SCRATCH_REGS; ++i) {
@@ -3428,8 +3991,11 @@ void register_possible_exception(void)
  */
 static uintptr get_handler(uintptr addr)
 {
+    addr = jit_canonicalize_target_pc(addr);
+    if (jit_force_execute_normal_successor_env() || jit_force_execute_normal_target_env(addr))
+        return (uintptr)popall_execute_normal;
     blockinfo* bi = get_blockinfo_addr_new((void*)(uintptr)addr);
-    uintptr h = (uintptr)bi->direct_handler_to_use;
+    uintptr h = (uintptr)(jit_force_nondirect_handler_env() ? bi->handler_to_use : bi->direct_handler_to_use);
     return h ? h : (uintptr)popall_execute_normal;
 }
 
@@ -3881,6 +4447,33 @@ static void calc_checksum(blockinfo* bi, uae_u32* c1, uae_u32* c2)
 
 int check_for_cache_miss(void)
 {
+#if defined(CPU_AARCH64)
+    /* Guard against corrupted pc_p. Valid pc_p must point into the
+       Mac memory region (RAM + ROM). Compiled endblock code can write
+       a truncated or garbage value to regs.pc_p. Detect and recover
+       by re-deriving pc_p from pc_oldp + m68k PC. */
+    {
+        uintptr pcp = (uintptr)regs.pc_p;
+        uintptr base = (uintptr)RAMBaseHost;
+        uintptr limit = base + RAMSize + ROMSize + 0x100000;
+        if (pcp < base || pcp >= limit || (pcp & 1)) {
+            static int bad_count = 0;
+            uae_u32 safe_pc = regs.pc & ~1u;
+            if (bad_count++ < 50)
+                fprintf(stderr, "JIT: bad pc_p=%p regs.pc=%08x safe=%08x "
+                    "d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x spc=%08x oldp=%p last_setpc=%p last_kind=%u last_seq=%lu\n",
+                    (void*)regs.pc_p, regs.pc, safe_pc,
+                    regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[15],
+                    (unsigned)regs.sr, (unsigned)regs.spcflags, (void*)regs.pc_oldp,
+                    (void*)jit_last_setpc_value, (unsigned)jit_last_setpc_kind, jit_last_setpc_seq);
+            flush_icache_hard(7);
+            regs.pc = safe_pc;
+            regs.pc_p = get_real_address(safe_pc, 0, sz_word);
+            regs.pc_oldp = regs.pc_p - safe_pc;
+            return 0;
+        }
+    }
+#endif
     blockinfo* bi = get_blockinfo_addr(regs.pc_p);
 
     if (bi) {
@@ -3903,6 +4496,10 @@ static void recompile_block(void)
     jit_diag_recompile_block_calls++;
     jit_diag_dispatch_count++;
     jit_diag_maybe_print();
+    if ((uintptr)regs.pc_p & 1) {
+        execute_normal();
+        return;
+    }
 #endif
 #ifdef JIT_DEBUG_MEM_CORRUPTION
     jit_dbg_check_vec2_dispatch("recompile_block");
@@ -3967,7 +4564,7 @@ static inline int block_check_checksum(blockinfo* bi)
         /* This block is still OK. So we reactivate. Of course, that
            means we have to move it into the needs-to-be-flushed list */
         bi->handler_to_use = bi->handler;
-        set_dhtu(bi, bi->direct_handler);
+        set_dhtu(bi, (jit_force_nondirect_handler_env() || jit_force_nondirect_target_env((uintptr)bi->pc_p)) ? bi->handler : bi->direct_handler);
         bi->status = BI_CHECKING;
         isgood = called_check_checksum(bi) != 0;
     }
@@ -4113,9 +4710,27 @@ STATIC_INLINE void create_popalls(void)
 
     /* now the exit points */
     popall_execute_normal_setpc = get_target();
-    uintptr idx = (uintptr) & (regs.pc_p) - (uintptr)&regs;
+    uintptr idx = (uintptr)&(regs.pc_p) - (uintptr)&regs;
 #if defined(CPU_AARCH64)
-    STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
+    if (jit_trace_setpc_env()) {
+        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
+        MOV_xx(REG_PAR1, REG_WORK1);
+        LOAD_U32(REG_PAR2, 1);
+        compemu_raw_call((uintptr)jit_trace_setpc_value);
+        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
+    }
+    {
+        const uintptr idx_pc = (uintptr)&(regs.pc) - (uintptr)&regs;
+        const uintptr idx_oldp = (uintptr)&(regs.pc_oldp) - (uintptr)&regs;
+        /* Match m68k_setpc(): pc_p = pc_oldp = get_real_address(newpc), pc = newpc.
+           REG_WORK1 already holds the host PC for the target block. */
+        STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
+        LOAD_U64(REG_WORK2, (uintptr)&MEMBaseDiff);
+        LDR_xXi(REG_WORK2, REG_WORK2, 0);
+        SUB_xxx(REG_WORK3, REG_WORK1, REG_WORK2);
+        STR_wXi(REG_WORK3, R_REGSTRUCT, idx_pc);
+        STR_xXi(REG_WORK1, R_REGSTRUCT, idx_oldp);
+    }
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
@@ -4125,7 +4740,23 @@ STATIC_INLINE void create_popalls(void)
 
     popall_check_checksum_setpc = get_target();
 #if defined(CPU_AARCH64)
-    STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
+    if (jit_trace_setpc_env()) {
+        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
+        MOV_xx(REG_PAR1, REG_WORK1);
+        LOAD_U32(REG_PAR2, 2);
+        compemu_raw_call((uintptr)jit_trace_setpc_value);
+        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
+    }
+    {
+        const uintptr idx_pc = (uintptr)&(regs.pc) - (uintptr)&regs;
+        const uintptr idx_oldp = (uintptr)&(regs.pc_oldp) - (uintptr)&regs;
+        STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
+        LOAD_U64(REG_WORK2, (uintptr)&MEMBaseDiff);
+        LDR_xXi(REG_WORK2, REG_WORK2, 0);
+        SUB_xxx(REG_WORK3, REG_WORK1, REG_WORK2);
+        STR_wXi(REG_WORK3, R_REGSTRUCT, idx_pc);
+        STR_xXi(REG_WORK1, R_REGSTRUCT, idx_oldp);
+    }
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
@@ -4135,7 +4766,23 @@ STATIC_INLINE void create_popalls(void)
 
     popall_exec_nostats_setpc = get_target();
 #if defined(CPU_AARCH64)
-    STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
+    if (jit_trace_setpc_env()) {
+        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
+        MOV_xx(REG_PAR1, REG_WORK1);
+        LOAD_U32(REG_PAR2, 3);
+        compemu_raw_call((uintptr)jit_trace_setpc_value);
+        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
+    }
+    {
+        const uintptr idx_pc = (uintptr)&(regs.pc) - (uintptr)&regs;
+        const uintptr idx_oldp = (uintptr)&(regs.pc_oldp) - (uintptr)&regs;
+        STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
+        LOAD_U64(REG_WORK2, (uintptr)&MEMBaseDiff);
+        LDR_xXi(REG_WORK2, REG_WORK2, 0);
+        SUB_xxx(REG_WORK3, REG_WORK1, REG_WORK2);
+        STR_wXi(REG_WORK3, R_REGSTRUCT, idx_pc);
+        STR_xXi(REG_WORK1, R_REGSTRUCT, idx_oldp);
+    }
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
@@ -4718,12 +5365,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             compemu_raw_dec_m((uintptr) & (bi->count));
             compemu_raw_maybe_recompile();
         }
-        /* AArch64: force optlev=0 for blocks containing DBcc (0x50C8-0x5FCF).
-           The native DBcc codegen has a branch target initialization bug
-           that causes jumps to NULL. Use interpreter for these blocks. */
         uae_u32 block_m68k_pc = 0;
         if (pc_hist[0].location) {
-            block_m68k_pc = (uae_u32)((uintptr)pc_hist[0].location - (uintptr)regs.pc_oldp) + regs.pc;
+            /* Anchor block PC derivation to the actual host fetch address,
+               not the mutable regs.pc/regs.pc_oldp metadata. This keeps
+               PC-relative codegen stable across mixed-mode/direct-chain
+               transitions. */
+            block_m68k_pc = jit_hostpc_to_macpc((uintptr)pc_hist[0].location);
         }
 #if defined(CPU_AARCH64)
         if (jit_force_optlev0()) {
@@ -4734,7 +5382,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             }
             for (int _i = 0; optlev > 0 && _i < blocklen; _i++) {
                 uae_u16 _op = do_get_mem_word(pc_hist[_i].location);
-                if ((_op & 0xF0F8) == 0x50C8) { /* DBcc */
+                if (jit_restore_barrier("dbcc") && (_op & 0xF0F8) == 0x50C8) {
                     optlev = 0;
                     break;
                 }
@@ -4794,7 +5442,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 compop_func** comptbl;
                 uae_u32 opcode = DO_GET_OPCODE(pc_hist[i].location);
                 needed_flags = (liveflags[i + 1] & prop[cft_map(opcode)].set_flags);
+#ifdef UAE
                 special_mem = pc_hist[i].specmem;
+#else
+                special_mem = special_mem_default;
+#endif
                 const uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
                 {
                     trace_flagflow_block_pc = block_m68k_pc;
@@ -4936,7 +5588,30 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         break;
                     }
                     freescratch();
-                    if (!(liveflags[i + 1] & FLAG_CZNV)) {
+                    bool flushed_after_native_op = false;
+#if defined(CPU_AARCH64)
+                    const bool _flush_this_op = jit_flush_target_pc(op_m68k_pc);
+                    if (jit_flush_each_op_env() || _flush_this_op) {
+                        /* Diagnostic mode: snapshot the effective live native
+                           state, then force canonical in-memory guest state.
+                           Comparing the snapshot against post-flush memory tells
+                           us what native continuation was carrying implicitly. */
+                        if (_flush_this_op) {
+                            fprintf(stderr, "JIT_FLUSH_INSERT pc=%08x op=%04x\n", op_m68k_pc, opcode);
+                            jit_emit_flush_delta_snapshot();
+                        }
+                        live.flags_are_important = 1;
+                        flush(1);
+                        if (_flush_this_op) {
+                            compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
+                            compemu_raw_call((uintptr)jit_flush_delta_compare);
+                        }
+                        init_comp();
+                        was_comp = 0;
+                        flushed_after_native_op = true;
+                    }
+#endif
+                    if (!flushed_after_native_op && !(liveflags[i + 1] & FLAG_CZNV)) {
                         /* We can forget about flags */
                         if (optlev > 1 && trace_flagflow_opcode((uae_u16)opcode))
                             trace_flagflow_log("DROP_AFTER_OP", liveflags[i + 1], prop[cft_map(opcode)].use_flags, prop[cft_map(opcode)].set_flags);
@@ -5019,9 +5694,33 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             (unsigned)liveflags[i + 1],
                             (unsigned)needed_flags);
                     }
+                    if (was_comp) {
+                        /* First-principles mixed-mode fix: before falling back to
+                           the interpreter inside a block, flush the full native
+                           live state and reset allocator assumptions. Otherwise
+                           the fallback sees stale guest state in memory, and any
+                           later native ops continue from stale compile-time
+                           register/flag facts. */
+                        flush(1);
+                        comp_pc_p = (uae_u8*)pc_hist[i].location;
+                        init_comp();
+                        was_comp = 0;
+                    }
                     compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)cft_map(opcode));
                     compemu_raw_mov_l_rr(REG_PAR2, R_REGSTRUCT);
+                    /* Static-audit fix: interpreter fallback from a direct-chained
+                       compiled block must not inherit stale PC base metadata.
+                       Many ARM64 L2 helper blocks are mixed native+fallback
+                       because shift/rotate families are still forced through the
+                       interpreter. Direct chains typically update regs.pc_p, but
+                       m68k_getpc() in the fallback/interpreter uses the full
+                       triple regs.pc + (regs.pc_p - regs.pc_oldp). Rebuild a
+                       self-consistent triple for the current opcode before the
+                       fallback call. */
+                    compemu_raw_mov_l_mi((uintptr)&regs.pc, op_m68k_pc);
                     compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
+                    compemu_raw_mov_l_rm(REG_WORK1, (uintptr)&regs.pc_p);
+                    compemu_raw_mov_l_mr((uintptr)&regs.pc_oldp, REG_WORK1);
                     compemu_raw_call((uintptr)cputbl[cft_map(opcode)]);
                     /* Trace interpreter-executed family-d instructions */
                     if (((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) {
@@ -5044,10 +5743,29 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
 
                     if (jit_force_interpreter_barrier_opcode((uae_u16)opcode)) {
-                        /* Full-SR interpreter fallbacks can switch stack banks,
-                           trace state, and interrupt masks via MakeFromSR().
-                           End the block immediately after the fallback call so
-                           later code restarts from a fresh handler entry. */
+                        /* Interpreter barrier opcodes already executed via the
+                           fallback call above. Runtime keeps using the normal
+                           execute_normal() handoff. In verifier mode, if the
+                           traced block ends exactly at this barrier, stop at the
+                           current regs.pc_p so the comparison stays block-local. */
+                        compemu_raw_mov_l_rm(0, (uintptr)specflags);
+#if defined(USE_DATA_BUFFER)
+                        data_check_end(12, 64);
+#endif
+                        compemu_raw_maybe_do_nothing(retired_cycles);
+                        if (i == blocklen - 1 &&
+                            jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc) {
+                            compemu_raw_mov_l_rm(REG_PC_TMP, (uintptr)&regs.pc_p);
+                            compemu_raw_endblock_pc_inreg(REG_PC_TMP, retired_cycles);
+                        } else {
+                            compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, retired_cycles);
+                        }
+                        forced_interpreter_barrier = true;
+                        break;
+                    }
+                    if (jit_end_block_on_fallback_env()) {
+                        /* Diagnostic mode: after any interpreter fallback,
+                           end the block immediately and return to dispatcher. */
                         compemu_raw_mov_l_rm(0, (uintptr)specflags);
 #if defined(USE_DATA_BUFFER)
                         data_check_end(12, 64);
@@ -5158,21 +5876,41 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 branchadd = (uae_u32*)get_target() - 1;
 
                 /* predicted outcome */
-                tbi = get_blockinfo_addr_new((void*)t1);
+                uintptr ct1 = jit_canonicalize_target_pc(t1);
+                tbi = get_blockinfo_addr_new((void*)ct1);
                 match_states(tbi);
+                if (jit_trace_setpc_env()) {
+                    uintptr _base = (uintptr)RAMBaseHost;
+                    uintptr _limit = _base + RAMSize + ROMSize + 0x100000;
+                    if (t1 < _base || t1 >= _limit || (t1 & 1)) {
+                        fprintf(stderr,
+                            "JIT_ENDCONST src=%08x path=pred target=%p canon=%p next=%p taken=%p cc=%d\n",
+                            (unsigned)block_m68k_pc, (void*)t1, (void*)ct1, (void*)next_pc_p, (void*)taken_pc_p, cc);
+                    }
+                }
 
-                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), t1);
-                write_jmp_target(tba, get_handler(t1));
-                create_jmpdep(bi, 0, tba, t1);
+                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
+                write_jmp_target(tba, get_handler(ct1));
+                create_jmpdep(bi, 0, tba, ct1);
 
                 /* not-predicted outcome */
                 write_jmp_target(branchadd, (uintptr)get_target());
-                tbi = get_blockinfo_addr_new((void*)t2);
+                uintptr ct2 = jit_canonicalize_target_pc(t2);
+                tbi = get_blockinfo_addr_new((void*)ct2);
                 match_states(tbi);
+                if (jit_trace_setpc_env()) {
+                    uintptr _base = (uintptr)RAMBaseHost;
+                    uintptr _limit = _base + RAMSize + ROMSize + 0x100000;
+                    if (t2 < _base || t2 >= _limit || (t2 & 1)) {
+                        fprintf(stderr,
+                            "JIT_ENDCONST src=%08x path=notpred target=%p canon=%p next=%p taken=%p cc=%d\n",
+                            (unsigned)block_m68k_pc, (void*)t2, (void*)ct2, (void*)next_pc_p, (void*)taken_pc_p, cc);
+                    }
+                }
 
-                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), t2);
-                write_jmp_target(tba, get_handler(t2));
-                create_jmpdep(bi, 1, tba, t2);
+                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
+                write_jmp_target(tba, get_handler(ct2));
+                create_jmpdep(bi, 1, tba, ct2);
             } else if (!forced_interpreter_barrier) {
                 if (was_comp) {
                     flush(1);
@@ -5189,17 +5927,36 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     uintptr v = live.state[PC_P].val;
                     uae_u32* tba;
                     blockinfo* tbi;
+                    const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
+                    const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
 
-
-                    tbi = get_blockinfo_addr_new((void*)v);
+                    uintptr cv = jit_canonicalize_target_pc(v);
+                    tbi = get_blockinfo_addr_new((void*)cv);
                     match_states(tbi);
+                    if (jit_trace_setpc_env()) {
+                        uintptr _base = (uintptr)RAMBaseHost;
+                        uintptr _limit = _base + RAMSize + ROMSize + 0x100000;
+                        if (v < _base || v >= _limit || (v & 1)) {
+                            fprintf(stderr,
+                                "JIT_ENDCONST src=%08x path=fallthrough target=%p canon=%p live_pcp_status=%d\n",
+                                (unsigned)block_m68k_pc, (void*)v, (void*)cv, live.state[PC_P].status);
+                        }
+                    }
 
 #if defined(USE_DATA_BUFFER)
                     data_check_end(4, 64);
 #endif
-                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), v);
-                    write_jmp_target(tba, get_handler(v));
-                    create_jmpdep(bi, 0, tba, v);
+                    if (final_is_braq && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
+                        /* Short BRA native blocks are safe only when the handoff
+                           re-enters through execute_normal_setpc; direct const
+                           chaining still reproduces the pure-L2 bad-PC family. */
+                        compemu_raw_set_pc_i(cv);
+                        compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
+                    } else {
+                        tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), cv);
+                        write_jmp_target(tba, get_handler(cv));
+                        create_jmpdep(bi, 0, tba, cv);
+                    }
                 } else {
                     r = REG_PC_TMP;
                     compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
@@ -5240,12 +5997,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
         compemu_raw_jmp((uintptr)bi->direct_handler);
 
-        /* AArch64 optlev=0 blocks execute via exec_nostats()/interpreter and need
-           a clean in-memory m68k register state. If other compiled blocks jump to
-           their direct handler, they bypass this wrapper and stale cached Dn/An
-           values can leak into the interpreter path. Route direct jumps for
-           non-compiled blocks through the flushed wrapper instead. */
-        if (!was_comp) {
+        /* Structural diagnostic mode: route all successor handoffs through the
+           non-direct wrapper so every chained entry revalidates pc/cache state.
+           This also covers the existing optlev=0 case, where exec_nostats()
+           requires fully canonical in-memory guest state. */
+        if (!was_comp || jit_force_nondirect_handler_env() || jit_force_nondirect_target_env((uintptr)bi->pc_p)) {
             set_dhtu(bi, bi->handler);
         }
 

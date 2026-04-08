@@ -7,7 +7,139 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Our work fixed **15 bugs** that prevented or destabilized L2 boot, bringing 9 of 15 opcode families to fully working native codegen. The remaining all-native failure has been narrowed substantially: it is no longer explained by the original byte-order bugs, by the first masked-IRQ/tick timing issues, by the first native BTST/MOVEA divergence, or by the FLAGX-in-memory normalization bug. The unresolved piece still sits deeper in the transformed helper path that feeds the `0x040b34dc` copy/compare loop.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, and ARM64 endblock slow-path bugs. The remaining all-native failure has now been narrowed much further: the immediate pure-L2 bad-PC crash is no longer best explained by the old helper-chain overshoot theory, but by a **native short-BRA (`BRAQ.B`) path that is still unsafe on ARM64**.
+
+## Current frontier (2026-04-08)
+
+The most important updates from the latest round are:
+
+### 1. The old block-verifier overshoot result was wrong
+
+The original block-level verifier was accidentally running native code from the interpreter's **post-block state** instead of the true entry state. That produced fake `+2/+4` successor-style overshoots such as:
+
+- `0x040b3566 -> ...35c8`
+- `0x040b35c8 -> ...3580`
+- `0x040b34a8 -> ...3496`
+
+This was fixed by:
+
+- capturing a real pre-block entry snapshot before the interpreter trace loop runs
+- replaying the interpreter block from entry state under the verifier
+- running the compiled block from the same entry state
+
+After that fix, the old “compiled block ran one or two instructions too far” conclusion was invalidated.
+
+### 2. ARM64 endblock slow-path bugs were real and are now fixed
+
+Two concrete ARM64 contract bugs were identified and fixed in dispatcher/chain handoff paths:
+
+1. **setpc trampolines only updated `regs.pc_p`**
+   - `popall_execute_normal_setpc`
+   - `popall_check_checksum_setpc`
+   - `popall_exec_nostats_setpc`
+
+   These now rebuild canonical PC state instead of entering C/interpreter code with stale `regs.pc` / `regs.pc_oldp`.
+
+2. **ARM64 endblock helpers used brittle negative-branch skip counts**
+   - `compemu_raw_endblock_pc_inreg()`
+   - `compemu_raw_endblock_pc_isconst()`
+
+   These were rewritten to use explicit patched hot/slow branch layout, removing the hard-coded skip-count contract.
+
+These fixes removed a real class of `bad pc_p` / `exec_normal bad` failures from the safe runtime.
+
+### 3. Corrected verifier result for the old hot helper chain
+
+With the fixed verifier, the earlier helper chain is mostly clean in targeted runs:
+
+- `0x040b3566` → matches in targeted verifier runs
+- `0x040b35c6` → matches in targeted verifier runs
+- `0x040b35c8` → matches in targeted verifier runs
+- `0x040b34a8` → matches in targeted verifier runs
+
+The one remaining context-sensitive verifier mismatch in that neighborhood is:
+
+- `0x040b357c`
+
+and it depends on whether that code is traced as a 1-op block or as the full `0241 4ed3` 2-op form.
+
+So the old `0x040b3566 -> 0x040b35c6 -> 0x040b35c8` chain is no longer the best lead for the immediate pure-L2 crash.
+
+### 4. Pure L2 everywhere still crashes
+
+All hardcoded barriers were temporarily removed, including:
+
+- DBcc
+- JMP / JSR
+- Bcc / BRA / BSR
+- EmulOps
+- MOVEQ
+- MOVEM
+- SR/CCR modifiers
+
+The pure-L2 run really was pure L2:
+
+- `optlev=[2]`
+
+and it failed with the old bad-PC family:
+
+- `regs.pc = 0xffffffff`
+- `pc_p = 0x10fffffff`
+- `exec_normal bad`
+- `bad pc_p`
+
+So at least one removed barrier was hiding a real native codegen bug.
+
+### 5. Barrier binary search localizes the immediate pure-L2 crash to short BRA
+
+A systematic barrier binary search was run by restoring subsets of the removed barriers via env-controlled tokens.
+
+Results:
+
+- restoring `branch` prevented the immediate pure-L2 bad-PC crash
+- restoring only `jsr` did **not** prevent it
+- splitting `branch` further showed:
+  - restoring only `braq` prevented the crash
+  - restoring only `braw` did not
+  - restoring only `bral` did not
+  - restoring only `bsr` did not
+  - restoring only `bcc` did not
+
+So the crashing native branch-family path is specifically:
+
+> **short BRA (`BRAQ.B`)**
+
+### 6. Direct handler-side BRA arithmetic was not the whole bug
+
+A direct fix attempt was made in the generated BRA handlers (`op_6000/op_6001/op_60ff`, ff/nf) to simplify how branch targets are formed, but pure-L2 still reproduced the `regs.pc=ffffffff` failure.
+
+So the remaining short-BRA problem is probably **not just the obvious displacement arithmetic in the emitted handler body**. The deeper problem is more likely in the constant-jump / block-follow / block-concatenation semantics that native short BRA relies on.
+
+### 7. Current safe state
+
+To keep the runtime safe while continuing investigation:
+
+- short BRA (`BRAQ.B`) is barriered again by default
+- other hardcoded barriers remain removed unless explicitly restored by env
+- current short smokes show:
+  - `optlev=[2]`
+  - no `bad pc_p`
+  - no `exec_normal bad`
+  - no SIGSEGV/SIGBUS in the 20s safe runtime check
+
+### 8. What is still not solved
+
+Even in the current safe state:
+
+- Xvfb visual checks are still black
+- no `DiskStatus`
+- no `SCSIGet`
+- no `SDL_VIDEOINT`
+- no `SDL_PRESENT`
+
+So the current state is:
+
+> the immediate pure-L2 crash family is localized to short BRA and fenced off again, but boot still does not reach visible Mac OS progress.
 
 ### Hardware
 
@@ -255,20 +387,60 @@ The earlier `ADDA.L (d16,A3),A3` suspicion remains historical context, but is no
 
 ### Per-Instruction Interpreter Barriers
 
-Instead of demoting entire blocks to L1 when they contain control-flow instructions, we implemented per-instruction interpreter barriers via `jit_force_interpreter_barrier_opcode()`. Specific instruction types force an interpreter fallback within L2 blocks:
+The barrier policy changed during the latest isolation work.
 
-- **Control flow**: Bcc, BRA, BSR, JMP, JSR, RTS, RTE, RTR, RTD, TRAPV
-- **Multi-register**: MOVEM
-- **Traps**: A-line (0xAxxx), EmulOps (0x71xx)
-- **SR modifiers**: MV2SR.W, ANDI/ORI/EORI to SR, selected CCR operations
+Historically, many control-flow / trap / state-modifying instructions were hard-barriered in `jit_force_interpreter_barrier_opcode()`. To test pure L2 properly, those hardcoded barriers were removed and replaced with env-controlled restoration tokens such as:
 
-Instructions before the barrier compile natively; the barrier instruction itself runs through the interpreter and ends the block.
+- `branch`, `bra`, `braq`, `braw`, `bral`, `bsr`, `bcc`
+- `jsr`, `jmp`, `ret`
+- `movem`, `aline`, `emulop`, `sr`, `moveq`, `dbcc`
+
+The current default safety state is narrower:
+
+- **short BRA (`BRAQ.B`) remains barriered by default** because removing it reproduces the immediate pure-L2 `regs.pc=ffffffff` / `bad pc_p` crash
+- other formerly hardcoded barriers are now restored only when explicitly requested for bisection/debugging
+
+When a barrier is active, instructions before it still compile natively; the barrier instruction itself runs through the interpreter and the block exits through the normal dispatcher path.
 
 ### Managed IRQ Delivery (`B2_JIT_MANAGED_IRQ=1`)
 
 Replaced the SIGUSR1-based async interrupt injection with a deferred safe-point model (similar to the original x86 JIT). Interrupts are consumed at block boundaries via `spcflags` checks rather than asynchronous signal delivery.
 
 A later fix tightened this further: in managed mode, **masked** level-1 interrupts no longer set `SPCFLAG_INT` immediately. They remain pending in `InterruptFlags` until SR/intmask changes make them deliverable. This removes a real block-boundary side-channel, although it did not fully solve the all-native stall.
+
+### Concurrent External Actors and Async Inputs
+
+The JIT does not run in isolation. In the current SDL + pthread build, several host-side actors continue running while the CPU thread executes native blocks:
+
+| Actor | Source | What it does | How it can affect L2 |
+|---|---|---|---|
+| CPU/JIT thread | `Start680x0()` → `m68k_compile_execute()` | Executes native blocks, fallbacks, exceptions, IRQ services | Primary execution engine |
+| 60Hz tick thread | `src/Unix/main_unix.cpp` `tick_func()` | Real-time `one_tick()` every ~16.625 ms | Sets `INTFLAG_60HZ` / `INTFLAG_1HZ`, calls `TriggerInterrupt()`, pumps SDL events from main-thread context |
+| SDL redraw/input thread | `src/SDL/video_sdl2.cpp` `redraw_func()` | Runs `handle_events()` + `video_refresh()` at ~60 Hz | Host input can raise `INTFLAG_ADB`; video work changes host scheduling and wall-time cost |
+| XPRAM watchdog thread | `src/Unix/main_unix.cpp` `xpram_func()` | Periodic XPRAM save | Minor host scheduling / I/O noise |
+| VNC thread (optional) | `src/SDL/vnc_server.cpp` | Background VNC snapshot / event processing | Extra host CPU load and timing pressure |
+| SDL audio callback (optional) | `src/SDL/audio_sdl.cpp` | Consumes audio ring buffer | Can interact with `INTFLAG_AUDIO` and host scheduling |
+| Ethernet RX thread (optional) | `src/ether.cpp` | Receives UDP/network packets asynchronously | Can raise `INTFLAG_ETHER` |
+| Host renderer / compositor threads | external to BasiliskII | GPU / window-system work | Add wall-time jitter without direct guest-state mutation |
+
+All asynchronous sources converge on:
+
+- `InterruptFlags`
+- `TriggerInterrupt()`
+- `regs.spcflags`
+- later `M68K_EMUL_OP_IRQ` service in `src/emul_op.cpp`
+
+That IRQ service then fans back out into guest-visible work:
+
+- `TimerInterrupt()`
+- `VideoInterrupt()`
+- `DoVBLTask`
+- `SonyInterrupt()` / `DiskInterrupt()` / `CDROMInterrupt()`
+- `ADBInterrupt()`
+- `EtherInterrupt()`
+- `AudioInterrupt()`
+
+This means L2 can fail even when local architectural state matches at a probe site, simply because block shape changes **when** the CPU thread returns to a safe point and therefore **when** async work becomes visible.
 
 ### Lightweight Inter-Instruction Spcflags Check
 
@@ -317,6 +489,8 @@ Added `--enable-aarch64-jit-experimental` to the autoconf build system, enabling
 | `B2_JIT_SYNC_TICKS=1` | Experimental synchronous tick model driven from JIT dispatch returns |
 | `B2_JIT_L2_ONLY=1` | Force all blocks to optlev=2 |
 | `B2_JIT_MAX_OPTLEV=N` | Cap maximum optimization level |
+| `B2_JIT_FLUSH_EACH_OP=1` | Diagnostic: canonicalize guest state after every compiled opcode |
+| `B2_JIT_FLUSH_OP_PCS=pc[-pc],...` | Diagnostic: canonicalize guest state only after selected compiled opcode PCs |
 
 ### Runtime Verification Framework
 
@@ -329,25 +503,23 @@ This confirmed 0 mismatches for all tested instructions across all opcode famili
 
 ### Per-Family Bisection
 
-The `B2_JIT_BARRIER_FAMILIES` variable allows testing each opcode family independently:
+The older `B2_JIT_BARRIER_FAMILIES` variable is still useful for coarse family testing, but the latest work bisected the crashing control-flow path more precisely with env-controlled barrier restoration tokens.
 
-| Family | Instructions | Boot Status |
+| Family | Instructions | Current status |
 |--------|-------------|-------------|
-| 0 | ORI/ANDI/SUBI/ADDI/CMPI/BTST/BCHG/BCLR/BSET | ⏳ All-native structural stall |
-| 1 | MOVE.B | ⏳ All-native structural stall |
-| 2 | MOVE.L | ⏳ All-native structural stall |
-| 3 | MOVE.W | ⏳ All-native structural stall |
-| 4 | CLR/NEG/NOT/TST/PEA/LEA/EXT/SWAP/LINK/UNLK | ✅ Boots |
-| 5 | ADDQ/SUBQ/Scc/DBcc | ⏳ All-native structural stall |
-| 6 | Bcc/BRA/BSR | ✅ Boots (barriers) |
-| 7 | MOVEQ | ✅ Boots |
-| 8 | OR/DIV/SBCD | ✅ Boots |
-| 9 | SUB/SUBA/SUBX | ✅ Boots |
-| a | A-line traps | ✅ Boots (barriers) |
-| b | CMP/CMPA/EOR | ✅ Boots |
-| c | AND/MUL/ABCD/EXG | ✅ Boots |
-| d | ADD/ADDA/ADDX | ⏳ All-native structural stall |
-| e | Shifts/Rotates | ✅ Boots |
+| 0 | ORI/ANDI/SUBI/ADDI/CMPI/BTST/BCHG/BCLR/BSET | native active in current L2 tests |
+| 1 | MOVE.B | native active in current L2 tests |
+| 2 | MOVE.L | native active in current L2 tests |
+| 3 | MOVE.W | native active in current L2 tests |
+| 4 | CLR/NEG/NOT/TST/PEA/LEA/EXT/SWAP/LINK/UNLK | native active |
+| 5 | ADDQ/SUBQ/Scc/DBcc | native active in current tests unless `dbcc` barrier is explicitly restored |
+| 6 | Bcc/BRA/BSR | immediate pure-L2 crash localized to **short BRA (`BRAQ.B`)**; short BRA is barriered again by default |
+| 7 | MOVEQ | native active in current L2 tests |
+| a | A-line traps | native active unless `aline` barrier is explicitly restored |
+| b | CMP/CMPA/EOR | native active |
+| c | AND/MUL/ABCD/EXG | native active |
+| d | ADD/ADDA/ADDX | native active in current L2 tests |
+| e | Shifts/Rotates | native active |
 
 ### Boot Progress Metrics
 
@@ -372,31 +544,49 @@ SDL_VIDEODRIVER=x11 DISPLAY=:99 B2_JIT_MANAGED_IRQ=1 \
 
 ### What Works
 
-With the 9 working opcode families (4,6,7,8,9,a,b,c,e) compiling natively:
-- Mac OS 7.5.5 boots to Finder desktop reliably
-- Speedometer benchmark runs (Graphics score: 210.368 at L1)
-- VNC remote display functional
-- Managed IRQ delivery stable
+- Managed IRQ delivery remains stable in the current safe build.
+- The fixed verifier now gives trustworthy whole-block comparisons instead of successor-state artifacts.
+- Current safe short smokes run with:
+  - `optlev=[2]`
+  - no `bad pc_p`
+  - no `exec_normal bad`
+  - no SIGSEGV / SIGBUS
 
-### Remaining Issue: All-Native Stall After Early Native Graph Build
+### Remaining Issue
 
-The 6 remaining families (0,1,2,3,5,d) still prevent a fully-native boot, but the diagnosis is now narrower than “memory divergence from a bad instruction.” Latest results:
+Boot still does **not** reach visible Mac OS progress in the current safe configuration:
 
-- Good gated config (`B2_JIT_BARRIER_FAMILIES="0,1,2,3,5,d,f"`) still reaches healthy boot progress: `DiskStatus=42`, `SCSIGet=14`
-- After bug 14, the all-native managed-IRQ config got measurably further: from ~174 compiled L2 blocks to ~189 compiled L2 blocks in the same headless test window
-- The early `0x0400091e / 0x04000922` divergence is gone after the legacy `adc/sbb` carry-semantics fix
-- Bug 15 fixed another real boundary issue: `FLAGX` now stays in interpreter format in memory, and targeted verification of the compiled block at `0x040b3566` no longer shows `X`-format mismatches
-- Experimental synchronous ticks (`B2_JIT_SYNC_TICKS=1`) still do **not** resolve the remaining stall
-- The next first matched-PC divergence is still later at `0x040b34dc`, but the transformed value changed again after bug 15, which confirms the remaining issue is still inside the same helper/transform family of code
+- Xvfb capture remains black
+- `DiskStatus=0`
+- `SCSIGet=0`
+- `SDL_VIDEOINT=0`
+- `SDL_PRESENT=0`
 
-This means the bringup is now in a deeper phase: two additional real semantic/boundary bugs have been removed, and the next remaining bug is in the helper/transform path that prepares the data checked at `0x040b34dc`.
+So there are now **two separated facts**:
+
+1. the immediate pure-L2 bad-PC crash has been localized to native short BRA and fenced off again
+2. even with that crash fenced off, the machine still does not boot to a visible desktop
+
+### Most useful current interpretation
+
+The old broad “async/timing explains everything” hypothesis is no longer the best summary.
+
+The strongest current picture is:
+
+- a real native short-BRA bug exists on ARM64 L2
+- that bug is severe enough to reproduce the old `regs.pc=ffffffff` crash in pure L2
+- after fencing it back off, a second remaining problem still prevents visible boot progress
 
 ### Diagnosis Path Forward
 
-1. **Use targeted verification (`B2_JIT_VERIFY_PCS`)** on the remaining compiled helper-entry blocks feeding the transform path (for example `0x0404b0be..0x0404b0cc` and nearby dispatch/setup blocks)
-2. **Compare helper outputs at `0x040b34dc`** between good and all-native runs to identify the first wrong transformed byte/word result
-3. **Test targeted optlev1 barriers inside the helper/dispatch path** to isolate which remaining compiled operation changes the final `D1/D2` pair
-4. **If helper semantics check out, return to deeper structure**: direct chaining, cache tags, or checksum/invalidation beyond this point
+The highest-value next work is now:
+
+1. fix the native short-BRA path properly
+   - likely in constant-jump / block-follow / chain semantics rather than only the obvious displacement arithmetic
+2. re-run pure-L2 / branch-family checks
+3. only then re-evaluate the remaining black-screen / no-progress runtime stall
+
+For the older broader async-isolation plan, see `docs/AARCH64_JIT_ISOLATION_MATRIX.md`.
 
 ## Build Instructions
 

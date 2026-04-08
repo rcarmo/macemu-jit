@@ -170,19 +170,17 @@ void m68k_do_compile_execute(void)
 		if (0) {
 			fprintf(stderr, "D %lu %08x", _dc, (unsigned)m68k_getpc()); if (_dc >= 11710 && _dc <= 11720) { MakeSR(); fprintf(stderr, " sr=%04x d0=%08x d1=%08x a3=%08x", (unsigned)regs.sr, (unsigned)m68k_dreg(regs,0), (unsigned)m68k_dreg(regs,1), (unsigned)m68k_areg(regs,3)); } fprintf(stderr, "\n");
 		}
+#if defined(CPU_AARCH64)
+		{
+			extern int32 jit_countdown;
+			if (jit_countdown < 0)
+				jit_countdown = 16000;
+		}
+#endif
 		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
 			if (m68k_do_specialties())
 				return;
 		}
-#if defined(CPU_AARCH64)
-		/* Reset JIT countdown after returning to C dispatch.
-		   The endblock code decrements jit_countdown and returns here
-		   when it goes negative. Reset to allow ~1000 more block
-		   dispatches before the next forced return. */
-		extern int32 jit_countdown;
-		if (jit_countdown < 0)
-			jit_countdown = 16000;
-#endif
 	}
 }
 

@@ -1090,6 +1090,17 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 
 static int present_sdl_video()
 {
+	{
+		static bool present_logged = false;
+		const char *trace_present = getenv("B2_TRACE_PRESENT");
+		if (!present_logged && trace_present && strcmp(trace_present, "0") != 0) {
+			fprintf(stderr, "SDL_PRESENT first rect=%d,%d %dx%d host=%p guest=%p\n",
+				sdl_update_video_rect.x, sdl_update_video_rect.y, sdl_update_video_rect.w, sdl_update_video_rect.h,
+				(void*)host_surface, (void*)guest_surface);
+			fflush(stderr);
+			present_logged = true;
+		}
+	}
 	if (SDL_RectEmpty(&sdl_update_video_rect)) {
 		maybe_dump_surface_png(host_surface);
 		return 0;
@@ -1163,6 +1174,14 @@ static int present_sdl_video()
 	
     // Update the display
 	SDL_RenderPresent(sdl_renderer);
+	{
+		static bool dump_first_present_done = false;
+		const char *dump_first_present = getenv("B2_DUMP_FIRST_PRESENT");
+		if (!dump_first_present_done && dump_first_present && strcmp(dump_first_present, "0") != 0) {
+			dump_surface_png_now(host_surface, "first-present", "present");
+			dump_first_present_done = true;
+		}
+	}
 	maybe_dump_surface_png(host_surface);
 	VNCServerUpdate(host_surface, updated_rect);
     
@@ -1175,6 +1194,14 @@ void update_sdl_video(SDL_Surface *s, int numrects, SDL_Rect *rects)
     // TODO: make sure SDL_Renderer resources get displayed, if and when
     // MacsBug is running (and VideoInterrupt() might not get called)
     
+    static bool update_logged = false;
+    const char *trace_present = getenv("B2_TRACE_PRESENT");
+    if (!update_logged && trace_present && strcmp(trace_present, "0") != 0 && numrects > 0) {
+        fprintf(stderr, "SDL_UPDATE first numrects=%d rect0=%d,%d %dx%d s=%p\n",
+            numrects, rects[0].x, rects[0].y, rects[0].w, rects[0].h, (void*)s);
+        fflush(stderr);
+        update_logged = true;
+    }
     SDL_LockMutex(sdl_update_video_mutex);
     for (int i = 0; i < numrects; ++i) {
         SDL_UnionRect(&sdl_update_video_rect, &rects[i], &sdl_update_video_rect);
@@ -2019,6 +2046,13 @@ void VideoVBL(void)
 #else
 void VideoInterrupt(void)
 {
+	static bool video_interrupt_logged = false;
+	const char *trace_present = getenv("B2_TRACE_PRESENT");
+	if (!video_interrupt_logged && trace_present && strcmp(trace_present, "0") != 0) {
+		fprintf(stderr, "SDL_VIDEOINT first\n");
+		fflush(stderr);
+		video_interrupt_logged = true;
+	}
 	// We must fill in the events queue in the same thread that did call SDL_SetVideoMode()
 	SDL_PumpEvents();
 

@@ -233,6 +233,12 @@ extern op_properties prop[65536];
 
 STATIC_INLINE int end_block(uae_u16 opcode)
 {
+	/* Short BRA (0x60xx except 0x6000/0x60ff) must end the traced block.
+	   On ARM64 the generic cflow metadata was allowing execution to continue
+	   at the branch target inside the same block, which in pure L2 produced
+	   the bad-PC `regs.pc=ffffffff` family. */
+	if ((opcode & 0xff00) == 0x6000 && opcode != 0x6000 && opcode != 0x60ff)
+		return 1;
 	return (prop[opcode].cflow & fl_end_block);
 }
 

@@ -228,6 +228,8 @@ LOWFUNC(WRITE,RMW,2,compemu_raw_inc_opcount,(IM16 op))
 }
 LENDFUNC(WRITE,RMW,1,compemu_raw_inc_opcount,(IM16 op))
 
+STATIC_INLINE void compemu_raw_call(uintptr t);
+
 LOWFUNC(WRITE,READ,1,compemu_raw_cmp_pc,(IMPTR s))
 {
 	/* s is always >= NATMEM_OFFSET and < NATMEM_OFFSET + max. Amiga mem */
@@ -244,6 +246,13 @@ LENDFUNC(WRITE,READ,1,compemu_raw_cmp_pc,(IMPTR s))
 LOWFUNC(NONE,WRITE,1,compemu_raw_set_pc_i,(IMPTR s))
 {
 	LOAD_U64(REG_WORK1, s);
+	if (jit_trace_setpc_env()) {
+		STR_xXpre(REG_WORK1, RSP_INDEX, -16);
+		LDR_xXi(REG_PAR1, RSP_INDEX, 0);
+		LOAD_U32(REG_PAR2, 9);
+		compemu_raw_call((uintptr)jit_trace_setpc_value);
+		LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
+	}
 	uintptr idx = (uintptr) &(regs.pc_p) - (uintptr) &regs;
 	STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
 }
@@ -468,6 +477,25 @@ LOWFUNC(NONE,WRITE,1,compemu_raw_execute_normal,(MEMR s))
 }
 LENDFUNC(NONE,WRITE,1,compemu_raw_execute_normal,(MEMR s))
 
+STATIC_INLINE void compemu_raw_execute_normal_cycles(MEMR s, IM32 cycles)
+{
+	LOAD_U64(REG_WORK3, (uintptr)&countdown);
+	LDR_wXi(REG_WORK2, REG_WORK3, 0);
+	if(cycles >= 0 && cycles <= 0xfff) {
+		SUB_wwi(REG_WORK2, REG_WORK2, cycles);
+	} else {
+		LOAD_U32(REG_WORK1, cycles);
+		SUB_www(REG_WORK2, REG_WORK2, REG_WORK1);
+	}
+	STR_wXi(REG_WORK2, REG_WORK3, 0);
+
+	LOAD_U64(REG_WORK1, s);
+	LDR_xXi(REG_WORK1, REG_WORK1, 0);
+	uae_u32* branchadd = (uae_u32*)get_target();
+	B_i(0);
+	write_jmp_target(branchadd, (uintptr)popall_execute_normal_setpc);
+}
+
 LOWFUNC(NONE,WRITE,1,compemu_raw_check_checksum,(MEMR s))
 {
 	LOAD_U64(REG_WORK1, s);
@@ -584,7 +612,31 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	}
 	STR_wXi(REG_WORK1, REG_WORK3, 0);
 
-	TBNZ_xii(REG_WORK1, 31, 7); // test sign → skip 7 insns to B_i(do_nothing)
+	uae_u32* branch_hot = (uae_u32*)get_target();
+	TBZ_xii(REG_WORK1, 31, 0); // non-negative countdown continues on the hot chain path
+
+	/* Slow exit: persist the already-computed successor PC and return to the
+	   dispatcher without chaining into the next block. */
+	{
+		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
+		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
+	}
+	uae_u32* branchadd = (uae_u32*)get_target();
+	B_i(0);
+	write_jmp_target(branchadd, (uintptr)popall_do_nothing);
+
+	write_jmp_target(branch_hot, (uintptr)get_target());
+	if (jit_trace_setpc_env()) {
+		STR_xXpre(rr_pc, RSP_INDEX, -16);
+		MOV_xx(REG_PAR1, rr_pc);
+		LOAD_U32(REG_PAR2, 4);
+		compemu_raw_call((uintptr)jit_trace_setpc_value);
+		LDR_xXpost(rr_pc, RSP_INDEX, 16);
+	}
+	if (jit_store_pcp_on_chain_env()) {
+		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
+		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
+	}
 	UBFIZ_xxii(rr_pc, rr_pc, 0, 16);  // apply TAGMASK (bottom 16 bits)
 	/* Clear bit 0 to ensure even cacheline index (handler slot, not bi slot) */
 	UBFX_xxii(rr_pc, rr_pc, 1, 15);
@@ -593,10 +645,6 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	LDR_xXi(REG_WORK1, R_REGSTRUCT, offs);
 	LDR_xXxLSLi(REG_WORK1, REG_WORK1, rr_pc, 3); // cacheline holds pointer -> multiply with 8
 	BR_x(REG_WORK1);
-
-	uae_u32* branchadd = (uae_u32*)get_target();
-	B_i(0);
-	write_jmp_target(branchadd, (uintptr)popall_do_nothing);
 }
 LENDFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 
@@ -617,18 +665,38 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 	}
 	STR_wXi(REG_WORK1, REG_WORK3, 0);
 
-	TBNZ_xii(REG_WORK1, 31, 2); // test sign and branch if set (negative)
-	tba = (uae_u32*)get_target();
-	B_i(0); // <target set by caller>
+	uae_u32* branch_hot = (uae_u32*)get_target();
+	TBZ_xii(REG_WORK1, 31, 0); // non-negative countdown continues on the hot chain path
 
-	LDR_xPCi(REG_WORK1, 12); // <v>
+	/* Slow exit: persist the constant successor PC in guest state and return
+	   to the dispatcher without chaining. */
+	LOAD_U64(REG_WORK1, v);
+	if (jit_trace_setpc_env()) {
+		STR_xXpre(REG_WORK1, RSP_INDEX, -16);
+		LDR_xXi(REG_PAR1, RSP_INDEX, 0);
+		LOAD_U32(REG_PAR2, 6);
+		compemu_raw_call((uintptr)jit_trace_setpc_value);
+		LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
+	}
 	uintptr offs = (uintptr)&regs.pc_p - (uintptr)&regs;
 	STR_xXi(REG_WORK1, R_REGSTRUCT, offs);
 	uae_u32* branchadd = (uae_u32*)get_target();
 	B_i(0);
 	write_jmp_target(branchadd, (uintptr)popall_do_nothing);
 
-	emit_quad(v);
+	write_jmp_target(branch_hot, (uintptr)get_target());
+	if (jit_trace_setpc_env()) {
+		LOAD_U64(REG_PAR1, v);
+		LOAD_U32(REG_PAR2, 5);
+		compemu_raw_call((uintptr)jit_trace_setpc_value);
+	}
+	if (jit_store_pcp_on_chain_env()) {
+		LOAD_U64(REG_WORK2, v);
+		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
+		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pc);
+	}
+	tba = (uae_u32*)get_target();
+	B_i(0); // <target set by caller>
 
 	return tba;
 }

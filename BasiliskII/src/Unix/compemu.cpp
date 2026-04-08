@@ -26842,12 +26842,10 @@ void REGPARAM2 op_6000_0_comp_ff(uae_u32 opcode) /* Bcc */
 	mov_l_ri(src, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
 	sign_extend_16_rr(src,src);
 	sub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);
-	add_l_ri(src,(uintptr)comp_pc_p);
 	mov_l_ri(PC_P,(uintptr)comp_pc_p);
-	add_l_ri(src,m68k_pc_offset);
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
-	mov_l_rr(PC_P,src);
+	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -26856,11 +26854,11 @@ void REGPARAM2 op_6000_0_comp_ff(uae_u32 opcode) /* Bcc */
 /* BccQ.B #<data> */
 void REGPARAM2 op_6001_0_comp_ff(uae_u32 opcode) /* Bcc */
 {
-#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)
-	uae_u32 srcreg = (uae_s32)(uae_s8)((opcode >> 8) & 255);
-#else
+	/* ARM64 JIT uses canonical big-endian opcodes via DO_GET_OPCODE.
+	   For BRAQ.B the 8-bit displacement lives in the low byte. Using the
+	   HAVE_GET_WORD_UNSWAPPED extraction here reads the condition byte
+	   instead and sends short BRA to the wrong target. */
 	uae_s32 srcreg = (uae_s32)(uae_s8)(opcode & 255);
-#endif
 	uae_u32 dodgy=0;
 	uae_u32 m68k_pc_offset_thisinst=m68k_pc_offset;
 	m68k_pc_offset+=2;
@@ -26870,12 +26868,10 @@ void REGPARAM2 op_6001_0_comp_ff(uae_u32 opcode) /* Bcc */
 	mov_l_ri(src, srcreg);
 	sign_extend_8_rr(src,src);
 	sub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);
-	add_l_ri(src,(uintptr)comp_pc_p);
 	mov_l_ri(PC_P,(uintptr)comp_pc_p);
-	add_l_ri(src,m68k_pc_offset);
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
-	mov_l_rr(PC_P,src);
+	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -26892,12 +26888,10 @@ void REGPARAM2 op_60ff_0_comp_ff(uae_u32 opcode) /* Bcc */
 {	int src = scratchie++;
 	mov_l_ri(src, comp_get_ilong((m68k_pc_offset+=4)-4));
 	sub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);
-	add_l_ri(src,(uintptr)comp_pc_p);
 	mov_l_ri(PC_P,(uintptr)comp_pc_p);
-	add_l_ri(src,m68k_pc_offset);
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
-	mov_l_rr(PC_P,src);
+	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -67092,12 +67086,10 @@ void REGPARAM2 op_6000_0_comp_nf(uae_u32 opcode) /* Bcc */
 	mov_l_ri(src, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
 	sign_extend_16_rr(src,src);
 	sub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);
-	add_l_ri(src,(uintptr)comp_pc_p);
 	mov_l_ri(PC_P,(uintptr)comp_pc_p);
-	add_l_ri(src,m68k_pc_offset);
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
-	mov_l_rr(PC_P,src);
+	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -67106,11 +67098,11 @@ void REGPARAM2 op_6000_0_comp_nf(uae_u32 opcode) /* Bcc */
 /* BccQ.B #<data> */
 void REGPARAM2 op_6001_0_comp_nf(uae_u32 opcode) /* Bcc */
 {
-#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)
-	uae_u32 srcreg = (uae_s32)(uae_s8)((opcode >> 8) & 255);
-#else
+	/* ARM64 JIT uses canonical big-endian opcodes via DO_GET_OPCODE.
+	   For BRAQ.B the 8-bit displacement lives in the low byte. Using the
+	   HAVE_GET_WORD_UNSWAPPED extraction here reads the condition byte
+	   instead and sends short BRA to the wrong target. */
 	uae_s32 srcreg = (uae_s32)(uae_s8)(opcode & 255);
-#endif
 	uae_u32 dodgy=0;
 	uae_u32 m68k_pc_offset_thisinst=m68k_pc_offset;
 	m68k_pc_offset+=2;
@@ -67120,12 +67112,10 @@ void REGPARAM2 op_6001_0_comp_nf(uae_u32 opcode) /* Bcc */
 	mov_l_ri(src, srcreg);
 	sign_extend_8_rr(src,src);
 	sub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);
-	add_l_ri(src,(uintptr)comp_pc_p);
 	mov_l_ri(PC_P,(uintptr)comp_pc_p);
-	add_l_ri(src,m68k_pc_offset);
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
-	mov_l_rr(PC_P,src);
+	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -67142,12 +67132,10 @@ void REGPARAM2 op_60ff_0_comp_nf(uae_u32 opcode) /* Bcc */
 {	int src = scratchie++;
 	mov_l_ri(src, comp_get_ilong((m68k_pc_offset+=4)-4));
 	sub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);
-	add_l_ri(src,(uintptr)comp_pc_p);
 	mov_l_ri(PC_P,(uintptr)comp_pc_p);
-	add_l_ri(src,m68k_pc_offset);
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
-	mov_l_rr(PC_P,src);
+	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)

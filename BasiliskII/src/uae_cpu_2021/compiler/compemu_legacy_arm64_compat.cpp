@@ -614,14 +614,39 @@ void execute_normal(void)
 	jit_diag_execute_normal_calls++;
 	jit_diag_dispatch_count++;
 	jit_diag_maybe_print();
+	/* If pc_p is outside valid Mac memory range (corrupt), re-derive it. */
+	{
+		uintptr pcp = (uintptr)regs.pc_p;
+		uintptr base = (uintptr)RAMBaseHost;
+		uintptr limit = base + RAMSize + ROMSize + 0x100000;
+		if (pcp < base || pcp >= limit || (pcp & 1)) {
+			static int fix_count = 0;
+			uae_u32 safe_pc = regs.pc & ~1u;
+			if (fix_count++ < 50)
+				fprintf(stderr, "JIT: exec_normal bad pc_p=%p regs.pc=%08x safe=%08x "
+					"d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x spc=%08x oldp=%p last_setpc=%p last_kind=%u last_seq=%lu\n",
+					(void*)regs.pc_p, regs.pc, safe_pc,
+					regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[15],
+					(unsigned)regs.sr, (unsigned)regs.spcflags, (void*)regs.pc_oldp,
+					(void*)jit_last_setpc_value, (unsigned)jit_last_setpc_kind, jit_last_setpc_seq);
+			flush_icache_hard(7);
+			regs.pc = safe_pc;
+			regs.pc_p = get_real_address(safe_pc, 0, sz_word);
+			regs.pc_oldp = regs.pc_p;
+		}
+	}
 #endif
 	if (!check_for_cache_miss()) {
 		cpu_history pc_hist[MAXRUN];
 		memset(pc_hist, 0, sizeof(pc_hist));
 		int blocklen = 0;
 		int total_cycles = 0;
-		start_pc_p = regs.pc_oldp;
-		start_pc = regs.pc;
+		/* Use the actual current fetch PC as the base for this traced block.
+		   On ARM64, stale regs.pc/regs.pc_oldp metadata can survive across
+		   mixed-mode transitions even when regs.pc_p is correct. PC-relative
+		   codegen (LEA/JMP d16,PC) should anchor to the current host PC. */
+		start_pc_p = regs.pc_p;
+		start_pc = get_virtual_address((uae_u8*)regs.pc_p);
 #if defined(CPU_AARCH64)
 		{
 			static unsigned long pctrace_count = 0;
@@ -633,7 +658,24 @@ void execute_normal(void)
 				pctrace_init = true;
 			}
 			if (pctrace_limit && pctrace_count < pctrace_limit) {
+				static unsigned long pctrace_words = 0;
+				static bool pctrace_words_init = false;
 				uae_u32 pc = m68k_getpc();
+				if (!pctrace_words_init) {
+					const char *env = getenv("B2_JIT_PCTRACE_WORDS");
+					pctrace_words = env ? strtoul(env, NULL, 10) : 0;
+					pctrace_words_init = true;
+				}
+				static int pctrace_stack = -1;
+				static int pctrace_mem = -1;
+				if (pctrace_stack < 0) {
+					const char *env = getenv("B2_JIT_PCTRACE_STACK");
+					pctrace_stack = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+				}
+				if (pctrace_mem < 0) {
+					const char *env = getenv("B2_JIT_PCTRACE_MEM");
+					pctrace_mem = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+				}
 				fprintf(stderr, "PCTRACE %lu %08x d0=%08x d1=%08x d2=%08x d3=%08x d4=%08x d5=%08x d6=%08x d7=%08x a0=%08x a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x sr=%04x nzcv=%08x x=%08x\n",
 					pctrace_count++, pc,
 					regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[3],
@@ -641,6 +683,39 @@ void execute_normal(void)
 					regs.regs[8], regs.regs[9], regs.regs[10], regs.regs[11],
 					regs.regs[12], regs.regs[13], regs.regs[14], regs.regs[15],
 					(unsigned)regs.sr, regflags.nzcv, regflags.x);
+				if (pctrace_stack) {
+					uaecptr sp = m68k_areg(regs, 7);
+					fprintf(stderr,
+						"PCTSTACK %08x sm4=%08x s0=%08x s4=%08x s8=%08x\n",
+						pc,
+						(unsigned)get_long(sp - 4),
+						(unsigned)get_long(sp + 0),
+						(unsigned)get_long(sp + 4),
+						(unsigned)get_long(sp + 8));
+				}
+				if (pctrace_mem) {
+					uaecptr a0v = m68k_areg(regs, 0);
+					uaecptr a3v = m68k_areg(regs, 3);
+					fprintf(stderr,
+						"PCTMEM %08x m1e4=%08x m1e8=%08x m20c=%08x ma0m4=%08x ma3=%08x ma3p4=%08x\n",
+						pc,
+						(unsigned)get_long(0x1e4),
+						(unsigned)get_long(0x1e8),
+						(unsigned)get_long(0x20c),
+						(unsigned)get_long(a0v >= 4 ? a0v - 4 : a0v),
+						(unsigned)get_long(a3v),
+						(unsigned)get_long(a3v + 4));
+				}
+				if (pctrace_words) {
+					if (pctrace_words > 12)
+						pctrace_words = 12;
+					fprintf(stderr, "PCTOPS %08x", pc);
+					for (unsigned long wi = 0; wi < pctrace_words; wi++) {
+						uae_u16 w = get_iword((int)(wi * 2));
+						fprintf(stderr, " w%lu=%04x", wi, (unsigned)w);
+					}
+					fprintf(stderr, "\n");
+				}
 			}
 		}
 #endif
@@ -653,6 +728,10 @@ void execute_normal(void)
 		   has negligible impact on 60Hz timing accuracy. */
 		extern bool tick_inhibit;
 		tick_inhibit = true;
+		uae_u32 verify_block_pc = get_virtual_address((uae_u8*)regs.pc_p);
+		const bool verify_this_block = !jit_block_verify_reentrant && jit_verify_block_target_pc(verify_block_pc);
+		if (verify_this_block)
+			jit_block_verify_entry_capture(verify_block_pc);
 #endif
 		for (;;) {
 			pc_hist[blocklen++].location = (uae_u16 *)regs.pc_p;
@@ -676,6 +755,11 @@ void execute_normal(void)
 			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
 #if defined(CPU_AARCH64)
 				tick_inhibit = false;
+				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);
+				if (verify_this_block) {
+					jit_block_verify_run(pc_hist, blocklen, total_cycles, block_pc);
+					return;
+				}
 #endif
 				compile_block(pc_hist, blocklen, total_cycles);
 				return;

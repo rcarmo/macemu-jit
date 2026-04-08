@@ -170,6 +170,13 @@ MIDFUNC(2,mov_l_mi,(IMPTR d, IMPTR s))
 		uintptr idx = d - (uintptr) &regs;
 		if(d == (uintptr) &(regs.pc_p) || d == (uintptr) &(regs.pc_oldp)) {
 			LOAD_U64(REG_WORK2, s);  // pc_p/pc_oldp are 64-bit host pointers
+			if (jit_trace_setpc_env()) {
+				STR_xXpre(REG_WORK2, RSP_INDEX, -16);
+				LDR_xXi(REG_PAR1, RSP_INDEX, 0);
+				LOAD_U32(REG_PAR2, 7);
+				compemu_raw_call((uintptr)jit_trace_setpc_value);
+				LDR_xXpost(REG_WORK2, RSP_INDEX, 16);
+			}
 			STR_xXi(REG_WORK2, R_REGSTRUCT, idx);
 		} else {
 			LOAD_U32(REG_WORK2, (uae_u32)s);
@@ -394,9 +401,16 @@ MIDFUNC(2,mov_l_mr,(IMPTR d, RR4 s))
 
 	if(d >= (uintptr)&regs && d < (uintptr)&regs + 32760) {
 		uintptr idx = d - (uintptr) &regs;
-		if(d == (uintptr)&regs.pc_oldp || d == (uintptr)&regs.pc_p)
+		if(d == (uintptr)&regs.pc_oldp || d == (uintptr)&regs.pc_p) {
+			if (jit_trace_setpc_env()) {
+				STR_xXpre(s, RSP_INDEX, -16);
+				LDR_xXi(REG_PAR1, RSP_INDEX, 0);
+				LOAD_U32(REG_PAR2, 8);
+				compemu_raw_call((uintptr)jit_trace_setpc_value);
+				LDR_xXpost(s, RSP_INDEX, 16);
+			}
 			STR_xXi(s, R_REGSTRUCT, idx);
-		else
+		} else
 			STR_wXi(s, R_REGSTRUCT, idx);
 	} else {
 		LOAD_U64(REG_WORK1, d);

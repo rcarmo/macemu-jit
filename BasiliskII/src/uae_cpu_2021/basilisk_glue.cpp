@@ -192,13 +192,14 @@ void Start680x0(void)
 void TriggerInterrupt(void)
 {
 	idle_resume();
-	/* In managed/deferred JIT mode, masked level-1 interrupts must stay
-	   pending without forcing an immediate exit from compiled code.
-	   Otherwise async 60Hz ticks split native blocks at non-architectural
-	   points purely as a function of block shape. Surface SPCFLAG_INT only
-	   when level 1 is actually deliverable. */
-	if (!UseDeferredInterruptModel() || regs.intmask < 1)
-		SPCFLAGS_SET(SPCFLAG_INT);
+	/* Always surface SPCFLAG_INT when there are pending interrupts.
+	   The old deferred model suppressed SPCFLAG_INT when intmask >= 1,
+	   which caused interrupts arriving during high-IPL critical sections
+	   to be silently lost — InterruptFlags was set but SPCFLAG_INT never
+	   was, and when IPL dropped back to 0 nobody re-checked.
+	   Now we always set SPCFLAG_INT; the spcflags dispatch in newcpu.cpp
+	   already checks intmask vs interrupt level before delivery. */
+	SPCFLAGS_SET(SPCFLAG_INT);
 	if (UseDeferredInterruptModel() && trace_irqmanaged_env_glue()) {
 		static unsigned long trace_count = 0;
 		if (trace_count < 4000) {
