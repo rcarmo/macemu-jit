@@ -7,9 +7,9 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, and ARM64 endblock slow-path bugs. The remaining all-native failure has now been narrowed much further: the immediate pure-L2 bad-PC crash is no longer best explained by the old helper-chain overshoot theory, but by a **native short-BRA (`BRAQ.B`) path that is still unsafe on ARM64**.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, and 32-bit host-PC construction bugs. The remaining all-native failure is now narrower and more architectural: **pure L2 no longer dies in the old `bad pc_p` crash family, but it still mis-executes an early ROM dispatch-table builder loop around `0x04009ab0..0x04009ad8`, centered on `DBRA` at `0x04009ac0`**.
 
-## Current frontier (2026-04-08)
+## Current frontier (2026-04-09)
 
 The most important updates from the latest round are:
 
@@ -29,9 +29,9 @@ This was fixed by:
 
 After that fix, the old “compiled block ran one or two instructions too far” conclusion was invalidated.
 
-### 2. ARM64 endblock slow-path bugs were real and are now fixed
+### 2. ARM64 endblock and host-PC corruption bugs were real and are now fixed
 
-Two concrete ARM64 contract bugs were identified and fixed in dispatcher/chain handoff paths:
+Multiple concrete ARM64 contract bugs were identified and fixed in dispatcher/chain handoff and target construction paths:
 
 1. **setpc trampolines only updated `regs.pc_p`**
    - `popall_execute_normal_setpc`
@@ -46,100 +46,112 @@ Two concrete ARM64 contract bugs were identified and fixed in dispatcher/chain h
 
    These were rewritten to use explicit patched hot/slow branch layout, removing the hard-coded skip-count contract.
 
-These fixes removed a real class of `bad pc_p` / `exec_normal bad` failures from the safe runtime.
+3. **legacy generated code could build host PCs with a bogus `+4GB` bias**
+   - some branch/jump paths still formed host-PC targets through 32-bit signed temporaries before adding `comp_pc_p`
+   - representative bad host targets included `0x114000488`, `0x11400091e`, `0x1140b3494`
 
-### 3. Corrected verifier result for the old hot helper chain
+   This was fixed by using pointer-width addition paths and strengthening `arm_ADD_l_ri(...)` to treat low-32-bit pointer immediates as pointer bases with sign-extended displacements.
 
-With the fixed verifier, the earlier helper chain is mostly clean in targeted runs:
+These fixes removed a real class of `bad pc_p` / `exec_normal bad` / host-target corruption failures from the safe runtime.
 
-- `0x040b3566` → matches in targeted verifier runs
-- `0x040b35c6` → matches in targeted verifier runs
-- `0x040b35c8` → matches in targeted verifier runs
-- `0x040b34a8` → matches in targeted verifier runs
+### 3. The old short-BRA crash family is no longer the main frontier
 
-The one remaining context-sensitive verifier mismatch in that neighborhood is:
+Barrier binary search originally localized the immediate pure-L2 crash family to native short BRA (`BRAQ.B`). That work produced two real fixes:
 
-- `0x040b357c`
+- short `BRA/BSR/Bcc` 8-bit displacement decode on ARM64 was corrected to use the low opcode byte under `HAVE_GET_WORD_UNSWAPPED`
+- the const-target short-BRA exit path was changed to write guest PC and re-enter through `compemu_raw_execute_normal_cycles(...)`
 
-and it depends on whether that code is traced as a 1-op block or as the full `0241 4ed3` 2-op form.
+After those fixes and the host-PC repair, pure-L2 no longer shows the old corruption signature in current smokes:
 
-So the old `0x040b3566 -> 0x040b35c6 -> 0x040b35c8` chain is no longer the best lead for the immediate pure-L2 crash.
+- `bad pc_p = 0`
+- `exec_normal bad = 0`
+- `SIGSEGV = 0`
+- `SIGBUS = 0`
 
-### 4. Pure L2 everywhere still crashes
+### 4. The remaining failure is now a stable semantic divergence in an early ROM loop
 
-All hardcoded barriers were temporarily removed, including:
+Pure L2 still does not boot, but the failure mode has changed:
 
-- DBcc
-- JMP / JSR
-- Bcc / BRA / BSR
-- EmulOps
-- MOVEQ
-- MOVEM
-- SR/CCR modifiers
+- Xvfb visual checks remain black
+- `DiskStatus = 0`
+- `SCSIGet = 0`
+- `SDL_VIDEOINT = 0`
+- `SDL_PRESENT = 0`
 
-The pure-L2 run really was pure L2:
+Detailed logging and trace-window comparison isolate the remaining divergence to the early ROM loop around:
 
-- `optlev=[2]`
+- `0x04009ab0`
+- `0x04009aca`
+- `0x04009ac0` (`DBRA`, opcode `0x51c8`)
+- `0x04009ad8`
 
-and it failed with the old bad-PC family:
+The key behavioral split is:
 
-- `regs.pc = 0xffffffff`
-- `pc_p = 0x10fffffff`
-- `exec_normal bad`
-- `bad pc_p`
+- **NoJIT**: at `0x04009ac0`, `DBRA` decrements `D0` and loops back to `0x04009ab0`
+- **JIT**: the same loop eventually diverges through `0x04009ace...` when the interpreter is still taking the immediate loop-back path
 
-So at least one removed barrier was hiding a real native codegen bug.
+### 5. Active ROM context: this is unpatched ROM code under `patch_rom_32()`
 
-### 5. Barrier binary search localizes the immediate pure-L2 crash to short BRA
+The Quadra 800 ROM in this setup reports version `0x067c`, so BasiliskII uses the 32-bit-clean patch set in `patch_rom_32()`.
 
-A systematic barrier binary search was run by restoring subsets of the removed barriers via env-controlled tokens.
+That patch set really does special-case several ROM startup paths, including:
 
-Results:
+- reset/bootstrap handoff
+- `PATCH_BOOT_GLOBS`
+- `CLKNOMEM`
+- `CHECKLOAD`
+- hardware init bypasses for VIA/SCC/IWM/SCSI/ASC
+- DBRA timing calibration values (`TimeDBRA`, `TimeSCCDBRA`, `TimeSCSIDBRA`, `TimeRAMDBRA`)
 
-- restoring `branch` prevented the immediate pure-L2 bad-PC crash
-- restoring only `jsr` did **not** prevent it
-- splitting `branch` further showed:
-  - restoring only `braq` prevented the crash
-  - restoring only `braw` did not
-  - restoring only `bral` did not
-  - restoring only `bsr` did not
-  - restoring only `bcc` did not
+But the hot loop at `0x04009ab0..0x04009ad8` is **not** one of BasiliskII's ROM-patched regions; it is expected to run as real ROM code.
 
-So the crashing native branch-family path is specifically:
+### 6. What that ROM loop actually does
 
-> **short BRA (`BRAQ.B`)**
+Disassembly of the active ROM shows the loop is building a low-memory dispatch/lookup table:
 
-### 6. Direct handler-side BRA arithmetic was not the whole bug
+```asm
+04009a9a: movea.l $2ae.w, a3
+04009aa0: lea.l   $0e00.w, a1
+04009aa4: movea.l a3, a0
+04009aa6: adda.l  $22(a0), a0
+04009aaa: move.w  #$03ff, d0
+...
+04009abe: move.l  a2, (a1)+
+04009ac0: dbra    d0, $4009ab0
+...
+04009ad8: move.l  a4, (a1)+
+04009ada: bra.b   $4009ac0
+```
 
-A direct fix attempt was made in the generated BRA handlers (`op_6000/op_6001/op_60ff`, ff/nf) to simplify how branch targets are formed, but pure-L2 still reproduced the `regs.pc=ffffffff` failure.
+Important properties:
 
-So the remaining short-BRA problem is probably **not just the obvious displacement arithmetic in the emitted handler body**. The deeper problem is more likely in the constant-jump / block-follow / block-concatenation semantics that native short BRA relies on.
+- `A1 = $0e00` before entering the loop
+- `D0 = #$03ff`, so the loop runs **1024 iterations**
+- each iteration writes one longword into the low-memory table at `$0e00`
+- `A4 = 0x04009ae6`, which acts as the default/fallback entry written for one case
+- later ROM code around `0x040099b0` consumes the tables rooted at `$0400` and `$0e00`
 
-### 7. Current safe state
+So this is not just a hot spin loop: it is a **dispatch-table builder** whose output directly feeds later ROM path selection.
 
-To keep the runtime safe while continuing investigation:
+### 7. Strongest current interpretation
 
-- short BRA (`BRAQ.B`) is barriered again by default
-- other hardcoded barriers remain removed unless explicitly restored by env
-- current short smokes show:
-  - `optlev=[2]`
-  - no `bad pc_p`
-  - no `exec_normal bad`
-  - no SIGSEGV/SIGBUS in the 20s safe runtime check
+The remaining boot stall is no longer best summarized as generic async/timing/interrupt behavior.
 
-### 8. What is still not solved
+The strongest current picture is:
 
-Even in the current safe state:
+- the old short-BRA / host-PC crash family was real and has been repaired well enough to keep pure L2 stable
+- the remaining failure is a **local semantic mismatch in the ROM dispatch-table builder loop**
+- the most suspicious point remains the compiled `DBRA` / loop-control behavior at `0x04009ac0`, because no-JIT and JIT diverge exactly on whether execution returns to `0x04009ab0`
+- the existing verifier mismatches in low memory (for example around `mem[0x00000e08]`) fit this interpretation: JIT is likely corrupting the table being built at `$0e00`
 
-- Xvfb visual checks are still black
-- no `DiskStatus`
-- no `SCSIGet`
-- no `SDL_VIDEOINT`
-- no `SDL_PRESENT`
+### 8. Diagnosis path forward
 
-So the current state is:
+The highest-value next work is now:
 
-> the immediate pure-L2 crash family is localized to short BRA and fenced off again, but boot still does not reach visible Mac OS progress.
+1. compare the first wrong `$0e00` table entry between no-JIT and JIT
+2. map that wrong entry back to the exact path through `0x04009ab0..0x04009ad8`
+3. repair the ARM64 native lowering for the remaining `DBRA` / loop-control mismatch
+4. only after the table-builder semantics match should broader async/timing theories be revisited
 
 ### Hardware
 
@@ -562,10 +574,11 @@ Boot still does **not** reach visible Mac OS progress in the current safe config
 - `SDL_VIDEOINT=0`
 - `SDL_PRESENT=0`
 
-So there are now **two separated facts**:
+But the nature of the failure is now more specific:
 
-1. the immediate pure-L2 bad-PC crash has been localized to native short BRA and fenced off again
-2. even with that crash fenced off, the machine still does not boot to a visible desktop
+1. the old pure-L2 `bad pc_p` / `exec_normal bad` crash family is no longer the dominant symptom
+2. the current pure-L2 failure is a stable semantic divergence inside the early ROM loop at `0x04009ab0..0x04009ad8`
+3. that loop is building the low-memory dispatch table at `$0e00`, so a local mismatch there can poison later ROM control flow without crashing immediately
 
 ### Most useful current interpretation
 
@@ -573,20 +586,20 @@ The old broad “async/timing explains everything” hypothesis is no longer the
 
 The strongest current picture is:
 
-- a real native short-BRA bug exists on ARM64 L2
-- that bug is severe enough to reproduce the old `regs.pc=ffffffff` crash in pure L2
-- after fencing it back off, a second remaining problem still prevents visible boot progress
+- a real native short-branch / host-PC corruption bug existed on ARM64 L2 and has been repaired enough to keep pure L2 stable
+- the remaining blocker is a **local loop-semantic bug**, most likely around compiled `DBRA` handling at `0x04009ac0`
+- the verifier's low-memory mismatches (for example around `mem[0x00000e08]`) are consistent with a corrupted `$0e00` dispatch table rather than a generic interrupt/tick issue
 
 ### Diagnosis Path Forward
 
 The highest-value next work is now:
 
-1. fix the native short-BRA path properly
-   - likely in constant-jump / block-follow / chain semantics rather than only the obvious displacement arithmetic
-2. re-run pure-L2 / branch-family checks
-3. only then re-evaluate the remaining black-screen / no-progress runtime stall
+1. capture and compare the first wrong `$0e00` table entry between no-JIT and JIT
+2. map that entry back to the exact path taken through `0x04009ab0..0x04009ad8`
+3. repair the remaining ARM64 `DBRA` / loop-control semantic mismatch
+4. only after that re-evaluate broader async/timing theories
 
-For the older broader async-isolation plan, see `docs/AARCH64_JIT_ISOLATION_MATRIX.md`.
+For the updated experiment framing, see `docs/AARCH64_JIT_ISOLATION_MATRIX.md`.
 
 ## Build Instructions
 

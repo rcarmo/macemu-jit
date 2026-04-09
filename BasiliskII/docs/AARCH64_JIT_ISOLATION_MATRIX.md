@@ -6,9 +6,11 @@ This matrix is for isolating the remaining `optlev=2` failure **systematically**
 
 Current working assessment:
 
-> The remaining L2 failure is no longer best described as a broad async/tick problem. The strongest current lead is a **successor-entry / direct-chain contract bug** in the tiny helper `JMP` chain around `0x040b3566 -> 0x040b35c6 -> 0x040b35c8`.
+> The remaining L2 failure is no longer best described as a broad async/tick problem, nor by the old helper-chain theory around `0x040b3566`. The strongest current lead is a **local semantic mismatch in the early ROM dispatch-table builder loop** at `0x04009ab0..0x04009ad8`, centered on `DBRA` at `0x04009ac0`.
 
-So the matrix should now prioritize **JIT continuation structure for specific helper successor blocks** before returning to generic opcode-family hunting.
+The active Quadra 800 ROM goes through `patch_rom_32()`, but this loop is **not** one of BasiliskII's ROM-patched helper paths. It is real ROM code that builds the low-memory table at `$0e00`, which is later consumed by the ROM dispatcher around `0x040099b0`.
+
+So the matrix should now prioritize **table-build correctness and local loop semantics** before returning to broader async or continuation-structure theories.
 
 ---
 
@@ -39,7 +41,9 @@ So the matrix should now prioritize **JIT continuation structure for specific he
 | first matched-PC divergence | best structural comparator |
 | first bad `pc_p` / low-PC recovery | whether corruption path still appears |
 | `InterruptFlags`, `spcflags`, `Ticks` (`0x16a`) traces when relevant | async timing visibility |
-| `PCTRACE` around the divergence window | aligned L1/L2 comparison |
+| `PCTRACE` / trace-window log around `0x04009ab0..0x04009ad8` | aligned L1/L2 comparison |
+| first wrong low-memory table entry at `$0e00 + n*4` | direct evidence of corrupted table build |
+| contents around `mem[0x0e00..0x0e20]` after the hot loop | pinpoints which path wrote the wrong entry |
 
 Recommended baseline trace settings when comparing L1/L2:
 
@@ -163,30 +167,30 @@ These rows perturb continuation structure while keeping native code enabled.
 Run:
 - `C0`, `C1`, `C2`, `C3`
 
-### Phase 1 — prove or disprove async boundary dominance
-Run:
-- `A6` → `A2` → `A4` → `B1` → `B2`
+### Phase 1 — establish exact table-build divergence
+Run the smallest aligned comparisons first:
+- no-JIT trace window over `0x04009ab0..0x04009ad8`
+- JIT trace window over the same range
+- verifier / memory snapshots for `$0e00..$0e20`
 
-Stop early if one of these dramatically changes:
-- first matched-PC divergence location
-- low-PC corruption family frequency
-- `DiskStatus` / `SCSIGet`
+Stop as soon as you can answer both of these:
+- what is the **first wrong table entry** written to `$0e00 + n*4`
+- which exact path through `0x04009ab0..0x04009ad8` wrote it
 
-### Phase 2 — isolate the active branch
-If `A4` helps, continue with:
-- `B1`, `B2`, `B3`, `B4`, `B5`
+### Phase 2 — isolate loop semantics, especially `DBRA`
+Prioritize semantic-local probes before async ones:
+- verify `DBRA` taken vs fallthrough behavior at `0x04009ac0`
+- compare `D0`, `PC`, `A1`, `A2`, and flags across the taken-backedge case
+- compare the `0x04009aca..0x04009ada` side paths only after the `DBRA` case is understood
+- if needed, force conservative dispatcher re-entry only for the `DBRA` block to prove whether the mismatch is in native loop control vs later chaining
 
-If `A2` helps, continue with:
-- `Cx1`, `Cx2`, `Cx6`
-
-If `A6` helps, continue with:
+### Phase 3 — only then revisit broader structure / async rows
+Only after the table-builder semantics match should broader rows be revisited:
 - `D3`, `D4`, `D5`
+- then `A6`, `A2`, `A4`
+- then `B1`, `B2`, `B3`, `B4`, `B5`
 
-### Phase 3 — only then return to opcode/helper semantics
-Only after async/safe-point sensitivity is bounded should we revisit:
-- `0x0404b0be..0x0404b0cc`
-- `0x040b3566..0x040b3638`
-- helper transform semantics near `0x040b34dc`
+The older helper-chain and async rows remain useful as secondary checks, but they are no longer the primary frontier.
 
 ---
 
@@ -215,11 +219,15 @@ Use one row per run:
 
 ## Current recommendation
 
-The highest-value next rows are now targeted structure probes in the helper chain:
+The highest-value next rows are now table-builder correctness probes in the ROM loop:
 
-- force only successor target `0x040b35c6`
-- force only successor target `0x040b35c8`
-- compare direct vs non-direct vs `execute_normal` entry for those targets
-- instrument the actual handoff contract (`target pc`, chosen handler, live regs/flags, `pc_p`) at those exits
+- compare no-JIT vs JIT writes to `$0e00 + n*4` for the first 8–16 entries
+- identify the first entry where JIT writes the wrong pointer / default stub
+- align that wrong write with the exact loop path through:
+  - `0x04009ab0`
+  - `0x04009aca`
+  - `0x04009ac0`
+  - `0x04009ad8`
+- treat `DBRA` at `0x04009ac0` as the primary suspect until the table matches
 
-Broader async rows (`A2`, `B1`, `B2`) remain useful only after the helper successor contract is either repaired or ruled out.
+Broader continuation and async rows (`D*`, `A*`, `B*`) remain useful only after the ROM table-builder semantics are either repaired or ruled out.
