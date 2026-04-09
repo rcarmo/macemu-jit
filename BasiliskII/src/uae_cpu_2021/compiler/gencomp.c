@@ -1449,7 +1449,6 @@ gen_opcode (unsigned int opcode)
     failure;
 #endif
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
-	genamode (curi->dmode, "dstreg", sz_long, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	start_brace();
 	comprintf("\tint tmp=scratchie++;\n");
 	switch(curi->size) {
@@ -1458,6 +1457,7 @@ gen_opcode (unsigned int opcode)
 	 case sz_long: comprintf("\ttmp=src;\n"); break;
 	 default: assert(0);
 	}
+	genamode (curi->dmode, "dstreg", sz_long, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tsub_l(dst,tmp);\n");
 	genastore ("dst", curi->dmode, "dstreg", sz_long, "dst");
 	break;
@@ -1493,7 +1493,6 @@ gen_opcode (unsigned int opcode)
 	failure;
 #endif
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
-	genamode (curi->dmode, "dstreg", sz_long, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	start_brace();
 	comprintf("\tint tmp=scratchie++;\n");
 	switch(curi->size) {
@@ -1502,6 +1501,7 @@ gen_opcode (unsigned int opcode)
 	 case sz_long: comprintf("\ttmp=src;\n"); break;
 	 default: assert(0);
 	}
+	genamode (curi->dmode, "dstreg", sz_long, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tadd_l(dst,tmp);\n");
 	genastore ("dst", curi->dmode, "dstreg", sz_long, "dst");
 	break;
@@ -1967,7 +1967,11 @@ gen_opcode (unsigned int opcode)
 #ifdef DISABLE_I_BCC
     failure;
 #endif
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	comprintf("\tuintptr v,v1,v2;\n");
+#else
 	comprintf("\tuae_u32 v,v1,v2;\n");
+#endif
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	/* That source is an immediate, so we can clobber it with abandon */
 	switch(curi->size) {
@@ -1978,7 +1982,11 @@ gen_opcode (unsigned int opcode)
 	comprintf("\tsub_l_ri(src,m68k_pc_offset-m68k_pc_offset_thisinst-2);\n");
 	/* Leave the following as "add" --- it will allow it to be optimized
 	   away due to src being a constant ;-) */
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	comprintf("\tarm_ADD_l_ri(src,(uintptr)comp_pc_p);\n");
+#else
 	comprintf("\tadd_l_ri(src,(uintptr)comp_pc_p);\n");
+#endif
 	comprintf("\tmov_l_ri(PC_P,(uintptr)comp_pc_p);\n");
 	/* Now they are both constant. Might as well fold in m68k_pc_offset */
 	comprintf("\tadd_l_ri(src,m68k_pc_offset);\n");
@@ -2064,10 +2072,12 @@ gen_opcode (unsigned int opcode)
 	 default: assert(0);  /* Seems this only comes in word flavour */
 	}
 	comprintf("\tsub_l_ri(offs,m68k_pc_offset-m68k_pc_offset_thisinst-2);\n");
-	comprintf("\tadd_l_ri(offs,(uintptr)comp_pc_p);\n"); /* New PC,
-								once the
-								offset_68k is
-								* also added */
+	/* New PC, once the offset_68k is also added. */
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	comprintf("\tarm_ADD_l_ri(offs,(uintptr)comp_pc_p);\n");
+#else
+	comprintf("\tadd_l_ri(offs,(uintptr)comp_pc_p);\n");
+#endif
 	/* Let's fold in the m68k_pc_offset at this point */
 	comprintf("\tadd_l_ri(offs,m68k_pc_offset);\n");
 	comprintf("\tadd_l_ri(PC_P,m68k_pc_offset);\n");
@@ -2090,8 +2100,13 @@ gen_opcode (unsigned int opcode)
 	    comprintf("\tsub_w_ri(src,1);\n");
 	    comprintf("\tend_needflags();\n");
 	    start_brace();
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	    comprintf("\tuintptr v2,v;\n"
+		      "\tuintptr v1=get_const(PC_P);\n");
+#else
 	    comprintf("\tuae_u32 v2,v;\n"
 		      "\tuae_u32 v1=get_const(PC_P);\n");
+#endif
 	    comprintf("\tv2=get_const(offs);\n"
 		      "\tregister_branch(v1,v2,%d);\n", NATIVE_CC_CC);
 	    break;
@@ -3109,43 +3124,63 @@ generate_one_opcode (int rp, int noflags)
 	{
 	    char source[100];
 	    int pos = table68k[opcode].spos;
+	    const int short_branch_disp =
+		(table68k[opcode].mnemo == i_Bcc || table68k[opcode].mnemo == i_BSR) &&
+		table68k[opcode].size == sz_byte && table68k[opcode].stype == 1 &&
+		pos == 0 && smsk == 255;
 
+	    if (short_branch_disp) {
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+		comprintf ("\tuae_s32 srcreg = (uae_s32)(uae_s8)(opcode & 255);\n");
+#else
 #ifndef UAE
-	    comprintf ("#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)\n");
+		comprintf ("#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)\n");
+		comprintf ("\tuae_u32 srcreg = (uae_s32)(uae_s8)((opcode >> 8) & 255);\n");
+		comprintf ("#else\n");
+#endif
+		comprintf ("\tuae_s32 srcreg = (uae_s32)(uae_s8)(opcode & 255);\n");
+#ifndef UAE
+		comprintf ("#endif\n");
+#endif
+#endif
+	    } else {
+#ifndef UAE
+		comprintf ("#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)\n");
 		
-	    if (pos < 8 && (smsk >> (8 - pos)) != 0)
-		sprintf (source, "(((opcode >> %d) | (opcode << %d)) & %d)",
-			pos ^ 8, 8 - pos, dmsk);
-	    else if (pos != 8)
-		sprintf (source, "((opcode >> %d) & %d)", pos ^ 8, smsk);
-	    else
-		sprintf (source, "(opcode & %d)", smsk);
+		if (pos < 8 && (smsk >> (8 - pos)) != 0)
+		    sprintf (source, "(((opcode >> %d) | (opcode << %d)) & %d)",
+			    pos ^ 8, 8 - pos, dmsk);
+		else if (pos != 8)
+		    sprintf (source, "((opcode >> %d) & %d)", pos ^ 8, smsk);
+		else
+		    sprintf (source, "(opcode & %d)", smsk);
 		
-	    if (table68k[opcode].stype == 3)
-		comprintf ("\tuae_u32 srcreg = imm8_table[%s];\n", source);
-	    else if (table68k[opcode].stype == 1)
-		comprintf ("\tuae_u32 srcreg = (uae_s32)(uae_s8)%s;\n", source);
-	    else
-		comprintf ("\tuae_u32 srcreg = %s;\n", source);
+		if (table68k[opcode].stype == 3)
+		    comprintf ("\tuae_u32 srcreg = imm8_table[%s];\n", source);
+		else if (table68k[opcode].stype == 1)
+		    comprintf ("\tuae_u32 srcreg = (uae_s32)(uae_s8)%s;\n", source);
+		else
+		    comprintf ("\tuae_u32 srcreg = %s;\n", source);
 		
-	    comprintf ("#else\n");
+		comprintf ("#else\n");
 #endif
 		
-	    if (pos)
-		sprintf (source, "((opcode >> %d) & %d)", pos, smsk);
-	    else
-		sprintf (source, "(opcode & %d)", smsk);
+		if (pos)
+		    sprintf (source, "((opcode >> %d) & %d)", pos, smsk);
+		else
+		    sprintf (source, "(opcode & %d)", smsk);
 
-	    if (table68k[opcode].stype == 3)
-		comprintf ("\tuae_s32 srcreg = imm8_table[%s];\n", source);
-	    else if (table68k[opcode].stype == 1)
-		comprintf ("\tuae_s32 srcreg = (uae_s32)(uae_s8)%s;\n", source);
-	    else
-		comprintf ("\tuae_s32 srcreg = %s;\n", source);
+		if (table68k[opcode].stype == 3)
+		    comprintf ("\tuae_s32 srcreg = imm8_table[%s];\n", source);
+		else if (table68k[opcode].stype == 1)
+		    comprintf ("\tuae_s32 srcreg = (uae_s32)(uae_s8)%s;\n", source);
+		else
+		    comprintf ("\tuae_s32 srcreg = %s;\n", source);
 
 #ifndef UAE
 		comprintf ("#endif\n");
 #endif
+	    }
 	}
     }
     if (table68k[opcode].duse

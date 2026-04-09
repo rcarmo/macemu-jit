@@ -592,6 +592,144 @@ void do_nothing(void)
 	/* Intentionally empty. */
 }
 
+static bool jit_tracewin_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_PC_START") && *getenv("B2_TRACE_PC_START")) ? 1 : 0;
+	return cached != 0;
+}
+
+static uae_u32 jit_tracewin_start()
+{
+	static uae_u32 value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_PC_START");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0;
+		init = true;
+	}
+	return value;
+}
+
+static uae_u32 jit_tracewin_end()
+{
+	static uae_u32 value = 0xffffffffu;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_PC_END");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0xffffffffu;
+		init = true;
+	}
+	return value;
+}
+
+static unsigned long jit_tracewin_limit()
+{
+	static unsigned long value = 200;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_LIMIT");
+		value = env && *env ? strtoul(env, NULL, 0) : 200;
+		init = true;
+	}
+	return value;
+}
+
+static bool jit_trace_after_table_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_AFTER_TABLE") && *getenv("B2_TRACE_AFTER_TABLE") && strcmp(getenv("B2_TRACE_AFTER_TABLE"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool jit_tracewin_match(uae_u32 pc)
+{
+	if (!jit_tracewin_enabled() || pc < jit_tracewin_start() || pc > jit_tracewin_end())
+		return false;
+	if (jit_trace_after_table_env() && !basilisk_trace_after_table_ready)
+		return false;
+	return true;
+}
+
+static bool jit_pctrace_match(uae_u32 pc)
+{
+	if (jit_tracewin_enabled() && (pc < jit_tracewin_start() || pc > jit_tracewin_end()))
+		return false;
+	if (jit_trace_after_table_env() && !basilisk_trace_after_table_ready)
+		return false;
+	return true;
+}
+
+static bool jit_trace_table_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_TABLE") && *getenv("B2_TRACE_TABLE") && strcmp(getenv("B2_TRACE_TABLE"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static void jit_trace_table_maybe_dump_complete(const char *tag, unsigned long step, uae_u32 pc)
+{
+	static int dumped = 0;
+	static int cfg_init = 0;
+	static char dump_path[512];
+	if (!cfg_init) {
+		const char *env = getenv("B2_TRACE_TABLE_DUMP_PATH");
+		dump_path[0] = 0;
+		if (env && *env) {
+			strncpy(dump_path, env, sizeof(dump_path) - 1);
+			dump_path[sizeof(dump_path) - 1] = 0;
+		}
+		cfg_init = 1;
+	}
+	if (dumped || !dump_path[0])
+		return;
+	unsigned a1 = (unsigned)regs.regs[9];
+	if (a1 >= 0x1e00 && a1 < 0x1e40)
+		basilisk_trace_after_table_ready = true;
+	if (a1 < 0x1e00 || a1 >= 0x1e40)
+		return;
+	FILE *f = fopen(dump_path, "wb");
+	if (!f)
+		return;
+	for (uaecptr addr = 0x0e00; addr < 0x1e00; addr++)
+		fputc((int)get_byte(addr), f);
+	fclose(f);
+	dumped = 1;
+	fprintf(stderr, "%s_DUMP step=%lu pc=%08x a1=%08x path=%s\n", tag, step, (unsigned)pc, (unsigned)regs.regs[9], dump_path);
+}
+
+static void jit_trace_table_log(const char *tag, unsigned long step, uae_u32 pc)
+{
+	if (!jit_trace_table_enabled())
+		return;
+	fprintf(stderr,
+		"%s step=%lu pc=%08x a1=%08x e00=%08x e04=%08x e08=%08x e0c=%08x e10=%08x e14=%08x e18=%08x e1c=%08x e20=%08x e24=%08x e28=%08x e2c=%08x e30=%08x e34=%08x e38=%08x e3c=%08x\n",
+		tag,
+		step,
+		(unsigned)pc,
+		(unsigned)regs.regs[9],
+		(unsigned)get_long(0x0e00),
+		(unsigned)get_long(0x0e04),
+		(unsigned)get_long(0x0e08),
+		(unsigned)get_long(0x0e0c),
+		(unsigned)get_long(0x0e10),
+		(unsigned)get_long(0x0e14),
+		(unsigned)get_long(0x0e18),
+		(unsigned)get_long(0x0e1c),
+		(unsigned)get_long(0x0e20),
+		(unsigned)get_long(0x0e24),
+		(unsigned)get_long(0x0e28),
+		(unsigned)get_long(0x0e2c),
+		(unsigned)get_long(0x0e30),
+		(unsigned)get_long(0x0e34),
+		(unsigned)get_long(0x0e38),
+		(unsigned)get_long(0x0e3c));
+	jit_trace_table_maybe_dump_complete(tag, step, pc);
+}
+
 void exec_nostats(void)
 {
 #if defined(CPU_AARCH64)
@@ -599,9 +737,54 @@ void exec_nostats(void)
 	jit_diag_dispatch_count++;
 	jit_diag_maybe_print();
 #endif
+	static unsigned long trace_count = 0;
 	for (;;) {
+		uae_u32 before_pc = m68k_getpc();
 		uae_u32 opcode = GET_OPCODE;
+		bool trace_this = trace_count < jit_tracewin_limit() && jit_tracewin_match(before_pc);
+		if (trace_this) {
+			fprintf(stderr,
+				"TRACEWINJ BEFORE step=%lu pc=%08x op=%04x regs.pc=%08x pc_p=%p oldp=%p d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x sr=%04x nzcv=%08x x=%08x\n",
+				trace_count + 1,
+				(unsigned)before_pc,
+				(unsigned)opcode,
+				(unsigned)regs.pc,
+				(void*)regs.pc_p,
+				(void*)regs.pc_oldp,
+				(unsigned)regs.regs[0],
+				(unsigned)regs.regs[1],
+				(unsigned)regs.regs[8],
+				(unsigned)regs.regs[9],
+				(unsigned)regs.regs[10],
+				(unsigned)regs.regs[15],
+				(unsigned)regs.sr,
+				(unsigned)regflags.nzcv,
+				(unsigned)regflags.x);
+			jit_trace_table_log("TRACEWINJTAB", trace_count + 1, before_pc);
+		}
 		(*cpufunctbl[opcode])(opcode);
+		if (trace_this) {
+			uae_u32 after_pc = m68k_getpc();
+			trace_count++;
+			fprintf(stderr,
+				"TRACEWINJ AFTER step=%lu pc=%08x op=%04x regs.pc=%08x pc_p=%p oldp=%p d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x sr=%04x nzcv=%08x x=%08x\n",
+				trace_count,
+				(unsigned)after_pc,
+				(unsigned)opcode,
+				(unsigned)regs.pc,
+				(void*)regs.pc_p,
+				(void*)regs.pc_oldp,
+				(unsigned)regs.regs[0],
+				(unsigned)regs.regs[1],
+				(unsigned)regs.regs[8],
+				(unsigned)regs.regs[9],
+				(unsigned)regs.regs[10],
+				(unsigned)regs.regs[15],
+				(unsigned)regs.sr,
+				(unsigned)regflags.nzcv,
+				(unsigned)regflags.x);
+			jit_trace_table_log("TRACEWINJTAB", trace_count, after_pc);
+		}
 		cpu_check_ticks();
 		if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL))
 			return;
@@ -649,6 +832,9 @@ void execute_normal(void)
 		start_pc = get_virtual_address((uae_u8*)regs.pc_p);
 #if defined(CPU_AARCH64)
 		{
+			uae_u32 trace_a1 = regs.regs[9];
+			if (trace_a1 >= 0x1e00 && trace_a1 < 0x1e40)
+				basilisk_trace_after_table_ready = true;
 			static unsigned long pctrace_count = 0;
 			static unsigned long pctrace_limit = 0;
 			static bool pctrace_init = false;
@@ -657,10 +843,10 @@ void execute_normal(void)
 				pctrace_limit = env ? strtoul(env, NULL, 10) : 0;
 				pctrace_init = true;
 			}
-			if (pctrace_limit && pctrace_count < pctrace_limit) {
+			uae_u32 pc = m68k_getpc();
+			if (pctrace_limit && pctrace_count < pctrace_limit && jit_pctrace_match(pc)) {
 				static unsigned long pctrace_words = 0;
 				static bool pctrace_words_init = false;
-				uae_u32 pc = m68k_getpc();
 				if (!pctrace_words_init) {
 					const char *env = getenv("B2_JIT_PCTRACE_WORDS");
 					pctrace_words = env ? strtoul(env, NULL, 10) : 0;
@@ -676,13 +862,15 @@ void execute_normal(void)
 					const char *env = getenv("B2_JIT_PCTRACE_MEM");
 					pctrace_mem = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
 				}
+				unsigned long current_step = pctrace_count++;
 				fprintf(stderr, "PCTRACE %lu %08x d0=%08x d1=%08x d2=%08x d3=%08x d4=%08x d5=%08x d6=%08x d7=%08x a0=%08x a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x sr=%04x nzcv=%08x x=%08x\n",
-					pctrace_count++, pc,
+					current_step, pc,
 					regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[3],
 					regs.regs[4], regs.regs[5], regs.regs[6], regs.regs[7],
 					regs.regs[8], regs.regs[9], regs.regs[10], regs.regs[11],
 					regs.regs[12], regs.regs[13], regs.regs[14], regs.regs[15],
 					(unsigned)regs.sr, regflags.nzcv, regflags.x);
+				jit_trace_table_log("PCTTABLE", current_step, pc);
 				if (pctrace_stack) {
 					uaecptr sp = m68k_areg(regs, 7);
 					fprintf(stderr,

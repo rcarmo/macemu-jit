@@ -55,6 +55,7 @@ extern int movem_index2[256];
 extern int movem_next[256];
 
 extern int broken_in;
+extern bool basilisk_trace_after_table_ready;
 
 #ifdef X86_ASSEMBLY
 /* This hack seems to force all register saves (pushl %reg) to be moved to the

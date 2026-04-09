@@ -47,6 +47,8 @@ extern "C" uaecptr basilisk_trace_fault_pc(void)
 	return regs.fault_pc;
 }
 
+bool basilisk_trace_after_table_ready = false;
+
 static bool trace_d6_enabled()
 {
 	static int cached = -1;
@@ -60,6 +62,14 @@ static bool trace_irqmanaged_env()
 	static int cached = -1;
 	if (cached < 0)
 		cached = (getenv("B2_TRACE_IRQMANAGED") && *getenv("B2_TRACE_IRQMANAGED") && strcmp(getenv("B2_TRACE_IRQMANAGED"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool trace_boot_stage_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_BOOT_STAGE") && *getenv("B2_TRACE_BOOT_STAGE") && strcmp(getenv("B2_TRACE_BOOT_STAGE"), "0") != 0) ? 1 : 0;
 	return cached != 0;
 }
 
@@ -135,9 +145,89 @@ static unsigned long trace_window_limit()
 	return value;
 }
 
+static bool trace_after_table_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_AFTER_TABLE") && *getenv("B2_TRACE_AFTER_TABLE") && strcmp(getenv("B2_TRACE_AFTER_TABLE"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
 static bool trace_window_matches(uae_u32 pc)
 {
-	return trace_window_enabled() && pc >= trace_window_start() && pc <= trace_window_end();
+	if (!trace_window_enabled() || pc < trace_window_start() || pc > trace_window_end())
+		return false;
+	if (trace_after_table_env() && !basilisk_trace_after_table_ready)
+		return false;
+	return true;
+}
+
+static bool trace_table_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_TABLE") && *getenv("B2_TRACE_TABLE") && strcmp(getenv("B2_TRACE_TABLE"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static void trace_table_maybe_dump_complete(const char *tag, unsigned long step, uae_u32 pc)
+{
+	static int dumped = 0;
+	static int cfg_init = 0;
+	static char dump_path[512];
+	if (!cfg_init) {
+		const char *env = getenv("B2_TRACE_TABLE_DUMP_PATH");
+		dump_path[0] = 0;
+		if (env && *env) {
+			strncpy(dump_path, env, sizeof(dump_path) - 1);
+			dump_path[sizeof(dump_path) - 1] = 0;
+		}
+		cfg_init = 1;
+	}
+	if (dumped || !dump_path[0])
+		return;
+	unsigned a1 = (unsigned)m68k_areg(regs, 1);
+	if (a1 >= 0x1e00 && a1 < 0x1e40)
+		basilisk_trace_after_table_ready = true;
+	if (a1 < 0x1e00 || a1 >= 0x1e40)
+		return;
+		FILE *f = fopen(dump_path, "wb");
+	if (!f)
+		return;
+	for (uaecptr addr = 0x0e00; addr < 0x1e00; addr++)
+		fputc((int)get_byte(addr), f);
+	fclose(f);
+	dumped = 1;
+	fprintf(stderr, "%s_DUMP step=%lu pc=%08x a1=%08x path=%s\n", tag, step, (unsigned)pc, (unsigned)m68k_areg(regs, 1), dump_path);
+}
+
+static void trace_table_log(const char *tag, unsigned long step, uae_u32 pc)
+{
+	if (!trace_table_enabled())
+		return;
+	fprintf(stderr,
+		"%s step=%lu pc=%08x a1=%08x e00=%08x e04=%08x e08=%08x e0c=%08x e10=%08x e14=%08x e18=%08x e1c=%08x e20=%08x e24=%08x e28=%08x e2c=%08x e30=%08x e34=%08x e38=%08x e3c=%08x\n",
+		tag,
+		step,
+		(unsigned)pc,
+		(unsigned)m68k_areg(regs, 1),
+		(unsigned)get_long(0x0e00),
+		(unsigned)get_long(0x0e04),
+		(unsigned)get_long(0x0e08),
+		(unsigned)get_long(0x0e0c),
+		(unsigned)get_long(0x0e10),
+		(unsigned)get_long(0x0e14),
+		(unsigned)get_long(0x0e18),
+		(unsigned)get_long(0x0e1c),
+		(unsigned)get_long(0x0e20),
+		(unsigned)get_long(0x0e24),
+		(unsigned)get_long(0x0e28),
+		(unsigned)get_long(0x0e2c),
+		(unsigned)get_long(0x0e30),
+		(unsigned)get_long(0x0e34),
+		(unsigned)get_long(0x0e38),
+		(unsigned)get_long(0x0e3c));
+	trace_table_maybe_dump_complete(tag, step, pc);
 }
 
 static void trace_window_log(const char *phase, unsigned long step, uae_u32 pc, uae_u32 opcode)
@@ -160,6 +250,7 @@ static void trace_window_log(const char *phase, unsigned long step, uae_u32 pc, 
 		(unsigned)m68k_areg(regs, 2), (unsigned)m68k_areg(regs, 3),
 		(unsigned)m68k_areg(regs, 4), (unsigned)m68k_areg(regs, 5),
 		(unsigned)m68k_areg(regs, 6), (unsigned)m68k_areg(regs, 7));
+	trace_table_log("TRACEWINTAB", step, pc);
 }
 
 struct trace_recent_entry {
@@ -674,6 +765,23 @@ void MakeFromSR (void)
        IPL was raised are silently lost. */
     if (InterruptFlags && regs.intmask < 1)
         SPCFLAGS_SET(SPCFLAG_INT);
+    if (trace_boot_stage_env()) {
+        static unsigned long makefromsr_logs = 0;
+        if (makefromsr_logs < 64) {
+            fprintf(stderr,
+                "BOOT_STAGE MAKEFROMSR pc=%08x sr=%04x intmask=%u spc=%08x live=%08x usp=%08x isp=%08x msp=%08x a7=%08x\n",
+                (unsigned)m68k_getpc(),
+                (unsigned)regs.sr,
+                (unsigned)regs.intmask,
+                (unsigned)regs.spcflags,
+                (unsigned)InterruptFlags,
+                (unsigned)regs.usp,
+                (unsigned)regs.isp,
+                (unsigned)regs.msp,
+                (unsigned)m68k_areg(regs, 7));
+            makefromsr_logs++;
+        }
+    }
     if (regs.t1 || regs.t0)
 	SPCFLAGS_SET( SPCFLAG_TRACE );
     else
@@ -784,6 +892,22 @@ void Exception(int nr, uaecptr oldpc)
 {
     uae_u32 currpc = m68k_getpc ();
     MakeSR();
+    if ((nr == 0xA || nr == 0xB) && currpc >= 0x04000500 && currpc <= 0x04000508) {
+        fprintf(stderr,
+            "ALINE_EXC nr=%d currpc=%08x oldpc=%08x sr=%04x intmask=%u spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
+            nr,
+            (unsigned)currpc,
+            (unsigned)oldpc,
+            (unsigned)regs.sr,
+            (unsigned)regs.intmask,
+            (unsigned)regs.spcflags,
+            (unsigned)m68k_dreg(regs,0),
+            (unsigned)m68k_dreg(regs,1),
+            (unsigned)m68k_dreg(regs,2),
+            (unsigned)m68k_areg(regs,0),
+            (unsigned)m68k_areg(regs,1),
+            (unsigned)m68k_areg(regs,7));
+    }
 
     if (fixup.flag)
     {
@@ -1349,6 +1473,21 @@ static void restore_regs(struct M68kRegisters &r)
 
 void m68k_emulop(uae_u32 opcode)
 {
+    if (opcode == 0xa02d || opcode == 0xa03f || opcode == 0xa051) {
+        fprintf(stderr,
+            "ALINE_EMULOP op=%04x pc=%08x sr=%04x intmask=%u spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
+            (unsigned)opcode,
+            (unsigned)m68k_getpc(),
+            (unsigned)regs.sr,
+            (unsigned)regs.intmask,
+            (unsigned)regs.spcflags,
+            (unsigned)m68k_dreg(regs,0),
+            (unsigned)m68k_dreg(regs,1),
+            (unsigned)m68k_dreg(regs,2),
+            (unsigned)m68k_areg(regs,0),
+            (unsigned)m68k_areg(regs,1),
+            (unsigned)m68k_areg(regs,7));
+    }
 #if 0
 	struct M68kRegisters r = {};
 	save_regs(r);
@@ -1544,6 +1683,21 @@ static void rts68000()
 
 void REGPARAM2 op_illg (uae_u32 opcode)
 {
+	if (opcode == 0xa02d || opcode == 0xa03f || opcode == 0xa051) {
+		fprintf(stderr,
+			"ALINE_ILLG op=%04x pc=%08x sr=%04x intmask=%u spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
+			(unsigned)opcode,
+			(unsigned)m68k_getpc(),
+			(unsigned)regs.sr,
+			(unsigned)regs.intmask,
+			(unsigned)regs.spcflags,
+			(unsigned)m68k_dreg(regs,0),
+			(unsigned)m68k_dreg(regs,1),
+			(unsigned)m68k_dreg(regs,2),
+			(unsigned)m68k_areg(regs,0),
+			(unsigned)m68k_areg(regs,1),
+			(unsigned)m68k_areg(regs,7));
+	}
 	if ((opcode & 0xF000) == 0xA000) {
 #if 0
 		if (opcode == 0xa0ff)
@@ -1689,6 +1843,21 @@ int m68k_do_specialties(void)
 #if 0
 	SERVE_INTERNAL_IRQ();
 #endif
+	if (trace_boot_stage_env()) {
+		static unsigned long specialties_logs = 0;
+		if (specialties_logs < 64) {
+			MakeSR();
+			fprintf(stderr,
+				"BOOT_STAGE SPECIALTIES pc=%08x sr=%04x intmask=%u spc=%08x live=%08x stopped=%u\n",
+				(unsigned)m68k_getpc(),
+				(unsigned)regs.sr,
+				(unsigned)regs.intmask,
+				(unsigned)regs.spcflags,
+				(unsigned)InterruptFlags,
+				(unsigned)regs.stopped);
+			specialties_logs++;
+		}
+	}
 #ifdef USE_JIT
 	if (UseJIT) {
 		// Block was compiled
@@ -1845,6 +2014,8 @@ void m68k_do_execute (void)
 		SPCFLAGS_CLEAR(SPCFLAG_JIT_END_COMPILE | SPCFLAG_JIT_EXEC_RETURN);
 #endif
 	regs.fault_pc = pc = m68k_getpc();
+	if ((unsigned)m68k_areg(regs, 1) >= 0x1e00 && (unsigned)m68k_areg(regs, 1) < 0x1e40)
+		basilisk_trace_after_table_ready = true;
 	nojit_insn_count++;
 	if (pc < nojit_pc_min) nojit_pc_min = pc;
 	if (pc > nojit_pc_max) nojit_pc_max = pc;

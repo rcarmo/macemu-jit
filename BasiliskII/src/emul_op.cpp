@@ -91,6 +91,34 @@ static bool trace_emulopflow_env()
 	return cached != 0;
 }
 
+static bool trace_boot_stage_env()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TRACE_BOOT_STAGE") && *getenv("B2_TRACE_BOOT_STAGE") && strcmp(getenv("B2_TRACE_BOOT_STAGE"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static void trace_boot_stage_log(const char *stage, const M68kRegisters *r)
+{
+	if (!trace_boot_stage_env())
+		return;
+	fprintf(stderr,
+		"BOOT_STAGE %s pc=%08x sr=%04x intmask=%u spc=%08x live=%08x d0=%08x d1=%08x a0=%08x a6=%08x a7=%08x ticks=%08x\n",
+		stage ? stage : "?",
+		(unsigned)m68k_getpc(),
+		(unsigned)(r ? r->sr : regs.sr),
+		(unsigned)regs.intmask,
+		(unsigned)regs.spcflags,
+		(unsigned)InterruptFlags,
+		(unsigned)(r ? r->d[0] : regs.regs[0]),
+		(unsigned)(r ? r->d[1] : regs.regs[1]),
+		(unsigned)(r ? r->a[0] : regs.regs[8]),
+		(unsigned)(r ? r->a[6] : regs.regs[14]),
+		(unsigned)(r ? r->a[7] : regs.regs[15]),
+		(unsigned)ReadMacInt32(0x16a));
+}
+
 static unsigned long trace_emulopflow_limit()
 {
 	static unsigned long value = 0;
@@ -177,6 +205,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 
 		case M68K_EMUL_OP_RESET: {			// MacOS reset
 			D(bug("*** RESET ***\n"));
+			trace_boot_stage_log("RESET", r);
 			tick_inhibit = true;
 			CDROMRemount(); // for System 7.x
 			TimerReset();
@@ -210,6 +239,11 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 		}
 
 		case M68K_EMUL_OP_CLKNOMEM: {		// Clock/PRAM operations
+			static unsigned long clknomem_logs = 0;
+			if (clknomem_logs < 16) {
+				trace_boot_stage_log("CLKNOMEM", r);
+				clknomem_logs++;
+			}
 			bool is_read = (r->d[1] & 0x80) != 0;
 			if ((r->d[1] & 0x78) == 0x38) {
 				// XPRAM
@@ -289,6 +323,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 
 		case M68K_EMUL_OP_PATCH_BOOT_GLOBS:	// Patch BootGlobs at startup
 			D(bug("Patch BootGlobs\n"));
+			trace_boot_stage_log("PATCH_BOOT_GLOBS", r);
 			WriteMacInt32(r->a[4] - 20, RAMBaseMac + RAMSize);			// MemTop
 			WriteMacInt8(r->a[4] - 26, 0);								// No MMU
 			WriteMacInt8(r->a[4] - 25, ReadMacInt8(r->a[4] - 25) | 1);	// No MMU
@@ -541,6 +576,11 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 		}
 
 		case M68K_EMUL_OP_IRQ: {			// Level 1 interrupt
+			static unsigned long irq_logs = 0;
+			if (irq_logs < 32) {
+				trace_boot_stage_log("IRQ", r);
+				irq_logs++;
+			}
 			r->d[0] = 0;
 			const bool use_deferred_irq = UseDeferredInterruptModel();
 			const bool use_irq_snapshot = !use_deferred_irq && irq_snapshot_env();
@@ -580,6 +620,11 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 #if !PRECISE_TIMING
 					TimerInterrupt();
 #endif
+					static unsigned long videoint_logs = 0;
+					if (videoint_logs < 8) {
+						trace_boot_stage_log("VIDEOINT", r);
+						videoint_logs++;
+					}
 					VideoInterrupt();
 
 					// Call DoVBLTask(0)
@@ -677,6 +722,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 		}
 
 		case M68K_EMUL_OP_CHECKLOAD: {		// vCheckLoad() patch (resource loader)
+			trace_boot_stage_log("CHECKLOAD", r);
 			uint32 type = r->d[1];
 			int16 id = ReadMacInt16(r->a[2]);
 			if (r->a[0] == 0)

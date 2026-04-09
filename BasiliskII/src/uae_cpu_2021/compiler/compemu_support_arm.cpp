@@ -187,6 +187,52 @@ static inline bool jit_force_optlev0(void)
 	return enabled != 0;
 }
 
+static inline bool jit_force_optlev0_block_env(uae_u32 pc)
+{
+	static int initialized = 0;
+	static int range_count = 0;
+	static struct {
+		uae_u32 start;
+		uae_u32 end;
+	} ranges[64];
+	if (!initialized) {
+		const char *env = getenv("B2_JIT_FORCE_OPTLEV0_PCS");
+		initialized = 1;
+		if (env && *env) {
+			const char *p = env;
+			while (*p && range_count < (int)(sizeof(ranges) / sizeof(ranges[0]))) {
+				while (*p == ' ' || *p == '\t' || *p == '\n' || *p == ',')
+					p++;
+				if (!*p)
+					break;
+				char *endp = NULL;
+				unsigned long start = strtoul(p, &endp, 0);
+				unsigned long end = start;
+				if (endp == p)
+					break;
+				p = endp;
+				if (*p == '-') {
+					p++;
+					end = strtoul(p, &endp, 0);
+					if (endp == p)
+						end = start;
+					p = endp;
+				}
+				ranges[range_count].start = (uae_u32)start;
+				ranges[range_count].end = (uae_u32)end;
+				range_count++;
+				while (*p && *p != ',')
+					p++;
+			}
+		}
+	}
+	for (int i = 0; i < range_count; i++) {
+		if (pc >= ranges[i].start && pc <= ranges[i].end)
+			return true;
+	}
+	return false;
+}
+
 static inline int jit_max_optlev(void)
 {
 	static int value = -1;
@@ -200,6 +246,20 @@ static inline int jit_max_optlev(void)
 		fprintf(stderr, "JIT: max_optlev=%d (env=%s)\n", value, env ? env : "(not set)");
 	}
 	return value;
+}
+
+static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
+{
+#if defined(CPU_AARCH64)
+	/* Startup containment while fixing the remaining ARM64 control-flow bug:
+	   exact-interpreter the confirmed trap/transition sites that feed the first
+	   SR/intmask drop. */
+	return (pc >= 0x040004f0 && pc <= 0x04000508) || pc == 0x04000780 ||
+		(pc >= 0x0400c5b2 && pc <= 0x0400c60a) || pc == 0x0400cc6e;
+#else
+	(void)pc;
+	return false;
+#endif
 }
 
 static inline bool jit_force_optlev1_block(uae_u32 pc)
@@ -931,6 +991,36 @@ static inline bool jit_restore_barrier(const char *token)
 {
 	return jit_env_has_csv_token("B2_JIT_RESTORE_BARRIERS", token) ||
 		jit_env_has_csv_token("B2_JIT_RESTORE_BARRIERS", "all");
+}
+
+static inline bool jit_force_exact_exec_nostats_opcode(uae_u16 op)
+{
+#if defined(CPU_AARCH64)
+	/* Some ROM A-line traps are not just "one opcode via cputbl" fallbacks:
+	   they rely on the full interpreter/exception path and the resulting C-side
+	   specialties processing before control returns to the next guest opcode.
+	   Executing them through the generic single-op fallback leaves startup on
+	   the wrong path (for example the `A02D` trap before the first SR/intmask
+	   drop at `0x0400023a`). Route the confirmed boot-time trap opcodes through
+	   exact exec_nostats() re-entry instead. */
+	if (op == 0xa02d || op == 0xa03f || op == 0xa051 ||
+		op == 0x2da0 || op == 0x3fa0 || op == 0x51a0)
+		return true;
+#endif
+	return false;
+}
+
+static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
+{
+#if defined(CPU_AARCH64)
+	/* Confirmed startup trap sites feeding the first SR/intmask drop. Keep the
+	   containment narrow and evidence-based. */
+	return pc == 0x04000502 || pc == 0x04000780 || pc == 0x0400c5b2 ||
+		pc == 0x0400c5be || pc == 0x0400c60a || pc == 0x0400cc6e;
+#else
+	(void)pc;
+	return false;
+#endif
 }
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
@@ -5374,7 +5464,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             block_m68k_pc = jit_hostpc_to_macpc((uintptr)pc_hist[0].location);
         }
 #if defined(CPU_AARCH64)
-        if (jit_force_optlev0()) {
+        if (jit_force_optlev0() || jit_force_optlev0_block_exact(block_m68k_pc) || jit_force_optlev0_block_env(block_m68k_pc)) {
             optlev = 0;
         } else if (optlev > 0) {
             if (optlev > 1 && jit_force_optlev1_block(block_m68k_pc)) {
@@ -5441,13 +5531,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 cpuop_func** cputbl;
                 compop_func** comptbl;
                 uae_u32 opcode = DO_GET_OPCODE(pc_hist[i].location);
+                const uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
                 needed_flags = (liveflags[i + 1] & prop[cft_map(opcode)].set_flags);
 #ifdef UAE
                 special_mem = pc_hist[i].specmem;
 #else
                 special_mem = special_mem_default;
 #endif
-                const uae_u32 op_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location);
                 {
                     trace_flagflow_block_pc = block_m68k_pc;
                     trace_flagflow_pc = op_m68k_pc;
@@ -5473,6 +5563,20 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     comptbl = compfunctbl;
                 }
 
+
+                if (jit_force_exact_exec_nostats_pc(op_m68k_pc)) {
+                    if (was_comp) {
+                        flush(1);
+                        was_comp = 0;
+                    }
+                    fprintf(stderr, "JIT_EXACT_EXEC_NOSTATS block=%08x pc=%08x op=%04x reason=pc\n",
+                        (unsigned)block_m68k_pc,
+                        (unsigned)op_m68k_pc,
+                        (unsigned)opcode);
+                    compemu_raw_exec_nostats((uintptr)pc_hist[i].location);
+                    forced_interpreter_barrier = true;
+                    break;
+                }
 
                 failure = 1; // gb-- defaults to failure state
                 /* ARM64 L2 bisection: only allow native codegen for specific families */
@@ -5559,7 +5663,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     /* Dump first 3 blocks' native code to file for disassembly */
                     {
                         static int dump_count = 0;
-                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0x11df || opcode == 0x11d8 || opcode == 0x31c0)) {
+                        if (getenv("B2_JIT_DUMP") && (_after - _before) > 0 && (dump_count < 3 || opcode == 0x11df || opcode == 0x11d8 || opcode == 0x31c0 || opcode == 0x51c8)) {
                             char fname[256];
                             snprintf(fname, sizeof(fname), "/workspace/tmp/jitdump/block%d_op%04x.bin", dump_count, opcode);
                             FILE *f = fopen(fname, "wb");
@@ -5677,6 +5781,19 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
 
                 if (failure) {
+                    if (jit_force_exact_exec_nostats_opcode((uae_u16)opcode)) {
+                        if (was_comp) {
+                            flush(1);
+                            was_comp = 0;
+                        }
+                        fprintf(stderr, "JIT_EXACT_EXEC_NOSTATS block=%08x pc=%08x op=%04x\n",
+                            (unsigned)block_m68k_pc,
+                            (unsigned)(block_m68k_pc + (uae_u32)((uintptr)pc_hist[i].location - (uintptr)pc_hist[0].location)),
+                            (unsigned)opcode);
+                        compemu_raw_exec_nostats((uintptr)pc_hist[i].location);
+                        forced_interpreter_barrier = true;
+                        break;
+                    }
                     if (was_comp) {
                         flush(1);
                         was_comp = 0;
@@ -5855,7 +5972,18 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 uae_u32* tba;
                 bigstate tmp;
                 blockinfo* tbi;
+                const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
+                const bool final_is_dbcc = ((final_op & 0x00f8) == 0x00c8 && (final_op & 0xf000) == 0x5000);
 
+#if defined(CPU_AARCH64)
+                /* ARM64 bringup: keep backward branches on the simple
+                   forward-style layout too. The old taken-path inversion
+                   optimization still misroutes some DBcc-controlled loops
+                   (for example the hot 04009abc -> 04009ab0 ROM loop),
+                   leaving the guest stuck before CHECKLOAD/VIDEOINT.
+                   Preserve semantics first; re-introduce prediction later
+                   once the branch inversion path is proven correct. */
+#else
                 if (taken_pc_p < next_pc_p) {
                     /* backward branch. Optimize for the "taken" case ---
                        which means the raw_jcc should fall through when
@@ -5867,6 +5995,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     else if (cc > NATIVE_CC_AL)
                         cc = 0x10 | (cc ^ 0xf);
                 }
+#endif
 
 #if defined(USE_DATA_BUFFER)
                 data_check_end(8, 128);
@@ -5889,9 +6018,14 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
                 }
 
-                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
-                write_jmp_target(tba, get_handler(ct1));
-                create_jmpdep(bi, 0, tba, ct1);
+                if (final_is_dbcc) {
+                    compemu_raw_set_pc_i(ct1);
+                    compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
+                } else {
+                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
+                    write_jmp_target(tba, get_handler(ct1));
+                    create_jmpdep(bi, 0, tba, ct1);
+                }
 
                 /* not-predicted outcome */
                 write_jmp_target(branchadd, (uintptr)get_target());
@@ -5908,12 +6042,28 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
                 }
 
-                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
-                write_jmp_target(tba, get_handler(ct2));
-                create_jmpdep(bi, 1, tba, ct2);
+                if (final_is_dbcc) {
+                    compemu_raw_set_pc_i(ct2);
+                    compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
+                } else {
+                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
+                    write_jmp_target(tba, get_handler(ct2));
+                    create_jmpdep(bi, 1, tba, ct2);
+                }
             } else if (!forced_interpreter_barrier) {
                 if (was_comp) {
                     flush(1);
+                } else {
+                    /* Interpreter-only / fallback-only blocks can still leave
+                       pending SPCFLAGS (for example A-line/F-line/illegal-op
+                       exceptions). Their endblock path must not hot-chain past
+                       those requests; re-check spcflags before choosing the
+                       successor so exception/interrupt handling returns to C. */
+                    compemu_raw_mov_l_rm(0, (uintptr)specflags);
+#if defined(USE_DATA_BUFFER)
+                    data_check_end(4, 64);
+#endif
+                    compemu_raw_maybe_do_nothing(scaled_cycles(totcycles));
                 }
 
                 /* Let's find out where next_handler is... */
@@ -5947,9 +6097,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     data_check_end(4, 64);
 #endif
                     if (final_is_braq && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
-                        /* Short BRA native blocks are safe only when the handoff
-                           re-enters through execute_normal_setpc; direct const
-                           chaining still reproduces the pure-L2 bad-PC family. */
+                        /* After fixing short-branch low-byte decode, direct
+                           const chaining still leaves some ARM64 BRAQ exits
+                           with corrupted PC_P state. Re-enter through the
+                           canonical execute_normal_setpc path until that
+                           remaining native handoff bug is fixed. */
                         compemu_raw_set_pc_i(cv);
                         compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
                     } else {

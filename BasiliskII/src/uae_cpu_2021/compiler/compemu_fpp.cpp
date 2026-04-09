@@ -717,8 +717,13 @@ void comp_fbcc_opp(uae_u32 opcode)
 {
 	uae_u32 start_68k_offset = m68k_pc_offset;
 	uae_u32 off;
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	uintptr v1;
+	uintptr v2;
+#else
 	uae_u32 v1;
 	uae_u32 v2;
+#endif
 	int cc;
 
 	// comp_pc_p is expected to be bound to 32-bit addresses

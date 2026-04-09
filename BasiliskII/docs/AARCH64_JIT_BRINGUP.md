@@ -7,7 +7,7 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, and 32-bit host-PC construction bugs. The remaining all-native failure is now narrower and more architectural: **pure L2 no longer dies in the old `bad pc_p` crash family, but it still mis-executes an early ROM dispatch-table builder loop around `0x04009ab0..0x04009ad8`, centered on `DBRA` at `0x04009ac0`**.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, and word-to-address-register self-alias clobbers. The remaining all-native failure is now much narrower: **pure L2 no longer dies in the old `bad pc_p` crash family, and the current frontier has moved into an early ROM startup corridor around `0x0401b6d4..0x0401be94`, with the next strongest suspect inside the `0x0401be94 -> 0x0401bfd0..0x0401bfde` call/callee segment**.
 
 ## Current frontier (2026-04-09)
 
@@ -68,90 +68,99 @@ After those fixes and the host-PC repair, pure-L2 no longer shows the old corrup
 - `SIGSEGV = 0`
 - `SIGBUS = 0`
 
-### 4. The remaining failure is now a stable semantic divergence in an early ROM loop
+### 4. The frontier moved from the old `0x04009ab0` loop hypothesis to a much smaller ROM startup corridor
 
-Pure L2 still does not boot, but the failure mode has changed:
+Pure L2 still does not boot, but the failure mode has narrowed substantially.
 
-- Xvfb visual checks remain black
+Current visual / boot metrics in the failing all-native path remain:
+
+- Xvfb visual checks black
 - `DiskStatus = 0`
 - `SCSIGet = 0`
 - `SDL_VIDEOINT = 0`
 - `SDL_PRESENT = 0`
 
-Detailed logging and trace-window comparison isolate the remaining divergence to the early ROM loop around:
+Optlev-0 range narrowing now shows that meaningful progress is recovered only when a very small set of ROM regions is interpreter-forced:
 
-- `0x04009ab0`
-- `0x04009aca`
-- `0x04009ac0` (`DBRA`, opcode `0x51c8`)
-- `0x04009ad8`
+- always-needed base containments:
+  - `0x04000000-0x0400ffff`
+  - `0x04040000-0x0407ffff`
+  - `0x040b0000-0x040bffff`
+- narrowed low-side cluster:
+  - `0x0401b6d4-0x0401b6de`
+- narrowed high-side cluster:
+  - `0x0401be46-0x0401be94`
 
-The key behavioral split is:
+That high-side narrowing moved the best current frontier away from the older `0x04009ab0..0x04009ad8` table-builder hypothesis and into the later ROM startup corridor around:
 
-- **NoJIT**: at `0x04009ac0`, `DBRA` decrements `D0` and loops back to `0x04009ab0`
-- **JIT**: the same loop eventually diverges through `0x04009ace...` when the interpreter is still taking the immediate loop-back path
+- `0x0401b6d4..0x0401b6de`
+- `0x0401be46..0x0401be94`
+- especially the dynamic block rooted at `0x0401be94`
 
-### 5. Active ROM context: this is unpatched ROM code under `patch_rom_32()`
+### 5. A real native codegen bug was found and fixed at `0x0401be8a`
 
-The Quadra 800 ROM in this setup reports version `0x067c`, so BasiliskII uses the 32-bit-clean patch set in `patch_rom_32()`.
+Inside that narrowed high-side range, the following ROM instruction was confirmed to have a real compiled self-alias bug:
 
-That patch set really does special-case several ROM startup paths, including:
+- `0x0401be8a: adda.w $1a(a1), a1`
 
-- reset/bootstrap handoff
-- `PATCH_BOOT_GLOBS`
-- `CLKNOMEM`
-- `CHECKLOAD`
-- hardware init bypasses for VIA/SCC/IWM/SCSI/ASC
-- DBRA timing calibration values (`TimeDBRA`, `TimeSCCDBRA`, `TimeSCSIDBRA`, `TimeRAMDBRA`)
+This is the generic `ADDA.W (d16,An),An` case with `srcreg == dstreg`.
 
-But the hot loop at `0x04009ab0..0x04009ad8` is **not** one of BasiliskII's ROM-patched regions; it is expected to run as real ROM code.
+**Root cause**:
 
-### 6. What that ROM loop actually does
+- the classic generator order materialized the destination `An` before preserving the loaded word source
+- in the self-alias case, that allowed host-register reuse to clobber the loaded source before `sign_extend_16_rr(...)`
 
-Disassembly of the active ROM shows the loop is building a low-memory dispatch/lookup table:
+**Fix**:
+
+- changed the classic `ADDA` / `SUBA` generators in `gencomp.c` and `gencomp_arm.c` so the source is sign-extended into a stable temporary **before** destination materialization
+- rebuilt generated handlers in `src/Unix/compemu.cpp`
+
+Single-op native disassembly after the fix shows the correct sequence for `0x0401be8a`: load word, byte-swap, sign-extend to a stable temp, reload original `A1`, then add `A1 + signext(word)`.
+
+### 6. That fix was real, but it was not the last blocker
+
+Post-fix smokes confirm that the `0x0401be8a` bug was genuine, but boot still does not progress in all-native mode.
+
+In particular, after the fix:
+
+- the base-only all-native smoke still stalls with `CHECKLOAD = 0`, `IRQ = 0`
+- base + low-side `0x0401b6d4-0x0401b6de` also still stalls with `CHECKLOAD = 0`, `IRQ = 0`
+
+So the self-alias producer at `0x0401be8a` was one real codegen bug, but not the last remaining native semantic mismatch in the narrowed corridor.
+
+### 7. The next strongest suspect is deeper in the `0x0401be94` call/callee segment
+
+The best remaining target is now the later portion of the block rooted at `0x0401be94`, especially:
+
+- `0x0401beac: bsr.w $401bfd0`
+
+and the callee body it reaches:
 
 ```asm
-04009a9a: movea.l $2ae.w, a3
-04009aa0: lea.l   $0e00.w, a1
-04009aa4: movea.l a3, a0
-04009aa6: adda.l  $22(a0), a0
-04009aaa: move.w  #$03ff, d0
-...
-04009abe: move.l  a2, (a1)+
-04009ac0: dbra    d0, $4009ab0
-...
-04009ad8: move.l  a4, (a1)+
-04009ada: bra.b   $4009ac0
+0401bfd0: movem.l d0/a0-a1, -(a7)
+0401bfd4: exg.l   d0, a1
+0401bfd6: sub.l   a0, d0
+0401bfd8: and.l   $31a.w, d0
+0401bfdc: adda.l  a0, a1
+0401bfde: a02e
 ```
 
-Important properties:
+Single-op native dumps for nearby instructions such as:
 
-- `A1 = $0e00` before entering the loop
-- `D0 = #$03ff`, so the loop runs **1024 iterations**
-- each iteration writes one longword into the low-memory table at `$0e00`
-- `A4 = 0x04009ae6`, which acts as the default/fallback entry written for one case
-- later ROM code around `0x040099b0` consumes the tables rooted at `$0400` and `$0e00`
+- `0x0401be9c: mulu.w 4(a2), d0`
+- `0x0401bea0: movea.w 6(a2), a2`
+- `0x0401bfd4: exg.l d0, a1`
 
-So this is not just a hot spin loop: it is a **dispatch-table builder** whose output directly feeds later ROM path selection.
-
-### 7. Strongest current interpretation
-
-The remaining boot stall is no longer best summarized as generic async/timing/interrupt behavior.
-
-The strongest current picture is:
-
-- the old short-BRA / host-PC crash family was real and has been repaired well enough to keep pure L2 stable
-- the remaining failure is a **local semantic mismatch in the ROM dispatch-table builder loop**
-- the most suspicious point remains the compiled `DBRA` / loop-control behavior at `0x04009ac0`, because no-JIT and JIT diverge exactly on whether execution returns to `0x04009ab0`
-- the existing verifier mismatches in low memory (for example around `mem[0x00000e08]`) fit this interpretation: JIT is likely corrupting the table being built at `$0e00`
+look correct in isolation, which makes the remaining bug more likely to be in mixed block-local state propagation, the `BSR`/callee interaction, or a deeper semantic mismatch in that call chain.
 
 ### 8. Diagnosis path forward
 
 The highest-value next work is now:
 
-1. compare the first wrong `$0e00` table entry between no-JIT and JIT
-2. map that wrong entry back to the exact path through `0x04009ab0..0x04009ad8`
-3. repair the ARM64 native lowering for the remaining `DBRA` / loop-control mismatch
-4. only after the table-builder semantics match should broader async/timing theories be revisited
+1. keep the confirmed `ADDA` / `SUBA` self-alias fix committed and documented
+2. compare native vs interpreter state across entry to the dynamic block rooted at `0x0401be94`
+3. inspect and, if needed, instrument/fix the `0x0401beac -> 0x0401bfd0..0x0401bfde` call/callee segment
+4. only after that re-evaluate whether any of the older broader loop hypotheses still explain the remaining boot stall
 
 ### Hardware
 
@@ -362,6 +371,23 @@ That is wrong. The generated JIT uses legacy `adc/sbb` both for true carry/borro
 
 **Fix**: Removed the eager in-memory normalization of `regflags.x` and instead taught register loads of `FLAGX` to decode bit 29 into JIT `0/1` on load (`do_load_reg()` special case). This keeps memory permanently in interpreter format and only uses JIT format in native registers.
 
+### Bug 16: Word-to-An Self-Alias Source Clobber in Classic `ADDA`/`SUBA` Generation (2026-04-09)
+
+**Symptom**: After narrowing the remaining all-native failure with targeted `optlev=0` ranges, the ROM instruction
+
+- `0x0401be8a: adda.w $1a(a1), a1`
+
+was identified as a real compiled-code producer bug inside the smallest failing high-side range `0x0401be46-0x0401be94`.
+
+**Root cause**: In the classic non-`USE_JIT2` generators, `ADDA` / `SUBA` generated the destination address-register path before preserving the loaded source word. In self-alias forms (`srcreg == dstreg`), that allowed host-register reuse to clobber the loaded source before `sign_extend_16_rr(...)` copied it into a stable temporary.
+
+**Fix**:
+
+- changed `gencomp.c` and `gencomp_arm.c` so `ADDA` / `SUBA` sign-extend/copy the source into `tmp` **before** destination materialization
+- rebuilt the generated handlers in `src/Unix/compemu.cpp`
+
+This fixes the real self-alias codegen bug at `0x0401be8a`, although boot still remains blocked by a deeper mismatch later in the `0x0401be94 -> 0x0401bfd0..0x0401bfde` path.
+
 ## Block-Level Trace Analysis
 
 The comprehensive block-level trace comparison was the key diagnostic that identified bugs 11 and the remaining memory divergence. The technique:
@@ -563,6 +589,7 @@ SDL_VIDEODRIVER=x11 DISPLAY=:99 B2_JIT_MANAGED_IRQ=1 \
   - no `bad pc_p`
   - no `exec_normal bad`
   - no SIGSEGV / SIGBUS
+- The real self-alias `ADDA` / `SUBA` source-clobber bug in classic word-to-`An` generation is now fixed.
 
 ### Remaining Issue
 
@@ -577,8 +604,8 @@ Boot still does **not** reach visible Mac OS progress in the current safe config
 But the nature of the failure is now more specific:
 
 1. the old pure-L2 `bad pc_p` / `exec_normal bad` crash family is no longer the dominant symptom
-2. the current pure-L2 failure is a stable semantic divergence inside the early ROM loop at `0x04009ab0..0x04009ad8`
-3. that loop is building the low-memory dispatch table at `$0e00`, so a local mismatch there can poison later ROM control flow without crashing immediately
+2. the most useful current `optlev=0` narrowing points to the ROM startup corridor around `0x0401b6d4..0x0401be94`
+3. the confirmed `0x0401be8a` self-alias bug was real, but fixing it did **not** restore boot progress, so the remaining blocker is deeper in the same corridor
 
 ### Most useful current interpretation
 
@@ -587,17 +614,17 @@ The old broad “async/timing explains everything” hypothesis is no longer the
 The strongest current picture is:
 
 - a real native short-branch / host-PC corruption bug existed on ARM64 L2 and has been repaired enough to keep pure L2 stable
-- the remaining blocker is a **local loop-semantic bug**, most likely around compiled `DBRA` handling at `0x04009ac0`
-- the verifier's low-memory mismatches (for example around `mem[0x00000e08]`) are consistent with a corrupted `$0e00` dispatch table rather than a generic interrupt/tick issue
+- a second real codegen bug existed in classic self-alias `ADDA` / `SUBA` word-to-`An` lowering and is now fixed
+- the remaining blocker is now most likely deeper in the block rooted at `0x0401be94`, especially the `BSR`/callee segment through `0x0401bfd0..0x0401bfde`
 
 ### Diagnosis Path Forward
 
 The highest-value next work is now:
 
-1. capture and compare the first wrong `$0e00` table entry between no-JIT and JIT
-2. map that entry back to the exact path taken through `0x04009ab0..0x04009ad8`
-3. repair the remaining ARM64 `DBRA` / loop-control semantic mismatch
-4. only after that re-evaluate broader async/timing theories
+1. compare native vs interpreter state across entry to the `0x0401be94` dynamic block
+2. inspect/instrument the `0x0401beac -> 0x0401bfd0..0x0401bfde` call/callee segment
+3. repair the next real native semantic mismatch in that path
+4. only after that re-evaluate whether any of the older broader loop hypotheses still matter
 
 For the updated experiment framing, see `docs/AARCH64_JIT_ISOLATION_MATRIX.md`.
 

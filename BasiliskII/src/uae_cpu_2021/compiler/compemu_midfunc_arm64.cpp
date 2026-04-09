@@ -491,8 +491,9 @@ MENDFUNC(2,sub_l_ri,(RW4 d, IM8 i))
 
 MIDFUNC(2,sub_w_ri,(RW2 d, IM8 i))
 {
-	// This function is only called with i = 1
-	// Caller needs flags...
+	// This function is only called with i = 1 and the caller needs flags.
+	// ARM SUBS sets C = not-borrow, so for x86-style carry conditions we
+	// must mark carry as inverted just like the jff_SUB_* helpers do.
 	clobber_flags();
 
 	d = rmw(d);
@@ -501,6 +502,8 @@ MIDFUNC(2,sub_w_ri,(RW2 d, IM8 i))
 
 	SUBS_wwish(REG_WORK2, REG_WORK2, (i & 0xff) << 4, 1);
 	BFXIL_xxii(d, REG_WORK2, 16, 16);
+	flags_carry_inverted = true;
+	live_flags();
 
 	unlock2(d);
 }
@@ -573,24 +576,38 @@ MIDFUNC(2,arm_ADD_ldiv8,(RW4 d, RR4 s))
 }
 MENDFUNC(2,arm_ADD_ldiv8,(RW4 d, RR4 s))
 
+static inline bool arm64_low32_hostptr_imm(uintptr i)
+{
+	uintptr base = (uintptr)RAMBaseHost;
+	uintptr limit = base + RAMSize + ROMSize + 0x100000;
+	if (i >= base && i < limit)
+		return true;
+	if (base <= (uintptr)0xFFFFFFFFULL && limit <= (uintptr)0xFFFFFFFFULL + 1) {
+		uintptr i32 = (uintptr)(uae_u32)i;
+		uintptr b32 = (uintptr)(uae_u32)base;
+		uintptr l32 = (uintptr)(uae_u32)limit;
+		if (i32 >= b32 && i32 < l32)
+			return true;
+	}
+	return false;
+}
+
 MIDFUNC(2,arm_ADD_l_ri,(RW4 d, IMPTR i))
 {
 	if (!i)
 		return;
+	const bool hostptr_imm = arm64_low32_hostptr_imm(i);
 	if (isconst(d)) {
-		// Preserve full 64-bit result when d is PC_P, when i is a 64-bit
-		// host pointer, OR when val already exceeds 32 bits (e.g. scratch
-		// register that received comp_pc_p in a previous arm_ADD_l_ri).
-		if (d == PC_P || i > (IMPTR)0xFFFFFFFFULL || live.state[d].val > (uintptr)0xFFFFFFFFULL) {
+		// Preserve full 64-bit result when d is PC_P, when i is a host
+		// pointer immediate (even if it currently fits in 32 bits on Linux),
+		// or when val already exceeds 32 bits.
+		if (d == PC_P || i > (IMPTR)0xFFFFFFFFULL || hostptr_imm || live.state[d].val > (uintptr)0xFFFFFFFFULL) {
 			uintptr val = live.state[d].val;
-			// When adding a 64-bit host pointer (i) to a 32-bit M68K value
-			// (val), sign-extend val first.  M68K branch displacements are
-			// signed, so a backward branch like -0x100 is stored as
-			// 0xFFFFFF00.  Without sign extension, adding 0xFFFFFF00 to a
-			// 64-bit pointer produces carry into bit 32 (0x4... instead of
-			// 0x3...).
-			if (val <= (uintptr)0xFFFFFFFFULL && i > (IMPTR)0xFFFFFFFFULL)
-				val = (uintptr)(uae_s64)(uae_s32)val;
+			// When adding a host pointer base to a 32-bit M68K displacement,
+			// sign-extend the displacement first. Otherwise values like
+			// 0xFFFFFFFA are treated as +4GB-6 and produce 0x1........ PCs.
+			if (val <= (uintptr)0xFFFFFFFFULL && (i > (IMPTR)0xFFFFFFFFULL || hostptr_imm))
+				val = (uintptr)(uae_s64)(uae_s32)(uae_u32)val;
 			live.state[d].val = val + i;
 		} else {
 			live.state[d].val = (uae_u32)(live.state[d].val + i);
@@ -598,17 +615,14 @@ MIDFUNC(2,arm_ADD_l_ri,(RW4 d, IMPTR i))
 		return;
 	}
 
-	// Use 64-bit ADD when d is PC_P (always a host pointer) or when
-	// the immediate itself exceeds 32 bits (e.g. branch target scratch
-	// registers that hold natmem_offset + M68k_addr).
-	bool is_ptr = (d == PC_P) || (i > (IMPTR)0xFFFFFFFFULL);
+	// Use 64-bit ADD when d is PC_P or when the immediate is a host pointer
+	// base used to turn a signed guest displacement into a host PC pointer.
+	bool is_ptr = (d == PC_P) || (i > (IMPTR)0xFFFFFFFFULL) || hostptr_imm;
 	bool is_pcp = (d == PC_P);
 	d = rmw(d);
 
 	if (is_ptr) {
-		// 64-bit ADD to preserve upper bits (e.g. 0x300000000 on macOS).
 		if (is_pcp) {
-			// PC_P already holds a 64-bit host pointer; just add.
 			if(i <= 0xfff) {
 				ADD_xxi(d, d, i);
 			} else {
@@ -616,17 +630,10 @@ MIDFUNC(2,arm_ADD_l_ri,(RW4 d, IMPTR i))
 				ADD_xxx(d, d, REG_WORK1);
 			}
 		} else {
-			// d is a scratch holding a 32-bit M68K displacement in Wd.
-			// Sign-extend Wd to Xd before adding the 64-bit pointer,
-			// because M68K branch displacements are signed.
 			LOAD_U64(REG_WORK1, (uintptr)i);
 			ADD_xxwEX(d, REG_WORK1, d, 6); // ADD Xd, Ximm, Wd, SXTW
 		}
 	} else {
-		// Use 32-bit ADD (ADD_www/ADD_wwi) to keep upper 32 bits of the X
-		// register zeroed.  The result may later be used as an Amiga memory
-		// address in [Xn, X27] indexed loads, which read the full 64-bit
-		// register.  64-bit ADD_xxx could leave upper bits set on wrap.
 		uae_u32 i32 = (uae_u32)i;
 		if(i32 <= 0xfff) {
 			ADD_wwi(d, d, i32);

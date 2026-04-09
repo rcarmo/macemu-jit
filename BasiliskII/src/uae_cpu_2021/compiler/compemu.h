@@ -444,9 +444,15 @@ extern void set_zero(int r, int tmp);
 extern int kill_rodent(int r);
 #define SYNC_PC_OFFSET 100
 extern void sync_m68k_pc(void);
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+extern uintptr get_const(int r);
+extern int  is_const(int r);
+extern void register_branch(uintptr not_taken, uintptr taken, uae_u8 cond);
+#else
 extern uae_u32 get_const(int r);
 extern int  is_const(int r);
 extern void register_branch(uae_u32 not_taken, uae_u32 taken, uae_u8 cond);
+#endif
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 /* Legacy gencomp helper compatibility for clean ARM64 compemu.cpp rebuilds. */
 extern void start_needflags(void);
