@@ -39,22 +39,34 @@ static inline int legacy_x86_cc_to_native(int cc)
 	}
 }
 
-static inline int legacy_addr_with_offset(int base, uae_s32 offset)
+static inline int legacy_addr_with_offset_avoid(int base, uae_s32 offset, int avoid)
 {
 	if (offset == 0)
 		return base;
+	int tmp = REG_WORK1;
+	if (tmp == base || tmp == avoid)
+		tmp = REG_WORK2;
+	if (tmp == base || tmp == avoid)
+		tmp = REG_WORK3;
+	if (tmp == base || tmp == avoid)
+		tmp = REG_WORK4;
+	if (tmp == base || tmp == avoid)
+		jit_abort("no temporary register for legacy host-pointer offset base=%d avoid=%d", base, avoid);
 	if (offset > 0 && offset <= 4095) {
-		const int tmp = (base == REG_WORK1) ? REG_WORK2 : REG_WORK1;
 		ADD_xxi(tmp, base, offset);
 		return tmp;
 	}
 	if (offset < 0 && offset >= -4095) {
-		const int tmp = (base == REG_WORK1) ? REG_WORK2 : REG_WORK1;
 		SUB_xxi(tmp, base, -offset);
 		return tmp;
 	}
 	jit_abort("unsupported legacy host-pointer offset %d", offset);
 	return base;
+}
+
+static inline int legacy_addr_with_offset(int base, uae_s32 offset)
+{
+	return legacy_addr_with_offset_avoid(base, offset, -1);
 }
 
 void start_needflags(void) { needflags = 1; }
@@ -468,7 +480,7 @@ void mov_l_Rr(RR4 d, RR4 s, uae_s32 offset)
 		STR_wXi(src, REG_WORK2, 0);
 	} else {
 		const int base = readreg(d);
-		const int addr = legacy_addr_with_offset(base, offset);
+		const int addr = legacy_addr_with_offset_avoid(base, offset, src);
 		STR_wXi(src, addr, 0);
 		unlock2(base);
 	}
@@ -486,7 +498,7 @@ void mov_w_Rr(RR4 d, RR2 s, uae_s32 offset)
 		STRH_wXi(src, REG_WORK2, 0);
 	} else {
 		const int base = readreg(d);
-		const int addr = legacy_addr_with_offset(base, offset);
+		const int addr = legacy_addr_with_offset_avoid(base, offset, src);
 		STRH_wXi(src, addr, 0);
 		unlock2(base);
 	}

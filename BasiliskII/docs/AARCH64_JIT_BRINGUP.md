@@ -128,7 +128,33 @@ In particular, after the fix:
 
 So the self-alias producer at `0x0401be8a` was one real codegen bug, but not the last remaining native semantic mismatch in the narrowed corridor.
 
-### 7. The next strongest suspect is deeper in the `0x0401be94` call/callee segment
+### 7. A second real codegen bug was then found inside the `0x0401be94` call/callee segment
+
+After fixing `0x0401be8a`, targeted block verification on the full block rooted at `0x0401be94` still found a deterministic stack-memory mismatch.
+
+The culprit was the inlined callee store path for:
+
+- `0x0401bfd0: movem.l d0/a0-a1, -(a7)`
+
+More specifically, the ARM64 legacy helper `mov_l_Rr(d, s, offset)` could use the same work register for:
+
+- the source value being stored
+- and the temporary address calculation for a negative offset
+
+That clobbered the source before the store, so the native code wrote a host-pointer-shaped value to the stack slot instead of the intended big-endian longword.
+
+**Fix**:
+
+- taught `legacy_addr_with_offset(...)` to avoid the source register when selecting its temporary
+- updated `mov_l_Rr()` / `mov_w_Rr()` to request an address temp that cannot alias the source register
+
+After that fix, repeated block verification for:
+
+- `JITBLOCKVERIFY block=0401be94 len=16`
+
+went from `mismatch=1` to repeated `mismatch=0`.
+
+### 8. The next strongest suspect is now outside the verified-clean `0x0401be94` body
 
 The best remaining target is now the later portion of the block rooted at `0x0401be94`, especially:
 
@@ -153,7 +179,7 @@ Single-op native dumps for nearby instructions such as:
 
 look correct in isolation, which makes the remaining bug more likely to be in mixed block-local state propagation, the `BSR`/callee interaction, or a deeper semantic mismatch in that call chain.
 
-### 8. Diagnosis path forward
+### 9. Diagnosis path forward
 
 The highest-value next work is now:
 
@@ -386,7 +412,24 @@ was identified as a real compiled-code producer bug inside the smallest failing 
 - changed `gencomp.c` and `gencomp_arm.c` so `ADDA` / `SUBA` sign-extend/copy the source into `tmp` **before** destination materialization
 - rebuilt the generated handlers in `src/Unix/compemu.cpp`
 
-This fixes the real self-alias codegen bug at `0x0401be8a`, although boot still remains blocked by a deeper mismatch later in the `0x0401be94 -> 0x0401bfd0..0x0401bfde` path.
+This fixes the real self-alias codegen bug at `0x0401be8a`, although boot still remained blocked by a deeper mismatch later in the `0x0401be94 -> 0x0401bfd0..0x0401bfde` path.
+
+### Bug 17: Negative-Offset Store Temp Alias in ARM64 Legacy `mov_*_Rr` Helpers (2026-04-09)
+
+**Symptom**: Targeted block verification for the block rooted at `0x0401be94` still showed a deterministic stack-memory mismatch after bug 16 was fixed. The mismatch came from the inlined callee path for:
+
+- `0x0401bfd0: movem.l d0/a0-a1, -(a7)`
+
+where native code wrote a host-pointer-shaped value into the saved-stack slot instead of the intended big-endian longword.
+
+**Root cause**: In `compemu_legacy_arm64_compat.cpp`, the legacy helper `mov_l_Rr(d, s, offset)` used a temporary chosen by `legacy_addr_with_offset(...)`. For negative offsets, that temp could alias the source register itself, so address formation clobbered the value that was supposed to be stored.
+
+**Fix**:
+
+- introduced an address-temp selection helper that can avoid a specified register
+- updated `mov_l_Rr()` and `mov_w_Rr()` to forbid aliasing the source register during offset-address formation
+
+This made repeated `JITBLOCKVERIFY block=0401be94 len=16` runs compare clean.
 
 ## Block-Level Trace Analysis
 
@@ -590,6 +633,7 @@ SDL_VIDEODRIVER=x11 DISPLAY=:99 B2_JIT_MANAGED_IRQ=1 \
   - no `exec_normal bad`
   - no SIGSEGV / SIGBUS
 - The real self-alias `ADDA` / `SUBA` source-clobber bug in classic word-to-`An` generation is now fixed.
+- The negative-offset temp-alias store bug in ARM64 legacy `mov_*_Rr` helpers is now fixed, and the full `0x0401be94` block now verifies clean.
 
 ### Remaining Issue
 
@@ -605,7 +649,7 @@ But the nature of the failure is now more specific:
 
 1. the old pure-L2 `bad pc_p` / `exec_normal bad` crash family is no longer the dominant symptom
 2. the most useful current `optlev=0` narrowing points to the ROM startup corridor around `0x0401b6d4..0x0401be94`
-3. the confirmed `0x0401be8a` self-alias bug was real, but fixing it did **not** restore boot progress, so the remaining blocker is deeper in the same corridor
+3. the confirmed `0x0401be8a` self-alias bug was real, and a second real store-temp alias bug inside the `0x0401be94` callee path was also real and is now fixed, but boot still does **not** progress
 
 ### Most useful current interpretation
 
@@ -615,14 +659,15 @@ The strongest current picture is:
 
 - a real native short-branch / host-PC corruption bug existed on ARM64 L2 and has been repaired enough to keep pure L2 stable
 - a second real codegen bug existed in classic self-alias `ADDA` / `SUBA` word-to-`An` lowering and is now fixed
-- the remaining blocker is now most likely deeper in the block rooted at `0x0401be94`, especially the `BSR`/callee segment through `0x0401bfd0..0x0401bfde`
+- a third real bug existed in ARM64 legacy negative-offset store address formation (`mov_*_Rr`) and is now fixed
+- the full block rooted at `0x0401be94` now verifies clean, so the next blocker is elsewhere in the narrowed corridor
 
 ### Diagnosis Path Forward
 
 The highest-value next work is now:
 
-1. compare native vs interpreter state across entry to the `0x0401be94` dynamic block
-2. inspect/instrument the `0x0401beac -> 0x0401bfd0..0x0401bfde` call/callee segment
+1. compare native vs interpreter state across the remaining narrowed corridor outside the now-clean `0x0401be94` body
+2. focus next on the verifier-reported PC-boundary mismatches around `0x0401be46`, `0x0401be82`, and `0x0401b6d4`
 3. repair the next real native semantic mismatch in that path
 4. only after that re-evaluate whether any of the older broader loop hypotheses still matter
 
