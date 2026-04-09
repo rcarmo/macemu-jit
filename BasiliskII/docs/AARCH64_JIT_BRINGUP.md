@@ -154,39 +154,68 @@ After that fix, repeated block verification for:
 
 went from `mismatch=1` to repeated `mismatch=0`.
 
-### 8. The next strongest suspect is now outside the verified-clean `0x0401be94` body
+### 8. The reduced working workaround now isolates two exact high-side PCs
 
-The best remaining target is now the later portion of the block rooted at `0x0401be94`, especially:
+With the `0x0401be94` body fixed and verifying clean, the previously broad high-side workaround narrows further.
 
-- `0x0401beac: bsr.w $401bfd0`
+The current reduced working combination is:
 
-and the callee body it reaches:
+- base containments:
+  - `0x04000000-0x0400ffff`
+  - `0x04040000-0x0407ffff`
+  - `0x040b0000-0x040bffff`
+- low-side:
+  - `0x0401b6d4-0x0401b6de`
+- exact high-side PCs:
+  - `0x0401be4c`
+  - `0x0401be88`
 
-```asm
-0401bfd0: movem.l d0/a0-a1, -(a7)
-0401bfd4: exg.l   d0, a1
-0401bfd6: sub.l   a0, d0
-0401bfd8: and.l   $31a.w, d0
-0401bfdc: adda.l  a0, a1
-0401bfde: a02e
-```
+That reduced combo still restores meaningful progress (`CHECKLOAD`, `IRQ`, `intmask -> 0`).
 
-Single-op native dumps for nearby instructions such as:
+### 9. Exact opcode checks for `0x0401be4c` and `0x0401be88` are clean
 
-- `0x0401be9c: mulu.w 4(a2), d0`
-- `0x0401bea0: movea.w 6(a2), a2`
-- `0x0401bfd4: exg.l d0, a1`
+The two exact high-side PCs are:
 
-look correct in isolation, which makes the remaining bug more likely to be in mixed block-local state propagation, the `BSR`/callee interaction, or a deeper semantic mismatch in that call chain.
+- `0x0401be4c: bsr.w $401b698`
+- `0x0401be88: movea.l (a4), a1`
 
-### 9. Diagnosis path forward
+Both were checked with the exact per-instruction verifier (`B2_JIT_VERIFY_PCS=...`). In both cases:
+
+- the opcode body compiled
+- no `JITVERIFY` mismatch line was emitted
+
+So neither exact instruction shows a direct compiled-vs-interpreter mismatch at the single-instruction level.
+
+### 10. But block verification at those PCs still mismatches
+
+Despite the exact per-instruction verifier being clean, block verification still reports mismatches for blocks rooted at those same PCs.
+
+Representative results:
+
+- `0x0401be4c` one-op block: exact instruction verifies clean, but block verification can still mismatch on exit PC / flags / stack state
+- `0x0401be88` one-op and short multi-op blocks: exact instruction verifies clean, but block verification still mismatches on exit PC / flags / stack bytes
+
+This means the remaining bug is no longer best described as the isolated opcode semantics of `BSR.W` or `MOVEA.L (A4),A1` themselves.
+
+### 11. Substitution checks also stayed narrow
+
+Replacing the exact PCs with nearby downstream sites did **not** reproduce the workaround.
+
+Examples that did **not** substitute for the exact sites:
+
+- replacing `0x0401be4c` with callee/nearby sites such as `0x0401b698..0x0401b69a` or `0x0401b6d0..0x0401b6de`
+- replacing `0x0401be88` with `0x0401be8a`, `0x0401be8e`, or `0x0401be90`
+
+So the reduced workaround remains pinned to the exact PCs `0x0401be4c` and `0x0401be88`, even though the exact opcode bodies themselves verify clean.
+
+### 12. Diagnosis path forward
 
 The highest-value next work is now:
 
-1. keep the confirmed `ADDA` / `SUBA` self-alias fix committed and documented
-2. compare native vs interpreter state across entry to the dynamic block rooted at `0x0401be94`
-3. inspect and, if needed, instrument/fix the `0x0401beac -> 0x0401bfd0..0x0401bfde` call/callee segment
-4. only after that re-evaluate whether any of the older broader loop hypotheses still explain the remaining boot stall
+1. keep the confirmed `ADDA` / `SUBA` self-alias fix and the `mov_*_Rr` negative-offset fix committed and documented
+2. compare native vs interpreter state at block exit / successor setup for the exact-PC workaround sites `0x0401be4c` and `0x0401be88`
+3. inspect the block-end / successor-state mechanics around those two exact PCs, since that is where block verification still disagrees even when per-instruction verification does not
+4. only after that re-evaluate whether any broader corridor hypothesis is still needed
 
 ### Hardware
 
@@ -650,6 +679,7 @@ But the nature of the failure is now more specific:
 1. the old pure-L2 `bad pc_p` / `exec_normal bad` crash family is no longer the dominant symptom
 2. the most useful current `optlev=0` narrowing points to the ROM startup corridor around `0x0401b6d4..0x0401be94`
 3. the confirmed `0x0401be8a` self-alias bug was real, and a second real store-temp alias bug inside the `0x0401be94` callee path was also real and is now fixed, but boot still does **not** progress
+4. the current reduced working workaround now isolates the exact PCs `0x0401be4c` and `0x0401be88`, even though exact per-instruction verification shows those opcode bodies match the interpreter
 
 ### Most useful current interpretation
 
@@ -661,14 +691,15 @@ The strongest current picture is:
 - a second real codegen bug existed in classic self-alias `ADDA` / `SUBA` word-to-`An` lowering and is now fixed
 - a third real bug existed in ARM64 legacy negative-offset store address formation (`mov_*_Rr`) and is now fixed
 - the full block rooted at `0x0401be94` now verifies clean, so the next blocker is elsewhere in the narrowed corridor
+- the remaining disagreement is now concentrated at block-exit / successor-state behavior around the exact workaround PCs `0x0401be4c` and `0x0401be88`, not in their isolated opcode bodies
 
 ### Diagnosis Path Forward
 
 The highest-value next work is now:
 
-1. compare native vs interpreter state across the remaining narrowed corridor outside the now-clean `0x0401be94` body
-2. focus next on the verifier-reported PC-boundary mismatches around `0x0401be46`, `0x0401be82`, and `0x0401b6d4`
-3. repair the next real native semantic mismatch in that path
+1. compare native vs interpreter state across block exit / successor setup for the exact workaround PCs `0x0401be4c` and `0x0401be88`
+2. treat the isolated opcode bodies there as provisionally verified-clean and focus on why block verification still diverges at those roots
+3. repair the next real native mismatch in that path
 4. only after that re-evaluate whether any of the older broader loop hypotheses still matter
 
 For the updated experiment framing, see `docs/AARCH64_JIT_ISOLATION_MATRIX.md`.
