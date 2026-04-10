@@ -89,8 +89,18 @@ void restore_carry(void)
 
 void add_b(RW1 d, RR1 s) { if (legacy_needflags_enabled()) jff_ADD_b(d, s); else jnf_ADD_b(d, s); }
 void add_w(RW2 d, RR2 s) { if (legacy_needflags_enabled()) jff_ADD_w(d, s); else jnf_ADD_w(d, s); }
-void add_l(RW4 d, RR4 s) { if (legacy_needflags_enabled()) jff_ADD_l(d, s); else jnf_ADD_l(d, s); }
-void add_l_ri(RW4 d, uae_s32 i) { if (legacy_needflags_enabled()) jff_ADD_l_imm(d, i); else jnf_ADD_l_imm(d, i); }
+void add_l(RW4 d, RR4 s) {
+#ifdef CPU_AARCH64
+	if (d == PC_P) { arm_ADD_l(d, s); return; }
+#endif
+	if (legacy_needflags_enabled()) jff_ADD_l(d, s); else jnf_ADD_l(d, s);
+}
+void add_l_ri(RW4 d, uae_s32 i) {
+#ifdef CPU_AARCH64
+	if (d == PC_P) { arm_ADD_l_ri(d, (uintptr)(uae_s64)i); return; }
+#endif
+	if (legacy_needflags_enabled()) jff_ADD_l_imm(d, i); else jnf_ADD_l_imm(d, i);
+}
 void sub_b(RW1 d, RR1 s) { if (legacy_needflags_enabled()) jff_SUB_b(d, s); else jnf_SUB_b(d, s); }
 void sub_w(RW2 d, RR2 s) { if (legacy_needflags_enabled()) jff_SUB_w(d, s); else jnf_SUB_w(d, s); }
 void sub_l(RW4 d, RR4 s) { if (legacy_needflags_enabled()) jff_SUB_l(d, s); else jnf_SUB_l(d, s); }

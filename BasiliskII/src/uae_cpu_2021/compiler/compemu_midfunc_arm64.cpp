@@ -472,18 +472,22 @@ MIDFUNC(2,sub_l_ri,(RW4 d, IM8 i))
 	if (!i)
 		return;
 	if (isconst(d)) {
-		// Preserve full 64-bit if the current value already exceeds 32 bits
-		// (e.g. scratch register holding a host pointer for branch target).
-		if (live.state[d].val > (uintptr)0xFFFFFFFFULL)
+		// Always preserve full 64-bit for PC_P (host pointer) or
+		// when the current value already exceeds 32 bits.
+		if (d == PC_P || live.state[d].val > (uintptr)0xFFFFFFFFULL)
 			live.state[d].val = live.state[d].val - i;
 		else
 			live.state[d].val = (uae_u32)(live.state[d].val - i);
 		return;
 	}
 
+	bool is_pcp = (d == PC_P);
 	d = rmw(d);
 
-	SUB_wwi(d, d, i);
+	if (is_pcp)
+		SUB_xxi(d, d, i);  // 64-bit SUB for host pointer
+	else
+		SUB_wwi(d, d, i);
 
 	unlock2(d);
 }
