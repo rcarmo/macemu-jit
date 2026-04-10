@@ -7,9 +7,97 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, and word-to-address-register self-alias clobbers. The remaining all-native failure is now much narrower: **pure L2 no longer dies in the old `bad pc_p` crash family, and the current frontier has moved into an early ROM startup corridor around `0x0401b6d4..0x0401be94`, with the next strongest suspect inside the `0x0401be94 -> 0x0401bfd0..0x0401bfde` call/callee segment**.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, word-to-address-register self-alias clobbers, and the remaining early `A995` trap-return divergence. The remaining all-native failure is now later and more specific: **A-line traps now run through an L2 runtime-helper trap path instead of interpreter containment, pure L2 gets past the old `0x040011e4` / `intmask=7 forever` blocker, and the current frontier is a later ROM startup path that falls into the `0x0400706a..0x04007124` wait/copy loop and spins on `m[a5] == 0xff`**.
 
-## Current frontier (2026-04-09)
+## Current frontier (2026-04-10)
+
+The most important updates from the latest round are:
+
+### 1. `A995` and the A-line startup trap class were moved out of interpreter containment
+
+The earlier `0x040011e4: a995` divergence turned out to be a control-flow modeling bug, not a random PC corruption problem.
+
+What changed:
+
+- removed the hardcoded `A995` interpreter barrier
+- removed the exact-exec / optlev0 A-line containments for the startup trap sites
+- added an L2 runtime-helper trap path in `src/uae_cpu_2021/compiler/compemu_support_arm.cpp`
+  - `op_aline_trap_comp_ff()`
+  - `jit_runtime_aline_trap()`
+
+So A-line opcodes now execute as real trap control-flow in L2:
+
+1. call `op_illg(opcode)`
+2. run the real `Exception(0xA, 0)` path
+3. end the block on the helper-updated `regs.pc_p`
+4. re-enter dispatch from the trap-established machine state
+
+This preserved the first-principles semantics while removing the earlier interpreter-only containment.
+
+### 2. The old `A995` startup blocker is gone in pure L2
+
+Post-change pure-L2 smokes now clearly get past the former frontier:
+
+- `A995` still executes at `0x040011e4`
+- pure L2 later reaches:
+  - `0x04000266`
+  - `0x04009500`
+  - `0x04001396`
+- pure L2 also still reaches the later frontier around:
+  - `0x04007118`
+
+So the remaining failure is no longer the old `A995` return-path issue.
+
+### 3. The next frontier is a later ROM wait/copy routine, not `DBcc` or `TST` semantics themselves
+
+The strongest current evidence comes from dispatch tracing around:
+
+- `0x0400706a..0x04007124`
+
+Pure L2 enters this routine with:
+
+- `a3 = 0x50f14000`
+- `a5 = 0x50f00000`
+- `m[a5] = 0xff`
+
+and then runs the inner wait loop:
+
+- `0x04007116: 4a15`
+- `0x04007118: 51cc fffc`
+
+while polling `m[a5]`, which remains `0xff`.
+
+Important point: the local loop mechanics are behaving coherently.
+
+Observed in trace:
+
+- `d4` is loaded from `d0` and decrements normally through the `0x04007118` `DBcc`
+- the loop then repeats because the polled value at `a5` never changes
+
+So the current late failure is **not** explained by a direct `DBcc` decrement bug or a local `TST.B (A5)` bug.
+
+### 4. Current best causal reading
+
+Pure L2 is reaching a later ROM path that behaves like a hardware/video/slot wait-and-copy sequence and then spins because its polled byte never changes:
+
+- `m[a5] == 0xff` throughout the loop
+- the routine keeps using the `0x50f00000 / 0x50f14000` address family
+
+The best current interpretation is:
+
+- the all-native run is now diverging into the wrong later ROM service path or carrying the wrong service state into it
+- once there, it waits on a slot/video-style status location that never becomes ready in the pure-L2 execution
+
+That means the next bug is **earlier state/control selection feeding this loop**, not the inner `DBcc` / `TST` pair itself.
+
+### 5. Status
+
+- old `A995` trap-return blocker: **fixed in L2**
+- pure L2 no longer depends on the old A-line interpreter containments
+- boot still **not fixed** all-native
+- current late frontier: `0x0400706a..0x04007124`, with the observed spin centered on polling `m[a5] == 0xff`
+
+## Previous frontier (2026-04-09)
 
 The most important updates from the latest round are:
 

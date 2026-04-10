@@ -840,6 +840,10 @@ static inline void exc_make_frame(
 #endif
 }
 
+static inline bool trace_a995_env(void);
+static bool trace_a995_pending = false;
+static unsigned long trace_a995_step = 0;
+static uae_u32 trace_a995_origin_pc = 0;
 
 void ex_rte(void)
 {
@@ -892,7 +896,8 @@ void Exception(int nr, uaecptr oldpc)
 {
     uae_u32 currpc = m68k_getpc ();
     MakeSR();
-    if ((nr == 0xA || nr == 0xB) && currpc >= 0x04000500 && currpc <= 0x04000508) {
+    if (((nr == 0xA || nr == 0xB) && currpc >= 0x04000500 && currpc <= 0x04000508) ||
+        (nr == 0xA && currpc == 0x040011e4 && trace_a995_env())) {
         fprintf(stderr,
             "ALINE_EXC nr=%d currpc=%08x oldpc=%08x sr=%04x intmask=%u spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
             nr,
@@ -993,6 +998,14 @@ void Exception(int nr, uaecptr oldpc)
 	exc_make_frame(0, regs.sr, currpc, nr, 0, 0);
     }
     m68k_setpc (get_long (regs.vbr + 4*nr));
+    if (nr == 0xA && currpc == 0x040011e4 && trace_a995_env()) {
+        fprintf(stderr,
+            "A995_TRACE exception-vector target=%08x sp=%08x frame_sr=%04x frame_pc=%08x\n",
+            (unsigned)m68k_getpc(),
+            (unsigned)m68k_areg(regs,7),
+            (unsigned)get_word(m68k_areg(regs,7)),
+            (unsigned)get_long(m68k_areg(regs,7) + 2));
+    }
 #ifdef USE_JIT
     if (UseJIT)
         SPCFLAGS_SET( SPCFLAG_JIT_END_COMPILE );
@@ -1683,7 +1696,7 @@ static void rts68000()
 
 void REGPARAM2 op_illg (uae_u32 opcode)
 {
-	if (opcode == 0xa02d || opcode == 0xa03f || opcode == 0xa051) {
+	if (opcode == 0xa02d || opcode == 0xa03f || opcode == 0xa051 || opcode == 0xa995) {
 		fprintf(stderr,
 			"ALINE_ILLG op=%04x pc=%08x sr=%04x intmask=%u spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
 			(unsigned)opcode,
@@ -1697,6 +1710,18 @@ void REGPARAM2 op_illg (uae_u32 opcode)
 			(unsigned)m68k_areg(regs,0),
 			(unsigned)m68k_areg(regs,1),
 			(unsigned)m68k_areg(regs,7));
+		if (opcode == 0xa995 && trace_a995_env()) {
+			trace_a995_pending = true;
+			trace_a995_step = 0;
+			trace_a995_origin_pc = (uae_u32)m68k_getpc();
+			fprintf(stderr,
+				"A995_TRACE origin pc=%08x sp=%08x top=%08x top4=%08x sr=%04x\n",
+				(unsigned)trace_a995_origin_pc,
+				(unsigned)m68k_areg(regs,7),
+				(unsigned)get_long(m68k_areg(regs,7)),
+				(unsigned)get_long(m68k_areg(regs,7) + 4),
+				(unsigned)regs.sr);
+		}
 	}
 	if ((opcode & 0xF000) == 0xA000) {
 #if 0
@@ -1838,11 +1863,95 @@ static void do_trace (void)
 }
 #endif
 
+static inline bool trace_specialties_count_env(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_TRACE_SPECIALTIES_COUNT");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static inline bool trace_intdecide_env(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_TRACE_INTDECIDE");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static inline bool trace_intdecide_pc(uae_u32 pc)
+{
+	return pc >= 0x040099b0 && pc <= 0x04009a30;
+}
+
+static inline bool trace_a995_env(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_TRACE_A995");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static void trace_intdecide_log(const char *stage, int intr)
+{
+	static unsigned long count = 0;
+	if (!trace_intdecide_env())
+		return;
+	uae_u32 pc = (uae_u32)m68k_getpc();
+	if (!trace_intdecide_pc(pc))
+		return;
+	if (count >= 4000)
+		return;
+	MakeSR();
+	fprintf(stderr,
+		"INTDECIDE %lu stage=%s pc=%08x sr=%04x intmask=%u spc=%08x live=%08x int=%u doint=%u intr=%d stopped=%u d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x\n",
+		++count,
+		stage,
+		(unsigned)pc,
+		(unsigned)regs.sr,
+		(unsigned)regs.intmask,
+		(unsigned)regs.spcflags,
+		(unsigned)InterruptFlags,
+		SPCFLAGS_TEST(SPCFLAG_INT) ? 1u : 0u,
+		SPCFLAGS_TEST(SPCFLAG_DOINT) ? 1u : 0u,
+		intr,
+		(unsigned)regs.stopped,
+		(unsigned)regs.regs[0],
+		(unsigned)regs.regs[1],
+		(unsigned)regs.regs[8],
+		(unsigned)regs.regs[9],
+		(unsigned)regs.regs[10],
+		(unsigned)regs.regs[15]);
+}
+
 int m68k_do_specialties(void)
 {
 #if 0
 	SERVE_INTERNAL_IRQ();
 #endif
+	if (trace_specialties_count_env()) {
+		static unsigned long specialties_count = 0;
+		specialties_count++;
+		if (specialties_count <= 32 || (specialties_count % 1000) == 0) {
+			MakeSR();
+			fprintf(stderr,
+				"SPECIALTIES_COUNT %lu pc=%08x sr=%04x intmask=%u spc=%08x live=%08x stopped=%u\n",
+				specialties_count,
+				(unsigned)m68k_getpc(),
+				(unsigned)regs.sr,
+				(unsigned)regs.intmask,
+				(unsigned)regs.spcflags,
+				(unsigned)InterruptFlags,
+				(unsigned)regs.stopped);
+		}
+	}
+	trace_intdecide_log("entry", -2);
 	if (trace_boot_stage_env()) {
 		static unsigned long specialties_logs = 0;
 		if (specialties_logs < 64) {
@@ -1943,6 +2052,7 @@ int m68k_do_specialties(void)
 	}
 */
 	if (SPCFLAGS_TEST( SPCFLAG_DOINT )) {
+		trace_intdecide_log("doint-pre", -2);
 		if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
 			static unsigned long doint_pre_count = 0;
 			if (doint_pre_count < 4000) {
@@ -1956,6 +2066,7 @@ int m68k_do_specialties(void)
 		}
 		SPCFLAGS_CLEAR( SPCFLAG_DOINT );
 		int intr = intlev ();
+		trace_intdecide_log("doint-post", intr);
 		if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
 			static unsigned long doint_post_count = 0;
 			if (doint_post_count < 4000) {
@@ -1968,14 +2079,19 @@ int m68k_do_specialties(void)
 			}
 		}
 		if (intr != -1 && intr > regs.intmask) {
+			trace_intdecide_log("interrupt-taken-pre", intr);
 			Interrupt (intr);
 			if (UseDeferredInterruptModel())
 				SPCFLAGS_CLEAR( SPCFLAG_INT | SPCFLAG_DOINT );
 			regs.stopped = 0;
+			trace_intdecide_log("interrupt-taken-post", intr);
+		} else {
+			trace_intdecide_log("interrupt-not-taken", intr);
 		}
 	}
 
 	if (SPCFLAGS_TEST( SPCFLAG_INT )) {
+		trace_intdecide_log("promote-pre", -2);
 		if (UseDeferredInterruptModel() && trace_irqmanaged_env()) {
 			static unsigned long promote_count = 0;
 			if (promote_count < 4000) {
@@ -1989,6 +2105,7 @@ int m68k_do_specialties(void)
 		}
 		SPCFLAGS_CLEAR( SPCFLAG_INT );
 		SPCFLAGS_SET( SPCFLAG_DOINT );
+		trace_intdecide_log("promote-post", -2);
 	}
 
 	if (SPCFLAGS_TEST( SPCFLAG_BRK /*| SPCFLAG_MODE_CHANGE*/ )) {
@@ -2062,6 +2179,25 @@ void m68k_do_execute (void)
 	m68k_record_step(m68k_getpc(), cft_map(opcode));
 #endif
 	(*cpufunctbl[opcode])(opcode);
+	if (trace_a995_pending && trace_a995_step < 64) {
+		MakeSR();
+		fprintf(stderr,
+			"A995_TRACE step=%lu origin=%08x pc=%08x op=%04x sr=%04x intmask=%u a7=%08x sp0=%08x sp4=%08x\n",
+			++trace_a995_step,
+			(unsigned)trace_a995_origin_pc,
+			(unsigned)m68k_getpc(),
+			(unsigned)opcode,
+			(unsigned)regs.sr,
+			(unsigned)regs.intmask,
+			(unsigned)m68k_areg(regs,7),
+			(unsigned)get_long(m68k_areg(regs,7)),
+			(unsigned)get_long(m68k_areg(regs,7) + 4));
+		if (m68k_getpc() == 0x040011e6 || m68k_getpc() == 0x040011e8 ||
+			m68k_getpc() == 0x040011ec || m68k_getpc() == 0x040012fa ||
+			m68k_getpc() == 0x04000200 || trace_a995_step >= 64) {
+			trace_a995_pending = false;
+		}
+	}
 	if (trace_this_step) {
 		trace_window_count++;
 		trace_window_log("AFTER", trace_window_count, m68k_getpc(), opcode);

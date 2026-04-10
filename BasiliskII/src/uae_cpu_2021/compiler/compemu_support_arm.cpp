@@ -250,16 +250,8 @@ static inline int jit_max_optlev(void)
 
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
-#if defined(CPU_AARCH64)
-	/* Startup containment while fixing the remaining ARM64 control-flow bug:
-	   exact-interpreter the confirmed trap/transition sites that feed the first
-	   SR/intmask drop. */
-	return (pc >= 0x040004f0 && pc <= 0x04000508) || pc == 0x04000780 ||
-		(pc >= 0x0400c5b2 && pc <= 0x0400c60a) || pc == 0x0400cc6e;
-#else
 	(void)pc;
 	return false;
-#endif
 }
 
 static inline bool jit_force_optlev1_block(uae_u32 pc)
@@ -510,9 +502,10 @@ static inline bool jit_pc_in_env_ranges(const char *env_name, uae_u32 pc)
 		int range_count;
 		range_pair ranges[64];
 	};
-	static cache_entry caches[2] = {
+	static cache_entry caches[3] = {
 		{"B2_JIT_VERIFY_PCS", 0, 0, {}},
 		{"B2_JIT_FLUSH_OP_PCS", 0, 0, {}},
+		{"B2_JIT_TRACE_PCS", 0, 0, {}},
 	};
 	cache_entry *cache = NULL;
 	for (size_t ci = 0; ci < sizeof(caches) / sizeof(caches[0]); ci++) {
@@ -567,6 +560,11 @@ static inline bool jit_verify_target_pc(uae_u32 pc)
 static inline bool jit_flush_target_pc(uae_u32 pc)
 {
 	return jit_pc_in_env_ranges("B2_JIT_FLUSH_OP_PCS", pc);
+}
+
+static inline bool jit_trace_target_pc(uae_u32 pc)
+{
+	return jit_pc_in_env_ranges("B2_JIT_TRACE_PCS", pc);
 }
 
 struct jit_verify_snapshot {
@@ -815,13 +813,13 @@ static void jit_verify_post(uae_u32 pc, uae_u32 opcode)
 	const uae_u8 interp_mem_a2 = get_byte(jit_verify_pre_state.mem_a2_addr);
 	const uae_u8 interp_mem_a2_p400 = get_byte(jit_verify_pre_state.mem_a2_p400_addr);
 	bool mismatch = false;
-	if (regs.regs[0] != compiled_post.regs.regs[0] ||
-		regs.regs[1] != compiled_post.regs.regs[1] ||
-		regs.regs[2] != compiled_post.regs.regs[2] ||
-		regs.regs[3] != compiled_post.regs.regs[3] ||
-		regs.regs[12] != compiled_post.regs.regs[12] ||
-		regs.regs[13] != compiled_post.regs.regs[13] ||
-		regflags.nzcv != compiled_post.flags.nzcv ||
+	for (int ri = 0; ri < 16; ri++) {
+		if (regs.regs[ri] != compiled_post.regs.regs[ri]) {
+			mismatch = true;
+			break;
+		}
+	}
+	if (regflags.nzcv != compiled_post.flags.nzcv ||
 		regflags.x != compiled_post.flags.x ||
 		interp_mem_a2 != compiled_post.mem_a2_byte ||
 		interp_mem_a2_p400 != compiled_post.mem_a2_p400_byte)
@@ -829,14 +827,19 @@ static void jit_verify_post(uae_u32 pc, uae_u32 opcode)
 
 	if (mismatch && jit_verify_log_count < 400) {
 		fprintf(stderr,
-			"JITVERIFY pc=%08x op=%04x interp:d0=%08x d1=%08x d2=%08x d3=%08x a4=%08x a5=%08x nzcv=%08x x=%08x m[a2]=%02x m[a2+400]=%02x compiled:d0=%08x d1=%08x d2=%08x d3=%08x a4=%08x a5=%08x nzcv=%08x x=%08x m[a2]=%02x m[a2+400]=%02x\n",
+			"JITVERIFY pc=%08x op=%04x interp:d0=%08x d1=%08x d2=%08x d3=%08x a0=%08x a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x nzcv=%08x x=%08x m[a2]=%02x m[a2+400]=%02x compiled:d0=%08x d1=%08x d2=%08x d3=%08x a0=%08x a1=%08x a2=%08x a3=%08x a4=%08x a5=%08x a6=%08x a7=%08x nzcv=%08x x=%08x m[a2]=%02x m[a2+400]=%02x\n",
 			(unsigned)pc, (unsigned)opcode,
 			(unsigned)regs.regs[0], (unsigned)regs.regs[1], (unsigned)regs.regs[2], (unsigned)regs.regs[3],
-			(unsigned)regs.regs[12], (unsigned)regs.regs[13], regflags.nzcv, regflags.x,
+			(unsigned)regs.regs[8], (unsigned)regs.regs[9], (unsigned)regs.regs[10], (unsigned)regs.regs[11],
+			(unsigned)regs.regs[12], (unsigned)regs.regs[13], (unsigned)regs.regs[14], (unsigned)regs.regs[15],
+			regflags.nzcv, regflags.x,
 			(unsigned)interp_mem_a2, (unsigned)interp_mem_a2_p400,
 			(unsigned)compiled_post.regs.regs[0], (unsigned)compiled_post.regs.regs[1],
 			(unsigned)compiled_post.regs.regs[2], (unsigned)compiled_post.regs.regs[3],
+			(unsigned)compiled_post.regs.regs[8], (unsigned)compiled_post.regs.regs[9],
+			(unsigned)compiled_post.regs.regs[10], (unsigned)compiled_post.regs.regs[11],
 			(unsigned)compiled_post.regs.regs[12], (unsigned)compiled_post.regs.regs[13],
+			(unsigned)compiled_post.regs.regs[14], (unsigned)compiled_post.regs.regs[15],
 			compiled_post.flags.nzcv, compiled_post.flags.x,
 			(unsigned)compiled_post.mem_a2_byte, (unsigned)compiled_post.mem_a2_p400_byte);
 		jit_verify_log_count++;
@@ -950,7 +953,9 @@ static void op_fullsr_mv2sr_w_comp_ff(uae_u32 opcode);
 static void op_move_l_d8anxn_absw_comp_ff(uae_u32 opcode);
 static void op_move_l_reg_d16an_comp_ff(uae_u32 opcode);
 extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode);
+extern "C" void jit_trace_pc_hit(uae_u32 pc, uae_u32 tagged_opcode);
 static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
+static void op_aline_trap_comp_ff(uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
@@ -995,32 +1000,14 @@ static inline bool jit_restore_barrier(const char *token)
 
 static inline bool jit_force_exact_exec_nostats_opcode(uae_u16 op)
 {
-#if defined(CPU_AARCH64)
-	/* Some ROM A-line traps are not just "one opcode via cputbl" fallbacks:
-	   they rely on the full interpreter/exception path and the resulting C-side
-	   specialties processing before control returns to the next guest opcode.
-	   Executing them through the generic single-op fallback leaves startup on
-	   the wrong path (for example the `A02D` trap before the first SR/intmask
-	   drop at `0x0400023a`). Route the confirmed boot-time trap opcodes through
-	   exact exec_nostats() re-entry instead. */
-	if (op == 0xa02d || op == 0xa03f || op == 0xa051 ||
-		op == 0x2da0 || op == 0x3fa0 || op == 0x51a0)
-		return true;
-#endif
+	(void)op;
 	return false;
 }
 
 static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
 {
-#if defined(CPU_AARCH64)
-	/* Confirmed startup trap sites feeding the first SR/intmask drop. Keep the
-	   containment narrow and evidence-based. */
-	return pc == 0x04000502 || pc == 0x04000780 || pc == 0x0400c5b2 ||
-		pc == 0x0400c5be || pc == 0x0400c60a || pc == 0x0400cc6e;
-#else
 	(void)pc;
 	return false;
-#endif
 }
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
@@ -3630,6 +3617,22 @@ static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode)
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
 }
 
+static void jit_runtime_aline_trap(uae_u32 opcode)
+{
+    op_illg(opcode);
+}
+
+static void op_aline_trap_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    /* A-line opcodes are trap control-flow, not local fallbacks. Execute the
+       real trap helper at the live guest PC, then end the block from the
+       helper-updated regs.pc_p so runtime resumes from the exception vector
+       or trap-established return path without interpreter fallback. */
+    jit_emit_runtime_helper_barrier((uintptr)jit_runtime_aline_trap,
+        (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
+}
+
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2)
 {
     flush(1);
@@ -5098,6 +5101,14 @@ void build_comp(void)
     compfunctbl[cft_map(0x007c)] = op_fullsr_orsr_w_comp_ff;
     compfunctbl[cft_map(0x027c)] = op_fullsr_andsr_w_comp_ff;
     compfunctbl[cft_map(0x0a7c)] = op_fullsr_eorsr_w_comp_ff;
+    /* Resolve A-line startup traps in L2 instead of exact interpreter fallback.
+       They are real control-flow/trap ops: run op_illg()/Exception() through a
+       runtime helper and end the block on the helper-updated regs.pc_p. */
+    for (opcode = 0xa000; opcode <= 0xafff; opcode++) {
+        compfunctbl[cft_map(opcode)] = op_aline_trap_comp_ff;
+        nfcompfunctbl[cft_map(opcode)] = op_aline_trap_comp_ff;
+        prop[cft_map(opcode)].cflow = fl_trap;
+    }
     /* Keep MV2SR.W on the exact legacy/interpreter path for now; the block
        barrier above preserves correctness after MakeFromSR()-style state
        changes while we continue narrowing the native helper bug. */
@@ -5623,12 +5634,20 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(CPU_AARCH64)
                     uae_u8* _before = get_target();
                     const bool _verify_this_op = jit_verify_target_pc(op_m68k_pc);
-                    if (_verify_this_op) {
+                    const bool _trace_this_op = jit_trace_target_pc(op_m68k_pc);
+                    if (_verify_this_op || _trace_this_op) {
                         flush(1);
-                        compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
-                        compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
-                        compemu_raw_mov_l_ri(REG_PAR2, opcode);
-                        compemu_raw_call((uintptr)jit_verify_pre);
+                        if (_trace_this_op) {
+                            compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
+                            compemu_raw_mov_l_ri(REG_PAR2, (1u << 16) | (opcode & 0xffff));
+                            compemu_raw_call((uintptr)jit_trace_pc_hit);
+                        }
+                        if (_verify_this_op) {
+                            compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
+                            compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
+                            compemu_raw_mov_l_ri(REG_PAR2, opcode);
+                            compemu_raw_call((uintptr)jit_verify_pre);
+                        }
                         comp_pc_p = (uae_u8*)pc_hist[i].location;
                         init_comp();
                     }
@@ -5838,6 +5857,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
                     compemu_raw_mov_l_rm(REG_WORK1, (uintptr)&regs.pc_p);
                     compemu_raw_mov_l_mr((uintptr)&regs.pc_oldp, REG_WORK1);
+                    if (jit_trace_target_pc(op_m68k_pc)) {
+                        compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
+                        compemu_raw_mov_l_ri(REG_PAR2, (2u << 16) | (opcode & 0xffff));
+                        compemu_raw_call((uintptr)jit_trace_pc_hit);
+                    }
                     compemu_raw_call((uintptr)cputbl[cft_map(opcode)]);
                     /* Trace interpreter-executed family-d instructions */
                     if (((opcode >> 12) & 0xf) == 0xd && getenv("B2_JIT_TRACE_ADD")) {

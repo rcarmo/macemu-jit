@@ -97,6 +97,280 @@ static bool ensure_aarch64_jit_runtime_ready(void)
 
 extern void jit_one_tick(void);
 
+static inline bool jit_bad_pcp_guard_enabled(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_JIT_GUARD_PCP");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static inline bool jit_trace_dispatch_pc_enabled(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_TRACE_DISPATCH_PC_START");
+		cached = (env && *env) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static inline uae_u32 jit_trace_dispatch_pc_start(void)
+{
+	static uae_u32 value = 0;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_DISPATCH_PC_START");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0;
+		init = true;
+	}
+	return value;
+}
+
+static inline uae_u32 jit_trace_dispatch_pc_end(void)
+{
+	static uae_u32 value = 0xffffffffu;
+	static bool init = false;
+	if (!init) {
+		const char *env = getenv("B2_TRACE_DISPATCH_PC_END");
+		value = env && *env ? (uae_u32)strtoul(env, NULL, 0) : 0xffffffffu;
+		init = true;
+	}
+	return value;
+}
+
+static void jit_log_dispatch_pc(unsigned long dispatch_seq,
+	uae_u32 guest_pc,
+	uae_u32 block_entry_pc,
+	uintptr block_entry_pcp,
+	uintptr block_entry_oldp,
+	unsigned long prev_dispatch_seq,
+	uae_u32 prev_block_entry_pc,
+	uintptr prev_block_entry_pcp,
+	uintptr prev_block_entry_oldp)
+{
+	static unsigned long log_count = 0;
+	if (log_count >= 400)
+		return;
+	MakeSR();
+	uae_u32 a5 = (uae_u32)regs.regs[13];
+	uae_u32 a5_byte = 0xffffffffu;
+	if (a5)
+		a5_byte = (uae_u32)get_byte(a5);
+	fprintf(stderr,
+		"DISPATCHPC[%lu] dispatch=%lu guest_pc=%08x regs.pc=%08x regs.pc_p=%p oldp=%p block_entry_pc=%08x block_entry_pcp=%p block_entry_oldp=%p prev_dispatch=%lu prev_block_entry_pc=%08x prev_block_entry_pcp=%p prev_block_entry_oldp=%p d0=%08x d1=%08x d4=%08x d5=%08x a0=%08x a1=%08x a2=%08x a3=%08x a5=%08x m[a5]=%02x a7=%08x sr=%04x intmask=%u spc=%08x\n",
+		++log_count,
+		dispatch_seq,
+		(unsigned)guest_pc,
+		(unsigned)regs.pc,
+		(void*)regs.pc_p,
+		(void*)regs.pc_oldp,
+		(unsigned)block_entry_pc,
+		(void*)block_entry_pcp,
+		(void*)block_entry_oldp,
+		prev_dispatch_seq,
+		(unsigned)prev_block_entry_pc,
+		(void*)prev_block_entry_pcp,
+		(void*)prev_block_entry_oldp,
+		(unsigned)regs.regs[0],
+		(unsigned)regs.regs[1],
+		(unsigned)regs.regs[4],
+		(unsigned)regs.regs[5],
+		(unsigned)regs.regs[8],
+		(unsigned)regs.regs[9],
+		(unsigned)regs.regs[10],
+		(unsigned)regs.regs[11],
+		a5,
+		(unsigned)(a5_byte & 0xff),
+		(unsigned)regs.regs[15],
+		(unsigned)regs.sr,
+		(unsigned)regs.intmask,
+		(unsigned)regs.spcflags);
+}
+
+static inline bool jit_bad_pcp_value(uintptr value, uae_u32 *guest_pc_out, uintptr *expected_pcp_out)
+{
+	const uae_u32 guest_pc = m68k_getpc();
+	const uintptr expected_pcp = (uintptr)get_real_address(guest_pc, 0, sz_word);
+	if (guest_pc_out)
+		*guest_pc_out = guest_pc;
+	if (expected_pcp_out)
+		*expected_pcp_out = expected_pcp;
+	return value != expected_pcp;
+}
+
+static void jit_log_bad_pcp(const char *phase,
+	unsigned long dispatch_seq,
+	uae_u32 block_entry_pc,
+	uintptr block_entry_pcp,
+	uintptr block_entry_oldp,
+	unsigned long prev_dispatch_seq,
+	uae_u32 prev_block_entry_pc,
+	uintptr prev_block_entry_pcp,
+	uintptr prev_block_entry_oldp,
+	uae_u32 guest_pc,
+	uintptr expected_pcp)
+{
+	static unsigned long log_count = 0;
+	if (log_count >= 32)
+		return;
+	fprintf(stderr,
+		"BAD_PCP[%lu] phase=%s dispatch=%lu guest_pc=%08x expected_pcp=%p regs.pc=%08x regs.pc_p=%p regs.pc_oldp=%p block_entry_pc=%08x block_entry_pcp=%p block_entry_oldp=%p prev_dispatch=%lu prev_block_entry_pc=%08x prev_block_entry_pcp=%p prev_block_entry_oldp=%p last_setpc_seq=%lu last_setpc_kind=%s last_setpc_value=%p d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x spc=%08x\n",
+		++log_count,
+		phase,
+		dispatch_seq,
+		(unsigned)guest_pc,
+		(void*)expected_pcp,
+		(unsigned)regs.pc,
+		(void*)regs.pc_p,
+		(void*)regs.pc_oldp,
+		(unsigned)block_entry_pc,
+		(void*)block_entry_pcp,
+		(void*)block_entry_oldp,
+		prev_dispatch_seq,
+		(unsigned)prev_block_entry_pc,
+		(void*)prev_block_entry_pcp,
+		(void*)prev_block_entry_oldp,
+		jit_last_setpc_seq,
+		jit_setpc_kind_name(jit_last_setpc_kind),
+		(void*)jit_last_setpc_value,
+		(unsigned)regs.regs[0],
+		(unsigned)regs.regs[1],
+		(unsigned)regs.regs[8],
+		(unsigned)regs.regs[9],
+		(unsigned)regs.regs[10],
+		(unsigned)regs.regs[15],
+		(unsigned)regs.spcflags);
+}
+
+static inline bool jit_spin_trace_enabled(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_JIT_TRACE_SPIN");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static inline bool jit_is_late_spin_pc(uae_u32 pc)
+{
+	switch (pc) {
+	case 0x040b98f6:
+	case 0x040b98fa:
+	case 0x040b9a18:
+	case 0x040b9a1c:
+	case 0x040ba0a8:
+	case 0x040ba0b0:
+	case 0x040ba0b2:
+	case 0x040ba0d6:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static inline bool jit_trace_0230_enabled(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_TRACE_REGION_0230");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+static inline bool jit_is_region_0230_pc(uae_u32 pc)
+{
+	return pc >= 0x04000220 && pc <= 0x04000248;
+}
+
+static void jit_log_region_0230(unsigned long dispatch_seq,
+	uae_u32 guest_pc,
+	uae_u32 prev_guest_pc,
+	uae_u32 block_entry_pc,
+	uintptr block_entry_pcp,
+	uintptr block_entry_oldp,
+	unsigned long prev_dispatch_seq,
+	uae_u32 prev_block_entry_pc,
+	uintptr prev_block_entry_pcp,
+	uintptr prev_block_entry_oldp)
+{
+	static unsigned long log_count = 0;
+	if (log_count >= 128)
+		return;
+	fprintf(stderr,
+		"TRACE0230[%lu] dispatch=%lu guest_pc=%08x prev_guest_pc=%08x regs.pc=%08x regs.pc_p=%p regs.pc_oldp=%p block_entry_pc=%08x block_entry_pcp=%p block_entry_oldp=%p prev_dispatch=%lu prev_block_entry_pc=%08x prev_block_entry_pcp=%p prev_block_entry_oldp=%p last_setpc_seq=%lu last_setpc_kind=%s last_setpc_value=%p d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x spc=%08x\n",
+		++log_count,
+		dispatch_seq,
+		(unsigned)guest_pc,
+		(unsigned)prev_guest_pc,
+		(unsigned)regs.pc,
+		(void*)regs.pc_p,
+		(void*)regs.pc_oldp,
+		(unsigned)block_entry_pc,
+		(void*)block_entry_pcp,
+		(void*)block_entry_oldp,
+		prev_dispatch_seq,
+		(unsigned)prev_block_entry_pc,
+		(void*)prev_block_entry_pcp,
+		(void*)prev_block_entry_oldp,
+		jit_last_setpc_seq,
+		jit_setpc_kind_name(jit_last_setpc_kind),
+		(void*)jit_last_setpc_value,
+		(unsigned)regs.regs[0],
+		(unsigned)regs.regs[1],
+		(unsigned)regs.regs[8],
+		(unsigned)regs.regs[9],
+		(unsigned)regs.regs[10],
+		(unsigned)regs.regs[15],
+		(unsigned)regs.spcflags);
+}
+
+static void jit_log_spin_trace(unsigned long dispatch_seq,
+	uae_u32 guest_pc,
+	uae_u32 prev_guest_pc,
+	uae_u32 block_entry_pc,
+	uintptr block_entry_pcp,
+	uintptr block_entry_oldp,
+	unsigned long prev_dispatch_seq,
+	uae_u32 prev_block_entry_pc,
+	uintptr prev_block_entry_pcp,
+	uintptr prev_block_entry_oldp)
+{
+	static unsigned long log_count = 0;
+	if (log_count >= 128)
+		return;
+	fprintf(stderr,
+		"SPIN_TRACE[%lu] dispatch=%lu guest_pc=%08x prev_guest_pc=%08x regs.pc=%08x regs.pc_p=%p regs.pc_oldp=%p block_entry_pc=%08x block_entry_pcp=%p block_entry_oldp=%p prev_dispatch=%lu prev_block_entry_pc=%08x prev_block_entry_pcp=%p prev_block_entry_oldp=%p last_setpc_seq=%lu last_setpc_kind=%s last_setpc_value=%p d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x spc=%08x\n",
+		++log_count,
+		dispatch_seq,
+		(unsigned)guest_pc,
+		(unsigned)prev_guest_pc,
+		(unsigned)regs.pc,
+		(void*)regs.pc_p,
+		(void*)regs.pc_oldp,
+		(unsigned)block_entry_pc,
+		(void*)block_entry_pcp,
+		(void*)block_entry_oldp,
+		prev_dispatch_seq,
+		(unsigned)prev_block_entry_pc,
+		(void*)prev_block_entry_pcp,
+		(void*)prev_block_entry_oldp,
+		jit_last_setpc_seq,
+		jit_setpc_kind_name(jit_last_setpc_kind),
+		(void*)jit_last_setpc_value,
+		(unsigned)regs.regs[0],
+		(unsigned)regs.regs[1],
+		(unsigned)regs.regs[8],
+		(unsigned)regs.regs[9],
+		(unsigned)regs.regs[10],
+		(unsigned)regs.regs[15],
+		(unsigned)regs.spcflags);
+}
+
 void m68k_do_compile_execute(void)
 {
 	if (!ensure_aarch64_jit_runtime_ready())
@@ -118,14 +392,94 @@ void m68k_do_compile_execute(void)
 	unsigned long tick_counter = 0;
 	const unsigned long tick_interval = 8000; /* ~60Hz at typical block dispatch rate */
 #endif
+	static unsigned long last_dispatch_seq = 0;
+	static uae_u32 last_block_entry_pc = 0;
+	static uintptr last_block_entry_pcp = 0;
+	static uintptr last_block_entry_oldp = 0;
+	static uae_u32 last_guest_pc = 0;
+	static bool last_guest_in_spin = false;
 	for (;;) {
+		const unsigned long dispatch_seq = _dc + 1;
+		const uae_u32 block_entry_pc = regs.pc;
+		const uintptr block_entry_pcp = (uintptr)regs.pc_p;
+		const uintptr block_entry_oldp = (uintptr)regs.pc_oldp;
 #if defined(CPU_AARCH64)
+		if (jit_bad_pcp_guard_enabled()) {
+			uae_u32 guest_pc = 0;
+			uintptr expected_pcp = 0;
+			if (jit_bad_pcp_value(block_entry_pcp, &guest_pc, &expected_pcp)) {
+				jit_log_bad_pcp("entry", dispatch_seq,
+					block_entry_pc, block_entry_pcp, block_entry_oldp,
+					last_dispatch_seq, last_block_entry_pc, last_block_entry_pcp, last_block_entry_oldp,
+					guest_pc, expected_pcp);
+			}
+		}
 		if (use_sync_ticks)
 			tick_inhibit = true;
 #endif
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
 #if defined(CPU_AARCH64)
+		if (jit_bad_pcp_guard_enabled()) {
+			uae_u32 guest_pc = 0;
+			uintptr expected_pcp = 0;
+			if (jit_bad_pcp_value((uintptr)regs.pc_p, &guest_pc, &expected_pcp)) {
+				jit_log_bad_pcp("post", _dc,
+					block_entry_pc, block_entry_pcp, block_entry_oldp,
+					last_dispatch_seq, last_block_entry_pc, last_block_entry_pcp, last_block_entry_oldp,
+					guest_pc, expected_pcp);
+			}
+		}
+		if (jit_trace_dispatch_pc_enabled()) {
+			const uae_u32 guest_pc = m68k_getpc();
+			if (guest_pc >= jit_trace_dispatch_pc_start() && guest_pc <= jit_trace_dispatch_pc_end()) {
+				jit_log_dispatch_pc(_dc,
+					guest_pc,
+					block_entry_pc,
+					block_entry_pcp,
+					block_entry_oldp,
+					last_dispatch_seq,
+					last_block_entry_pc,
+					last_block_entry_pcp,
+					last_block_entry_oldp);
+			}
+		}
+		last_dispatch_seq = _dc;
+		last_block_entry_pc = block_entry_pc;
+		last_block_entry_pcp = block_entry_pcp;
+		last_block_entry_oldp = block_entry_oldp;
+#endif
+#if defined(CPU_AARCH64)
+		{
+			const uae_u32 guest_pc_now = m68k_getpc();
+			const bool guest_in_spin = jit_is_late_spin_pc(guest_pc_now);
+			if (jit_spin_trace_enabled() && guest_in_spin && (!last_guest_in_spin || guest_pc_now != last_guest_pc)) {
+				jit_log_spin_trace(_dc,
+					guest_pc_now,
+					last_guest_pc,
+					block_entry_pc,
+					block_entry_pcp,
+					block_entry_oldp,
+					last_dispatch_seq,
+					last_block_entry_pc,
+					last_block_entry_pcp,
+					last_block_entry_oldp);
+			}
+			if (jit_trace_0230_enabled() && jit_is_region_0230_pc(guest_pc_now)) {
+				jit_log_region_0230(_dc,
+					guest_pc_now,
+					last_guest_pc,
+					block_entry_pc,
+					block_entry_pcp,
+					block_entry_oldp,
+					last_dispatch_seq,
+					last_block_entry_pc,
+					last_block_entry_pcp,
+					last_block_entry_oldp);
+			}
+			last_guest_pc = guest_pc_now;
+			last_guest_in_spin = guest_in_spin;
+		}
 		if ((_dc % 1000000) == 0) {
 			fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a7=%08x spc=%08x ti=%d\n",
 				_dc, m68k_getpc(), regs.regs[0], regs.regs[15], regs.spcflags, (int)tick_inhibit);
@@ -5709,6 +6063,37 @@ extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode)
             tc++, pc, opcode,
             regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[11], regflags.x);
     }
+}
+
+extern "C" void jit_trace_pc_hit(uae_u32 pc, uae_u32 tagged_opcode)
+{
+    static unsigned long tc = 0;
+    const uae_u16 opcode = (uae_u16)(tagged_opcode & 0xffff);
+    const uae_u16 kind = (uae_u16)(tagged_opcode >> 16);
+    const char *kind_name = kind == 1 ? "compiled" :
+        kind == 2 ? "fallback" : "unknown";
+    if (tc >= 400)
+        return;
+    MakeSR();
+    fprintf(stderr,
+        "JITPCHIT[%lu] kind=%s pc=%08x op=%04x regs.pc=%08x regs.pc_p=%p oldp=%p sr=%04x intmask=%u d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a2=%08x a7=%08x spc=%08x\n",
+        ++tc,
+        kind_name,
+        (unsigned)pc,
+        (unsigned)opcode,
+        (unsigned)regs.pc,
+        (void*)regs.pc_p,
+        (void*)regs.pc_oldp,
+        (unsigned)regs.sr,
+        (unsigned)regs.intmask,
+        (unsigned)regs.regs[0],
+        (unsigned)regs.regs[1],
+        (unsigned)regs.regs[2],
+        (unsigned)regs.regs[8],
+        (unsigned)regs.regs[9],
+        (unsigned)regs.regs[10],
+        (unsigned)regs.regs[15],
+        (unsigned)regs.spcflags);
 }
 #endif
 
