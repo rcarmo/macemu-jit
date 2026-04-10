@@ -1041,6 +1041,18 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 		return true;
 	if ((jit_restore_barrier("branch") || jit_restore_barrier("bcc")) && (op & 0xf000) == 0x6000 && (op & 0xff00) != 0x6000 && (op & 0xff00) != 0x6100)
 		return true;
+
+	/* ARM64: force all BSR and Bcc family branches through interpreter
+	   barriers. The compiled branch endblock/chaining path still has a
+	   target-computation bug that causes wrong control flow. Barrier
+	   bisection proved that forcing the branch family through the
+	   interpreter restores correct boot progress. */
+#if defined(CPU_AARCH64)
+	if ((op & 0xf000) == 0x6000)  /* BRA + BSR + Bcc (all sizes) */
+		return true;
+	if (op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e77)  /* RTE, RTD, RTS, RTR */
+		return true;
+#endif
 	if (jit_restore_barrier("jsr") && (op & 0xffc0) == 0x4e80)
 		return true;
 	if (jit_restore_barrier("jmp") && (op & 0xffc0) == 0x4ec0)

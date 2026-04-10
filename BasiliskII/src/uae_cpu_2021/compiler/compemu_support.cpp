@@ -141,6 +141,88 @@ static inline uae_u32 jit_trace_dispatch_pc_end(void)
 	return value;
 }
 
+static inline bool jit_trace_dispatch_ring_enabled(void)
+{
+	static int cached = -1;
+	if (cached < 0) {
+		const char *env = getenv("B2_TRACE_DISPATCH_RING");
+		cached = (env && *env && strcmp(env, "0") != 0) ? 1 : 0;
+	}
+	return cached != 0;
+}
+
+struct jit_dispatch_ring_entry {
+	unsigned long dispatch_seq;
+	uae_u32 guest_pc;
+	uae_u32 block_entry_pc;
+	uae_u32 d0, d1, d2, d4, d5;
+	uae_u32 a0, a1, a2, a3, a5, a7;
+	uae_u32 sr, intmask, spcflags;
+};
+
+static jit_dispatch_ring_entry jit_dispatch_ring[64];
+static unsigned long jit_dispatch_ring_count = 0;
+static bool jit_dispatch_ring_dumped = false;
+
+static void jit_trace_dispatch_ring_maybe_dump(unsigned long dispatch_seq, uae_u32 guest_pc, uae_u32 block_entry_pc)
+{
+	if (!jit_trace_dispatch_ring_enabled())
+		return;
+	jit_dispatch_ring_entry &slot = jit_dispatch_ring[jit_dispatch_ring_count % (sizeof(jit_dispatch_ring) / sizeof(jit_dispatch_ring[0]))];
+	MakeSR();
+	slot.dispatch_seq = dispatch_seq;
+	slot.guest_pc = guest_pc;
+	slot.block_entry_pc = block_entry_pc;
+	slot.d0 = (uae_u32)regs.regs[0];
+	slot.d1 = (uae_u32)regs.regs[1];
+	slot.d2 = (uae_u32)regs.regs[2];
+	slot.d4 = (uae_u32)regs.regs[4];
+	slot.d5 = (uae_u32)regs.regs[5];
+	slot.a0 = (uae_u32)regs.regs[8];
+	slot.a1 = (uae_u32)regs.regs[9];
+	slot.a2 = (uae_u32)regs.regs[10];
+	slot.a3 = (uae_u32)regs.regs[11];
+	slot.a5 = (uae_u32)regs.regs[13];
+	slot.a7 = (uae_u32)regs.regs[15];
+	slot.sr = (uae_u32)regs.sr;
+	slot.intmask = (uae_u32)regs.intmask;
+	slot.spcflags = (uae_u32)regs.spcflags;
+	jit_dispatch_ring_count++;
+
+	if (jit_dispatch_ring_dumped)
+		return;
+	if (!(guest_pc == 0x0400706a || guest_pc == 0x04007080 || guest_pc == 0x04007116))
+		return;
+	jit_dispatch_ring_dumped = true;
+	fprintf(stderr, "DISPATCHRING dump trigger guest_pc=%08x dispatch=%lu count=%lu\n",
+		(unsigned)guest_pc, dispatch_seq, jit_dispatch_ring_count);
+	const unsigned long cap = (unsigned long)(sizeof(jit_dispatch_ring) / sizeof(jit_dispatch_ring[0]));
+	unsigned long start = jit_dispatch_ring_count > cap ? (jit_dispatch_ring_count - cap) : 0;
+	for (unsigned long i = start; i < jit_dispatch_ring_count; i++) {
+		const jit_dispatch_ring_entry &e = jit_dispatch_ring[i % cap];
+		fprintf(stderr,
+			"DISPATCHRING[%lu] dispatch=%lu guest_pc=%08x block_entry_pc=%08x d0=%08x d1=%08x d2=%08x d4=%08x d5=%08x a0=%08x a1=%08x a2=%08x a3=%08x a5=%08x a7=%08x sr=%04x intmask=%u spc=%08x\n",
+			i - start,
+			e.dispatch_seq,
+			(unsigned)e.guest_pc,
+			(unsigned)e.block_entry_pc,
+			(unsigned)e.d0,
+			(unsigned)e.d1,
+			(unsigned)e.d2,
+			(unsigned)e.d4,
+			(unsigned)e.d5,
+			(unsigned)e.a0,
+			(unsigned)e.a1,
+			(unsigned)e.a2,
+			(unsigned)e.a3,
+			(unsigned)e.a5,
+			(unsigned)e.a7,
+			(unsigned)e.sr,
+			(unsigned)e.intmask,
+			(unsigned)e.spcflags);
+	}
+}
+
 static void jit_log_dispatch_pc(unsigned long dispatch_seq,
 	uae_u32 guest_pc,
 	uae_u32 block_entry_pc,
@@ -152,6 +234,7 @@ static void jit_log_dispatch_pc(unsigned long dispatch_seq,
 	uintptr prev_block_entry_oldp)
 {
 	static unsigned long log_count = 0;
+	jit_trace_dispatch_ring_maybe_dump(dispatch_seq, guest_pc, block_entry_pc);
 	if (log_count >= 400)
 		return;
 	MakeSR();

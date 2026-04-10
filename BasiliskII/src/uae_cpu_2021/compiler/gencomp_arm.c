@@ -4870,6 +4870,8 @@ static void generate_one_opcode(int rp, int noflags) {
 
 			if (short_branch_disp) {
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
+				/* ARM64: DO_GET_OPCODE byte-swaps back to canonical M68K form,
+				   so the displacement is in the low byte (opcode & 255). */
 				comprintf("\tuae_s32 srcreg = (uae_s32)(uae_s8)(opcode & 255);\n");
 #else
 				comprintf(

@@ -713,6 +713,34 @@ static void jit_trace_table_maybe_dump_complete(const char *tag, unsigned long s
 	fprintf(stderr, "%s_DUMP step=%lu pc=%08x a1=%08x path=%s\n", tag, step, (unsigned)pc, (unsigned)regs.regs[9], dump_path);
 }
 
+static void jit_trace_lowmem400_maybe_dump(unsigned long step, uae_u32 pc)
+{
+	static int dumped = 0;
+	static int cfg_init = 0;
+	static char dump_path[512];
+	if (!cfg_init) {
+		const char *env = getenv("B2_TRACE_LOWMEM400_DUMP_PATH");
+		dump_path[0] = 0;
+		if (env && *env) {
+			strncpy(dump_path, env, sizeof(dump_path) - 1);
+			dump_path[sizeof(dump_path) - 1] = 0;
+		}
+		cfg_init = 1;
+	}
+	if (dumped || !dump_path[0])
+		return;
+	if (pc < 0x040099f0 || pc > 0x04009a30)
+		return;
+	FILE *f = fopen(dump_path, "wb");
+	if (!f)
+		return;
+	for (uaecptr addr = 0x0400; addr < 0x0800; addr++)
+		fputc((int)get_byte(addr), f);
+	fclose(f);
+	dumped = 1;
+	fprintf(stderr, "LOWMEM400_DUMP step=%lu pc=%08x d1=%08x path=%s\n", step, (unsigned)pc, (unsigned)regs.regs[1], dump_path);
+}
+
 static void jit_trace_table_log(const char *tag, unsigned long step, uae_u32 pc)
 {
 	if (!jit_trace_table_enabled())
@@ -897,6 +925,7 @@ void execute_normal(void)
 					regs.regs[12], regs.regs[13], regs.regs[14], regs.regs[15],
 					(unsigned)regs.sr, regflags.nzcv, regflags.x);
 				jit_trace_table_log("PCTTABLE", current_step, pc);
+				jit_trace_lowmem400_maybe_dump(current_step, pc);
 				if (pctrace_stack) {
 					uaecptr sp = m68k_areg(regs, 7);
 					fprintf(stderr,
