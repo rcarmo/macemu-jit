@@ -251,16 +251,10 @@ static inline int jit_max_optlev(void)
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
 #if defined(CPU_AARCH64)
-	/* Interpreter containment for ROM hardware init paths.
-	   NuBus reads are intercepted in memory.h (returns 0).
-	   These ranges still need interpreter for timer-dependent
-	   polling and hardware init sequencing. */
+	/* Low ROM: interpreter for $dd0 I/O polling and timer sequencing.
+	   The NuBus video probe at 0400b27c is patched out in rom_patches.cpp,
+	   so 040b/0404 ranges no longer need interpreter containment. */
 	if (pc >= 0x04000000 && pc <= 0x0400ffff)
-		return true;
-	/* 0x0400e000-0x0400ffff: L2 (heap walk, memory manager) */
-	if (pc >= 0x04040000 && pc <= 0x0407ffff)
-		return true;
-	if (pc >= 0x040b0000 && pc <= 0x040bffff)
 		return true;
 #endif
 	(void)pc;
