@@ -256,6 +256,8 @@ static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 	   — the compiled code is correct — but the ROM expects hardware
 	   registers to update between polling iterations, which requires
 	   wall-clock time that the JIT's fast execution doesn't provide. */
+	if (pc >= 0x04000000 && pc <= 0x0400ffff)
+		return true;
 	if (pc >= 0x04040000 && pc <= 0x0407ffff)
 		return true;
 	if (pc >= 0x040b0000 && pc <= 0x040bffff)
