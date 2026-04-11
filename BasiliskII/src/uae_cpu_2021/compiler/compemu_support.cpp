@@ -475,142 +475,22 @@ void m68k_do_compile_execute(void)
 	unsigned long tick_counter = 0;
 	const unsigned long tick_interval = 8000; /* ~60Hz at typical block dispatch rate */
 #endif
-	static unsigned long last_dispatch_seq = 0;
-	static uae_u32 last_block_entry_pc = 0;
-	static uintptr last_block_entry_pcp = 0;
-	static uintptr last_block_entry_oldp = 0;
-	static uae_u32 last_guest_pc = 0;
-	static bool last_guest_in_spin = false;
 	for (;;) {
-		const unsigned long dispatch_seq = _dc + 1;
-		const uae_u32 block_entry_pc = regs.pc;
-		const uintptr block_entry_pcp = (uintptr)regs.pc_p;
-		const uintptr block_entry_oldp = (uintptr)regs.pc_oldp;
 #if defined(CPU_AARCH64)
-		if (jit_bad_pcp_guard_enabled()) {
-			uae_u32 guest_pc = 0;
-			uintptr expected_pcp = 0;
-			if (jit_bad_pcp_value(block_entry_pcp, &guest_pc, &expected_pcp)) {
-				jit_log_bad_pcp("entry", dispatch_seq,
-					block_entry_pc, block_entry_pcp, block_entry_oldp,
-					last_dispatch_seq, last_block_entry_pc, last_block_entry_pcp, last_block_entry_oldp,
-					guest_pc, expected_pcp);
-			}
-		}
 		if (use_sync_ticks)
 			tick_inhibit = true;
 #endif
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
 #if defined(CPU_AARCH64)
-		/* Detect A7 (stack pointer) corruption immediately after block execution */
-		/* (disabled — not needed for MAXRUN=1 investigation) */
-		/* Heap corruption watchpoint: check 0x2038 every dispatch after _dc=4M */
-		{
-			static uae_u32 heap_watch_val = 0;
-			static int heap_watch_logged = 0;
-			if (_dc > 9000 && _dc < 20000000) {
-				uae_u32 cur = get_long(0x2038);
-				if (heap_watch_val == 0) heap_watch_val = cur; /* init */
-				if (cur != heap_watch_val && heap_watch_logged < 3) {
-					uae_u32 pc_now = m68k_getpc();
-					fprintf(stderr, "HEAP_CORRUPT old=%08x new=%08x pc=%08x prev_pc=%08x d0=%08x d1=%08x a0=%08x a1=%08x a7=%08x sr=%04x _dc=%lu\n",
-						heap_watch_val, cur, pc_now, (unsigned)block_entry_pc,
-						regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[9],
-						regs.regs[15], (unsigned)regs.sr, _dc);
-					heap_watch_val = cur;
-					heap_watch_logged++;
-				}
-			}
-		}
-		if (jit_bad_pcp_guard_enabled()) {
-			uae_u32 guest_pc = 0;
-			uintptr expected_pcp = 0;
-			if (jit_bad_pcp_value((uintptr)regs.pc_p, &guest_pc, &expected_pcp)) {
-				jit_log_bad_pcp("post", _dc,
-					block_entry_pc, block_entry_pcp, block_entry_oldp,
-					last_dispatch_seq, last_block_entry_pc, last_block_entry_pcp, last_block_entry_oldp,
-					guest_pc, expected_pcp);
-			}
-		}
-		if (jit_trace_dispatch_pc_enabled()) {
-			const uae_u32 guest_pc = m68k_getpc();
-			if (guest_pc >= jit_trace_dispatch_pc_start() && guest_pc <= jit_trace_dispatch_pc_end()) {
-				jit_log_dispatch_pc(_dc,
-					guest_pc,
-					block_entry_pc,
-					block_entry_pcp,
-					block_entry_oldp,
-					last_dispatch_seq,
-					last_block_entry_pc,
-					last_block_entry_pcp,
-					last_block_entry_oldp);
-			}
-		}
-		last_dispatch_seq = _dc;
-		last_block_entry_pc = block_entry_pc;
-		last_block_entry_pcp = block_entry_pcp;
-		last_block_entry_oldp = block_entry_oldp;
-#endif
-#if defined(CPU_AARCH64)
-		{
-			const uae_u32 guest_pc_now = m68k_getpc();
-			const bool guest_in_spin = jit_is_late_spin_pc(guest_pc_now);
-			if (jit_spin_trace_enabled() && guest_in_spin && (!last_guest_in_spin || guest_pc_now != last_guest_pc)) {
-				jit_log_spin_trace(_dc,
-					guest_pc_now,
-					last_guest_pc,
-					block_entry_pc,
-					block_entry_pcp,
-					block_entry_oldp,
-					last_dispatch_seq,
-					last_block_entry_pc,
-					last_block_entry_pcp,
-					last_block_entry_oldp);
-			}
-			if (jit_trace_0230_enabled() && jit_is_region_0230_pc(guest_pc_now)) {
-				jit_log_region_0230(_dc,
-					guest_pc_now,
-					last_guest_pc,
-					block_entry_pc,
-					block_entry_pcp,
-					block_entry_oldp,
-					last_dispatch_seq,
-					last_block_entry_pc,
-					last_block_entry_pcp,
-					last_block_entry_oldp);
-			}
-			last_guest_pc = guest_pc_now;
-			last_guest_in_spin = guest_in_spin;
-		}
-		if ((_dc % 1000000) == 0) {
-			uae_u32 _pc = m68k_getpc();
-			if ((_pc & 0xffffff00) == 0x0400e100) {
-				fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a1=%08x a6=%08x (a6)=%08x a7=%08x spc=%08x\n",
-					_dc, _pc, regs.regs[0], regs.regs[9], regs.regs[14],
-					get_long(regs.regs[14]), regs.regs[15], regs.spcflags);
-			} else {
-				fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a7=%08x spc=%08x ti=%d ticks=%08x cfc=%08x\n",
-					_dc, _pc, regs.regs[0], regs.regs[15], regs.spcflags, (int)tick_inhibit,
-					(unsigned)get_long(0x16a), (unsigned)get_long(0xcfc));
-			}
-		}
-#endif
-#if defined(CPU_AARCH64)
 		if (use_sync_ticks) {
 			tick_inhibit = false;
-			/* Fire one_tick when countdown forced return to C */
 			extern int32 jit_countdown;
 			if (jit_countdown < 0) {
 				jit_countdown = 16000;
 				jit_one_tick();
 			}
 		}
-#endif
-		if (0) {
-			fprintf(stderr, "D %lu %08x", _dc, (unsigned)m68k_getpc()); if (_dc >= 11710 && _dc <= 11720) { MakeSR(); fprintf(stderr, " sr=%04x d0=%08x d1=%08x a3=%08x", (unsigned)regs.sr, (unsigned)m68k_dreg(regs,0), (unsigned)m68k_dreg(regs,1), (unsigned)m68k_areg(regs,3)); } fprintf(stderr, "\n");
-		}
-#if defined(CPU_AARCH64)
 		{
 			extern int32 jit_countdown;
 			if (jit_countdown < 0)
