@@ -7,7 +7,60 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, word-to-address-register self-alias clobbers, A-line trap control-flow modeling, 64-bit pointer truncation in the legacy `add_l`/`sub_l_ri` helpers, and the `endblock_pc_isconst` direct-chain stale-state bug. **Pure L2 now reaches `0x0400e1b2` ×284, gets past all earlier startup blockers, and has zero crashes. The remaining frontier is execution speed (every block exit re-enters the C dispatcher) and a residual late hardware-polling loop.**
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, word-to-address-register self-alias clobbers, A-line trap control-flow modeling, 64-bit pointer truncation in the legacy `add_l`/`sub_l_ri` helpers, the `endblock_pc_isconst` direct-chain stale-state bug, and EMUL_OP barrier requirements. **Pure L2 now runs at 93.75% ROM coverage + 100% RAM, with SCSIGet × 7 + SCSISelect × 7, zero crashes, zero `bad_pc_p`, and 634M dispatches/120s with direct `B` chaining.**
+
+## Current status (2026-04-11)
+
+### L2 coverage
+
+| Region | Coverage | Notes |
+|---|---|---|
+| ROM `0x04010000-0x040fffff` | **93.75% L2** | All non-init ROM code |
+| ROM `0x04000000-0x0400ffff` | Interpreter | Low-ROM startup, `$dd0` I/O polling |
+| RAM (Mac OS + applications) | **100% L2** | Full native ARM64 codegen |
+
+### Boot milestones reached
+
+- SCSIGet × 7
+- SCSISelect × 7 (full SCSI probe of all 7 target IDs)
+- 634M dispatches/120s with direct `B` chaining
+- Zero `bad_pc_p`, zero crashes, zero interpreter barriers for opcode families
+
+### Key fixes in the April 10-11 session
+
+1. **A-line trap L2 runtime helpers** (`adc83002`): A-line opcodes execute through `op_aline_trap_comp_ff` → `jit_runtime_aline_trap` which runs the real `Exception(0xA,0)` path and ends the block.
+
+2. **64-bit pointer truncation** (`91f2e0f8`): `add_l`/`add_l_ri`/`sub_l_ri` routed through `arm_ADD_l` for PC_P to preserve 64-bit host pointers.
+
+3. **Endblock `regs.pc_p` store** (`80afe33d`): Unconditional `regs.pc_p = v` on the `endblock_pc_isconst` and `endblock_pc_inreg` hot chain paths. Only `pc_p` is stored (not the full triple — that causes `bad_pc_p`).
+
+4. **Spcflags mid-block PC triple** (`c59cf7fe`): The mid-block spcflags cold path stores the full PC triple (`pc_p`, `pc`, `pc_oldp`) so `m68k_do_specialties → m68k_getpc()` returns correct guest PC.
+
+5. **EMUL_OP interpreter barrier** (`bcfcf85c`): EMUL_OP opcodes (`0x71xx`) end the block after interpreter execution. Without this, the return from SCSI dispatch takes wrong paths.
+
+6. **NuBus video probe ROM patch** (`ee27ef35`): The Quadra 800 ROM's NuBus slot probe at `0x0400b27c` is patched to `jmp (a6)` (skip). This follows the same pattern as BasiliskII's existing patches for VIA/SCC/IWM/ASC init. Guarded by instruction signature check — only applies if the expected bytes match.
+
+7. **Fallback interpreter containment**: If the ROM patch doesn't apply (different ROM), the JIT falls back to interpreter containment for `0x04040000-0x0407ffff` and `0x040b0000-0x040bffff`.
+
+### ROM compatibility
+
+The NuBus probe patch is guarded by a signature check at ROM offset `0xb27c`:
+- **Quadra 800 ROM**: signature matches → patch applied → 93.75% L2
+- **Other ROM32 ROMs**: signature may or may not match. If not, the `040b`/`0404` interpreter containment activates automatically → 62.5% L2
+- **Classic/Plus ROMs**: different ROM version, JIT patches don't apply
+
+### Architecture
+
+The endblock hot chain path on ARM64:
+1. `flush(1)` writes all dirty/const registers including PC_P to memory
+2. `endblock_pc_isconst` stores `regs.pc_p = v` (target host pointer)
+3. Direct `B` to target block's handler via `create_jmpdep`
+4. Target block runs with correct `regs.pc_p`; interpreter fallbacks rebuild the full PC triple before each `cputbl` call
+
+Special opcode handling:
+- **A-line (`0xAxxx`)**: L2 compiled runtime helper
+- **EMUL_OP (`0x71xx`)**: Interpreter barrier (ends block, re-enters dispatcher)
+- **All other opcodes**: Full L2 native ARM64 codegen
 
 ## Current frontier (2026-04-11)
 

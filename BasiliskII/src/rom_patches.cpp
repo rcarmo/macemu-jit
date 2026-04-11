@@ -1215,15 +1215,17 @@ static bool patch_rom_32(void)
 		*wp = htons(M68K_NOP);
 	}
 
-	// Skip NuBus video probe at 0x0400b27c (ROM offset 0xb27c).
+	// Skip NuBus video probe at ROM offset 0xb27c.
 	// This routine probes physical NuBus slot addresses (0x50fxxxxx)
 	// that BasiliskII doesn't emulate. BasiliskII's video works through
-	// the EMUL_OP video driver installed in the slot ROM, not through
-	// real NuBus hardware detection. Skipping this probe eliminates the
-	// need for interpreter containment of the 040b and 0404 ROM ranges.
-	// The routine uses A6 as return address (jmp (a6) to return).
-	wp = (uint16 *)(ROMBaseHost + 0xb27c);
-	*wp = htons(0x4ed6);	// jmp (a6) — skip NuBus probe, return to caller
+	// the EMUL_OP video driver installed in the slot ROM.
+	// Guard: verify the expected instruction signature at the patch site.
+	if (ROMBaseHost[0xb27c] == 0x2f && ROMBaseHost[0xb27d] == 0x0e &&
+	    ROMBaseHost[0xb27e] == 0x2f && ROMBaseHost[0xb27f] == 0x03) {
+		wp = (uint16 *)(ROMBaseHost + 0xb27c);
+		*wp = htons(0x4ed6);	// jmp (a6) — skip probe, return to caller
+		D(bug("Patched NuBus video probe at 0xb27c\n"));
+	}
 
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);

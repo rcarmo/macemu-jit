@@ -251,11 +251,26 @@ static inline int jit_max_optlev(void)
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
 #if defined(CPU_AARCH64)
-	/* Low ROM: interpreter for $dd0 I/O polling and timer sequencing.
-	   The NuBus video probe at 0400b27c is patched out in rom_patches.cpp,
-	   so 040b/0404 ranges no longer need interpreter containment. */
+	/* Low ROM: interpreter for $dd0 I/O polling and timer sequencing. */
 	if (pc >= 0x04000000 && pc <= 0x0400ffff)
 		return true;
+	/* If the NuBus probe patch was NOT applied (different ROM or
+	   signature mismatch), fall back to interpreter containment
+	   for the hardware-polling ranges. */
+	{
+		static int nubus_patched = -1;
+		if (nubus_patched < 0) {
+			extern uint8 *ROMBaseHost;
+			nubus_patched = (ROMBaseHost[0xb27c] == 0x4e &&
+			                 ROMBaseHost[0xb27d] == 0xd6) ? 1 : 0;
+		}
+		if (!nubus_patched) {
+			if (pc >= 0x04040000 && pc <= 0x0407ffff)
+				return true;
+			if (pc >= 0x040b0000 && pc <= 0x040bffff)
+				return true;
+		}
+	}
 #endif
 	(void)pc;
 	return false;
