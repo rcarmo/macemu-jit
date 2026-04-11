@@ -251,15 +251,15 @@ static inline int jit_max_optlev(void)
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
 #if defined(CPU_AARCH64)
-	/* ROM ranges that probe unemulated hardware registers (0x50fxxxxx
-	   NuBus/slot space). These loops read memory-mapped I/O that
-	   BasiliskII doesn't model. Interpreter speed gives one_tick()
-	   time to advance emulated state between iterations. */
-	if (pc >= 0x04000000 && pc <= 0x0400ffff)
+	/* Narrow interpreter containment: only the specific ROM hardware-polling
+	   sites that read unemulated I/O registers. Everything else compiles
+	   at L2 for maximum speed. */
+	if (pc >= 0x04000000 && pc <= 0x0400dfff)  /* low ROM except heap walk */
 		return true;
-	if (pc >= 0x04040000 && pc <= 0x0407ffff)
+	/* 0x0400e000-0x0400ffff: L2 (includes heap walk at 0400e1a4) */
+	if (pc >= 0x04040000 && pc <= 0x0407ffff)  /* hardware-polling subroutines */
 		return true;
-	if (pc >= 0x040b0000 && pc <= 0x040bffff)
+	if (pc >= 0x040b0000 && pc <= 0x040bffff)  /* video init + NuBus probing */
 		return true;
 #endif
 	(void)pc;
