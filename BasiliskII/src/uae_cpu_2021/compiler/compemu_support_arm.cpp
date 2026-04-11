@@ -1048,10 +1048,7 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 	   that causes a later control-flow divergence into the hardware
 	   polling loop. Barrier bisection (round 2) proved that BSR alone
 	   eliminates the late loop. Containment until root-caused. */
-#if defined(CPU_AARCH64)
-	if ((op & 0xff00) == 0x6100)  /* BSR (all sizes) */
-		return true;
-#endif
+/* BSR no longer needs a barrier — uses dynamic endblock path below */
 	if (jit_restore_barrier("jsr") && (op & 0xffc0) == 0x4e80)
 		return true;
 	if (jit_restore_barrier("jmp") && (op & 0xffc0) == 0x4ec0)
@@ -6114,6 +6111,20 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     blockinfo* tbi;
                     const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
                     const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
+#if defined(CPU_AARCH64)
+                    /* ARM64: BSR blocks must use the dynamic endblock path
+                       (read regs.pc_p from memory at runtime) instead of the
+                       compile-time const path. The const path embeds a direct
+                       branch to the target handler, but with BSR the target
+                       block's dependency resolution interacts badly with the
+                       cache state, causing wrong control flow. BRA.B already
+                       uses this safe path. Extend to BSR and BRA.W/BRA.L. */
+                    const bool final_is_bsr = ((final_op & 0xff00) == 0x6100);
+                    const bool final_is_bra = (final_op == 0x6000 || final_op == 0x60ff);
+                    const bool final_needs_dynamic_exit = final_is_braq || final_is_bsr || final_is_bra;
+#else
+                    const bool final_needs_dynamic_exit = false;
+#endif
 
 
                     uintptr cv = jit_canonicalize_target_pc(v);
@@ -6132,7 +6143,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(USE_DATA_BUFFER)
                     data_check_end(4, 64);
 #endif
-                    if (final_is_braq && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
+                    if ((final_is_braq || final_needs_dynamic_exit) && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
                         /* After fixing short-branch low-byte decode, direct
                            const chaining still leaves some ARM64 BRAQ exits
                            with corrupted PC_P state. Re-enter through the
