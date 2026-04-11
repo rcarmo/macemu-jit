@@ -6111,20 +6111,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     blockinfo* tbi;
                     const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
                     const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
-#if defined(CPU_AARCH64)
-                    /* ARM64: BSR blocks must use the dynamic endblock path
-                       (read regs.pc_p from memory at runtime) instead of the
-                       compile-time const path. The const path embeds a direct
-                       branch to the target handler, but with BSR the target
-                       block's dependency resolution interacts badly with the
-                       cache state, causing wrong control flow. BRA.B already
-                       uses this safe path. Extend to BSR and BRA.W/BRA.L. */
-                    const bool final_is_bsr = ((final_op & 0xff00) == 0x6100);
-                    const bool final_is_bra = (final_op == 0x6000 || final_op == 0x60ff);
-                    const bool final_needs_dynamic_exit = final_is_braq || final_is_bsr || final_is_bra;
-#else
-                    const bool final_needs_dynamic_exit = false;
-#endif
+
 
 
                     uintptr cv = jit_canonicalize_target_pc(v);
@@ -6143,15 +6130,14 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(USE_DATA_BUFFER)
                     data_check_end(4, 64);
 #endif
-                    if ((final_is_braq || final_needs_dynamic_exit) && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
-                        /* After fixing short-branch low-byte decode, direct
-                           const chaining still leaves some ARM64 BRAQ exits
-                           with corrupted PC_P state. Re-enter through the
-                           canonical execute_normal_setpc path until that
-                           remaining native handoff bug is fixed. */
+#if 0 /* no longer needed — endblock_pc_isconst hot path now
+                       re-enters execute_normal on ARM64 */
+                    if (final_is_braq && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
                         compemu_raw_set_pc_i(cv);
                         compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
-                    } else {
+                    } else
+#endif
+                    {
                         tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), cv);
                         write_jmp_target(tba, get_handler(cv));
                         create_jmpdep(bi, 0, tba, cv);

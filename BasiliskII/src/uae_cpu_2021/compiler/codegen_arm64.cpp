@@ -638,10 +638,17 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
 	}
 #if defined(CPU_AARCH64)
-	/* ARM64: always persist regs.pc_p on the hot chain path. */
+	/* ARM64: persist full PC triple on hot chain, same as endblock_pc_isconst. */
 	{
-		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
-		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
+		uintptr offs_pcp = (uintptr)&regs.pc_p - (uintptr)&regs;
+		uintptr offs_pc = (uintptr)&regs.pc - (uintptr)&regs;
+		uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
+		STR_xXi(rr_pc, R_REGSTRUCT, offs_pcp);
+		STR_xXi(rr_pc, R_REGSTRUCT, offs_oldp);
+		LOAD_U64(REG_WORK3, (uintptr)&MEMBaseDiff);
+		LDR_xXi(REG_WORK3, REG_WORK3, 0);
+		SUB_xxx(REG_WORK3, rr_pc, REG_WORK3);
+		STR_wXi(REG_WORK3, R_REGSTRUCT, offs_pc);
 	}
 #endif
 	UBFIZ_xxii(rr_pc, rr_pc, 0, 16);  // apply TAGMASK (bottom 16 bits)
@@ -703,18 +710,38 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pc);
 	}
 #if defined(CPU_AARCH64)
-	/* ARM64: always persist regs.pc_p on the hot chain path.
-	   Without this, chained successor blocks start with stale
-	   regs.pc_p from the previous block, causing m68k_getpc()
-	   and PC-relative codegen to compute wrong addresses. */
+	/* ARM64: persist the full PC triple (pc_p, pc, pc_oldp) on the hot
+	   chain path. Without this, chained successor blocks that contain
+	   interpreter fallback instructions call m68k_getpc() which derives
+	   the guest PC from the stale (regs.pc, regs.pc_oldp) pair of the
+	   PREVIOUS block, producing wrong addresses.
+	   This matches what popall_execute_normal_setpc does. */
 	{
 		LOAD_U64(REG_WORK2, v);
-		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
-		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pc);
+		uintptr offs_pcp = (uintptr)&regs.pc_p - (uintptr)&regs;
+		uintptr offs_pc = (uintptr)&regs.pc - (uintptr)&regs;
+		uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
+		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pcp);   // regs.pc_p = v
+		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_oldp);  // regs.pc_oldp = v
+		LOAD_U64(REG_WORK3, (uintptr)&MEMBaseDiff);
+		LDR_xXi(REG_WORK3, REG_WORK3, 0);
+		SUB_xxx(REG_WORK3, REG_WORK2, REG_WORK3);    // guest_pc = v - MEMBaseDiff
+		STR_wXi(REG_WORK3, R_REGSTRUCT, offs_pc);     // regs.pc = guest_pc
 	}
 #endif
+	/* ARM64: instead of direct-chaining to the target block's handler,
+	   pop preserved registers and re-enter execute_normal() which
+	   re-does the cache lookup from the canonical regs.pc_p. This avoids
+	   the direct-B chaining bug where the target handler's interpreter
+	   fallbacks see stale guest state from the source block.
+	   Performance impact: every const-exit block returns to the C
+	   dispatcher instead of hot-chaining. Acceptable until the
+	   underlying direct-chain state propagation bug is fixed. */
+	raw_pop_preserved_regs();
+	compemu_raw_jmp((uintptr)execute_normal);
+
 	tba = (uae_u32*)get_target();
-	B_i(0); // <target set by caller>
+	B_i(0); /* placeholder — not actually chained */
 
 	return tba;
 }
