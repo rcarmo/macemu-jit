@@ -764,6 +764,31 @@ static void genmovemle(uae_u16 opcode) {
 			break;
 		}
 	} else { /* Pre-decrement */
+#if defined(CPU_AARCH64)
+		/* ARM64 fix: avoid get_n_addr + mov_l_Rr which caches a 64-bit host
+		   pointer in a 32-bit virtual register. The register allocator can
+		   evict it as 32-bit, truncating the pointer. Instead, use
+		   writelong() which reconstructs the host pointer every store. */
+		comprintf("\tfor (i=0;i<16;i++) {\n"
+				"\t\tif ((mask>>i)&1) {\n");
+		switch (table68k[opcode].size) {
+		case sz_long:
+			comprintf("\t\t\tsub_l_ri(srca,4);\n"
+					"\t\t\tmov_l_rr(tmp,15-i);\n"
+					"\t\t\tmid_bswap_32(tmp);\n"
+					"\t\t\twritelong(srca,tmp,scratchie);\n");
+			break;
+		case sz_word:
+			comprintf("\t\t\tsub_l_ri(srca,2);\n"
+					"\t\t\tmov_l_rr(tmp,15-i);\n"
+					"\t\t\tmid_bswap_16(tmp);\n"
+					"\t\t\twriteword(srca,tmp,scratchie);\n");
+			break;
+		default:
+			assert(0);
+			break;
+		}
+#else
 		comprintf("\tfor (i=0;i<16;i++) {\n"
 				"\t\tif ((mask>>i)&1) {\n");
 		switch (table68k[opcode].size) {
@@ -783,12 +808,19 @@ static void genmovemle(uae_u16 opcode) {
 			assert(0);
 			break;
 		}
+#endif
 	}
 
 	comprintf("\t\t}\n"
 			"\t}");
 	if (table68k[opcode].dmode == Apdi) {
+#if defined(CPU_AARCH64)
+		/* ARM64: srca was modified in-place by sub_l_ri in the loop.
+		   Copy the final srca value to the address register. */
+		comprintf("\t\t\tmov_l_rr(8+dstreg,srca);\n");
+#else
 		comprintf("\t\t\tlea_l_brr(8+dstreg,srca,(uae_s32)offset);\n");
+#endif
 	}
 }
 
