@@ -633,7 +633,8 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 		compemu_raw_call((uintptr)jit_trace_setpc_value);
 		LDR_xXpost(rr_pc, RSP_INDEX, 16);
 	}
-	if (jit_store_pcp_on_chain_env()) {
+	/* ARM64: always store regs.pc_p on hot chain */
+	{
 		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
 		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
 	}
@@ -706,7 +707,11 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 		LOAD_U32(REG_PAR2, 5);
 		compemu_raw_call((uintptr)jit_trace_setpc_value);
 	}
-	if (jit_store_pcp_on_chain_env()) {
+	/* ARM64: always store regs.pc_p = v on the hot chain path.
+	   Without this, chained successor blocks see stale regs.pc_p
+	   from the source block's flush(1), causing bad_pc_p guards
+	   to fire and flush the icache. */
+	{
 		LOAD_U64(REG_WORK2, v);
 		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
 		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pc);
