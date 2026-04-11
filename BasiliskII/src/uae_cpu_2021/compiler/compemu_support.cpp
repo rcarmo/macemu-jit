@@ -564,32 +564,15 @@ void m68k_do_compile_execute(void)
 			last_guest_in_spin = guest_in_spin;
 		}
 		if ((_dc % 1000000) == 0) {
-			fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a7=%08x spc=%08x ti=%d\n",
-				_dc, m68k_getpc(), regs.regs[0], regs.regs[15], regs.spcflags, (int)tick_inhibit);
-		}
-		/* Watchpoint: detect writes to address 0x3214 */
-		{
-			static uae_u8 watched_val = 0;
-			static int watch_logged = 0;
-			uae_u8 cur = get_byte(0x3214);
-			if (cur != watched_val && _dc >= 24095 && watch_logged < 30) {
-				fprintf(stderr, "WATCHPOINT addr=3214 old=%02x new=%02x pc=%08x d0=%08x d1=%08x a0=%08x a7=%08x _dc=%lu\n",
-					watched_val, cur, m68k_getpc(),
-					regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[15], _dc);
-				watched_val = cur;
-				watch_logged++;
-			}
-		}
-		/* Log the first time we enter the memory test loop to see what A0 points to */
-		{
-			static int memtest_logged = 0;
-			uae_u32 pc = m68k_getpc();
-			if ((pc == 0x0400e1b8 || pc == 0x0400e1cc) && memtest_logged < 100) {
-				uae_u32 a0 = regs.regs[8];
-				uae_u32 a1 = regs.regs[9];
-				uae_u32 d1 = regs.regs[1];
-				fprintf(stderr, "MEMTEST[%d] a0=%08x a1=%08x d1=%08x byte_at_a0=%02x\n",
-					memtest_logged++, a0, a1, d1, (unsigned)get_byte(a0));
+			uae_u32 _pc = m68k_getpc();
+			if ((_pc & 0xffffff00) == 0x0400e100) {
+				fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a1=%08x a6=%08x (a6)=%08x a7=%08x spc=%08x\n",
+					_dc, _pc, regs.regs[0], regs.regs[9], regs.regs[14],
+					get_long(regs.regs[14]), regs.regs[15], regs.spcflags);
+			} else {
+				fprintf(stderr, "DISPATCH %lu pc=%08x d0=%08x a7=%08x spc=%08x ti=%d ticks=%08x cfc=%08x\n",
+					_dc, _pc, regs.regs[0], regs.regs[15], regs.spcflags, (int)tick_inhibit,
+					(unsigned)get_long(0x16a), (unsigned)get_long(0xcfc));
 			}
 		}
 #endif

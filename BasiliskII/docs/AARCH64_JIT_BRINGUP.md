@@ -11,6 +11,20 @@ The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86
 
 ## Current status (2026-04-11)
 
+### Interpreter baseline
+
+The pure interpreter (`jit false`) boots Mac OS 7.5.5 to the Finder desktop in approximately 60 seconds on the Orange Pi 6 Plus (CIX P1 12-core ARM64). The disk image (HD200MB with System 7.5.5) is confirmed working. An "improper shutdown" dialog appears on first boot and requires a Return keypress to dismiss.
+
+### JIT status
+
+The ARM64 JIT **does not yet boot to desktop**. Two blocking issues remain:
+
+1. **Heap corruption with MAXRUN=1 single-instruction blocks**: An L2-compiled ROM block writes `0x08` to address `0x2038` (the system heap's first block size field, should be `0x110`). This causes the Memory Manager's heap walk at `0x0400e1a4` to loop infinitely, blocking all boot progress past SCSI probe.
+
+2. **Register state corruption without MAXRUN=1**: Multi-instruction blocks corrupt A7 (stack pointer), producing `a7=0xffffff22` (bogus) and crashing early boot. This prevents removing the MAXRUN=1 workaround.
+
+With MAXRUN=1, the JIT reaches SCSIGet×7 + SCSISelect×7 (full SCSI bus probe) with zero crashes and 634M dispatches/120s, but does not progress to DiskStatus or beyond.
+
 ### L2 coverage
 
 | Region | Coverage | Notes |
@@ -19,28 +33,33 @@ The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86
 | ROM `0x04000000-0x0400ffff` | Interpreter | Low-ROM startup, `$dd0` I/O polling |
 | RAM (Mac OS + applications) | **100% L2** | Full native ARM64 codegen |
 
-### Boot milestones reached
+### Key fixes — full commit history
 
-- SCSIGet × 7
-- SCSISelect × 7 (full SCSI probe of all 7 target IDs)
-- 634M dispatches/120s with direct `B` chaining
-- Zero `bad_pc_p`, zero crashes, zero interpreter barriers for opcode families
+All fixes during the April 2026 bringup sessions, in chronological order:
 
-### Key fixes in the April 10-11 session
-
-1. **A-line trap L2 runtime helpers** (`adc83002`): A-line opcodes execute through `op_aline_trap_comp_ff` → `jit_runtime_aline_trap` which runs the real `Exception(0xA,0)` path and ends the block.
-
-2. **64-bit pointer truncation** (`91f2e0f8`): `add_l`/`add_l_ri`/`sub_l_ri` routed through `arm_ADD_l` for PC_P to preserve 64-bit host pointers.
-
-3. **Endblock `regs.pc_p` store** (`80afe33d`): Unconditional `regs.pc_p = v` on the `endblock_pc_isconst` and `endblock_pc_inreg` hot chain paths. Only `pc_p` is stored (not the full triple — that causes `bad_pc_p`).
-
-4. **Spcflags mid-block PC triple** (`c59cf7fe`): The mid-block spcflags cold path stores the full PC triple (`pc_p`, `pc`, `pc_oldp`) so `m68k_do_specialties → m68k_getpc()` returns correct guest PC.
-
-5. **EMUL_OP interpreter barrier** (`bcfcf85c`): EMUL_OP opcodes (`0x71xx`) end the block after interpreter execution. Without this, the return from SCSI dispatch takes wrong paths.
-
-6. **NuBus video probe ROM patch** (`ee27ef35`): The Quadra 800 ROM's NuBus slot probe at `0x0400b27c` is patched to `jmp (a6)` (skip). This follows the same pattern as BasiliskII's existing patches for VIA/SCC/IWM/ASC init. Guarded by instruction signature check — only applies if the expected bytes match.
-
-7. **Fallback interpreter containment**: If the ROM patch doesn't apply (different ROM), the JIT falls back to interpreter containment for `0x04040000-0x0407ffff` and `0x040b0000-0x040bffff`.
+| Commit | Date | Fix |
+|---|---|---|
+| `adc83002` | Apr 10 | A-line trap L2 runtime helpers — `op_aline_trap_comp_ff` runs `Exception(0xA,0)` and ends block |
+| `ef56ff56` | Apr 10 | Barrier bisection infrastructure — proved `branch` family (6xxx) is the divergence source |
+| `91f2e0f8` | Apr 10 | 64-bit pointer truncation — `add_l`/`sub_l_ri` routed through `arm_ADD_l` for PC_P |
+| `8c8d4f6d` | Apr 10 | Hot-chain `regs.pc_p` store + BSR barrier |
+| `03c0c1cf` | Apr 10 | BSR dynamic exit — changed BSR to use dynamic exit instead of direct chaining |
+| `6838db5d` | Apr 10 | Full PC triple on endblock — `endblock_pc_isconst` stores `pc_p`, `pc`, `pc_oldp` |
+| `9297d0de` | Apr 10 | PC_P const validation guard at compile time |
+| `f155eb38` | Apr 10 | Bringup doc update |
+| `c59cf7fe` | Apr 10 | Spcflags mid-block PC triple — cold path stores full triple for `m68k_getpc()` |
+| `24cc7373` | Apr 10 | EMUL_OP interpreter barrier |
+| `80afe33d` | Apr 10 | Unconditional `regs.pc_p` store on hot chain |
+| `35c02bcb` | Apr 10 | Narrow containment + EMUL_OP barrier |
+| `7280caf4` | Apr 10 | NuBus read hook (experimental, later removed) |
+| `0cbcee62` | Apr 10 | Restore 69% L2 config |
+| `bcba9fe7` | Apr 10 | Remove NuBus hook |
+| `bf9a569b` | Apr 10 | Restore full working boot config |
+| `ee27ef35` | Apr 11 | ROM-patch NuBus video probe → 93.75% L2 |
+| `1f692578` | Apr 11 | Signature-guarded NuBus patch + ROM fallback + docs |
+| `ffb1b731` | Apr 11 | **Cross-block flag loss fix** — `flush(save_regs=1)` forces `flags_are_important=1` |
+| `872ddd69` | Apr 11 | **Remove `tick_inhibit` during block tracing** — restores 60Hz timer cadence |
+| `1f43f27f` | Apr 11 | **Mid-block tick injection** — every 64 compiled instructions, emit `cpu_do_check_ticks()` + spcflags check |
 
 ### ROM compatibility
 
@@ -48,6 +67,18 @@ The NuBus probe patch is guarded by a signature check at ROM offset `0xb27c`:
 - **Quadra 800 ROM**: signature matches → patch applied → 93.75% L2
 - **Other ROM32 ROMs**: signature may or may not match. If not, the `040b`/`0404` interpreter containment activates automatically → 62.5% L2
 - **Classic/Plus ROMs**: different ROM version, JIT patches don't apply
+
+### Remaining work
+
+To boot Mac OS with the JIT:
+
+1. **Fix register state propagation in multi-instruction blocks.** Without `MAXRUN=1`, compiled blocks corrupt A7 (stack pointer). The register allocator's entry-state assumptions from trace time don't hold when blocks are entered from different source blocks or after interrupt delivery. This is the primary blocker.
+
+2. **Remove `MAXRUN=1` and test with mid-block tick injection.** Once multi-instruction blocks work, the `JIT_TICK_INTERVAL=64` tick injection ensures the 60Hz timer fires and interrupts are delivered mid-block. This has been implemented but is inactive with `MAXRUN=1`.
+
+3. **Investigate heap corruption at `0x2038`.** With `MAXRUN=1`, an L2-compiled ROM block writes `0x08` to the system heap's first block size field. This may be a symptom of the same register state bug that corrupts A7 in larger blocks, or a separate codegen issue in a specific opcode handler.
+
+4. **Performance tuning.** Once boot works, measure JIT vs interpreter speedup and optimize hot paths (direct block chaining, flag elimination, register allocation).
 
 ### Architecture
 
