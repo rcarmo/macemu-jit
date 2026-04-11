@@ -5786,10 +5786,46 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         dont_care_flags();
                     }
 
-                    /* Spcflags check between compiled instructions.
-                       When spcflags are set (interrupt pending from tick thread),
-                       exit the block with correct guest state. */
-                    if (i < blocklen - 1) {
+                    /* Mid-block tick injection + spcflags check.
+                       Every JIT_TICK_INTERVAL compiled instructions, emit a
+                       full flush → cpu_do_check_ticks() → spcflags check.
+                       This ensures one_tick() fires at the correct cadence
+                       even inside long compiled blocks, and that pending
+                       interrupts are delivered promptly.
+                       For shorter intervals, just check spcflags inline. */
+#define JIT_TICK_INTERVAL 64
+                    if (i < blocklen - 1 && was_comp && (i + 1) % JIT_TICK_INTERVAL == 0) {
+                        /* Full tick injection: flush state, call cpu_do_check_ticks,
+                           check spcflags, and if set, exit block. */
+                        flush(1);
+                        compemu_raw_call((uintptr)cpu_do_check_ticks);
+                        /* Now check spcflags — cpu_do_check_ticks may have
+                           called one_tick → TriggerInterrupt → SPCFLAG_INT */
+                        uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
+                        LDR_wXi(REG_WORK1, R_REGSTRUCT, idx_spc);
+                        uae_u32* branch_skip_tick = (uae_u32*)get_target();
+                        CBZ_wi(REG_WORK1, 0);
+                        /* Cold: spcflags set → exit block */
+                        compemu_raw_set_pc_i((uintptr)pc_hist[i + 1].location);
+                        {
+                            uae_u32 next_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i + 1].location - (uintptr)pc_hist[0].location);
+                            compemu_raw_mov_l_mi((uintptr)&regs.pc, next_m68k_pc);
+                            LOAD_U64(REG_WORK1, (uintptr)pc_hist[i + 1].location);
+                            uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
+                            STR_xXi(REG_WORK1, R_REGSTRUCT, offs_oldp);
+                        }
+                        LOAD_U64(REG_WORK3, (uintptr)&countdown);
+                        LDR_wXi(REG_WORK2, REG_WORK3, 0);
+                        LOAD_U32(REG_WORK1, retired_cycles);
+                        SUB_www(REG_WORK2, REG_WORK2, REG_WORK1);
+                        STR_wXi(REG_WORK2, REG_WORK3, 0);
+                        uae_u32* branch_exit_tick = (uae_u32*)get_target();
+                        B_i(0);
+                        write_jmp_target(branch_exit_tick, (uintptr)popall_do_nothing);
+                        write_jmp_target((uae_u32*)branch_skip_tick, (uintptr)get_target());
+                        init_comp();
+                        was_comp = 0;
+                    } else if (i < blocklen - 1) {
                         /* Check spcflags */
                         uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
                         LDR_wXi(REG_WORK1, R_REGSTRUCT, idx_spc);
