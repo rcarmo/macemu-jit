@@ -990,7 +990,7 @@ void execute_normal(void)
 		   individually, and the inhibit starves the 60Hz timer, preventing
 		   boot progress. Allow one_tick() during tracing. */
 		extern bool tick_inhibit;
-		/* tick_inhibit = true; -- removed: starves timer with MAXRUN=1 */
+		tick_inhibit = true;
 		uae_u32 verify_block_pc = get_virtual_address((uae_u8*)regs.pc_p);
 		const bool verify_this_block = !jit_block_verify_reentrant && jit_verify_block_target_pc(verify_block_pc);
 		if (verify_this_block)
@@ -1017,7 +1017,7 @@ void execute_normal(void)
 			}
 			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
 #if defined(CPU_AARCH64)
-				/* tick_inhibit = false; -- no longer needed */
+				tick_inhibit = false;
 				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);
 				if (verify_this_block) {
 					jit_block_verify_run(pc_hist, blocklen, total_cycles, block_pc);
