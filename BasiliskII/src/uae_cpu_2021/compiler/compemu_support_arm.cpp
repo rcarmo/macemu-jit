@@ -6153,21 +6153,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 } else if (was_comp && isconst(PC_P)) {
                     uintptr v = live.state[PC_P].val;
 #if defined(CPU_AARCH64)
-                    /* ARM64: flush the const PC_P to memory as the full PC
-                       triple, then use the dynamic endblock_pc_inreg path
-                       which reads regs.pc_p at runtime and does a proper
-                       cacheline dispatch. This avoids the direct-B chaining
-                       bug where target blocks see stale entry state.
-                       Performance is equivalent to FLUSH_EACH_OP (100M+
-                       dispatches/60s) without the per-instruction flush. */
-                    {
-                        uae_u32 guest_pc = (uae_u32)(v - (uintptr)RAMBaseHost);
-                        compemu_raw_set_pc_i(v);  /* regs.pc_p = v */
-                        compemu_raw_mov_l_mi((uintptr)&regs.pc, guest_pc);
-                        LOAD_U64(REG_WORK1, v);
-                        uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
-                        STR_xXi(REG_WORK1, R_REGSTRUCT, offs_oldp);
-                    }
+                    /* ARM64: flush(1) already wrote PC_P to regs.pc_p via
+                       writeback_const. Just read it back and use the dynamic
+                       cacheline dispatch. Don't write the PC triple here —
+                       let the endblock_pc_inreg hot path handle it. */
+                    (void)v;
                     r = REG_PC_TMP;
                     compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
 #if defined(USE_DATA_BUFFER)
