@@ -637,6 +637,13 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
 		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
 	}
+#if defined(CPU_AARCH64)
+	/* ARM64: always persist regs.pc_p on the hot chain path. */
+	{
+		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
+		STR_xXi(rr_pc, R_REGSTRUCT, offs_pc);
+	}
+#endif
 	UBFIZ_xxii(rr_pc, rr_pc, 0, 16);  // apply TAGMASK (bottom 16 bits)
 	/* Clear bit 0 to ensure even cacheline index (handler slot, not bi slot) */
 	UBFX_xxii(rr_pc, rr_pc, 1, 15);
@@ -695,6 +702,17 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
 		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pc);
 	}
+#if defined(CPU_AARCH64)
+	/* ARM64: always persist regs.pc_p on the hot chain path.
+	   Without this, chained successor blocks start with stale
+	   regs.pc_p from the previous block, causing m68k_getpc()
+	   and PC-relative codegen to compute wrong addresses. */
+	{
+		LOAD_U64(REG_WORK2, v);
+		uintptr offs_pc = (uintptr)&regs.pc_p - (uintptr)&regs;
+		STR_xXi(REG_WORK2, R_REGSTRUCT, offs_pc);
+	}
+#endif
 	tba = (uae_u32*)get_target();
 	B_i(0); // <target set by caller>
 

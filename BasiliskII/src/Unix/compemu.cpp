@@ -26940,6 +26940,7 @@ void REGPARAM2 op_6101_0_comp_ff(uae_u32 opcode) /* BSR */
 	m68k_pc_offset=0;
 	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
+
 }}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -67134,6 +67135,7 @@ void REGPARAM2 op_6101_0_comp_nf(uae_u32 opcode) /* BSR */
 	m68k_pc_offset=0;
 	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
+
 }}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();

@@ -482,9 +482,10 @@ MIDFUNC(2,sub_l_ri,(RW4 d, IM8 i))
 	}
 
 	bool is_pcp = (d == PC_P);
+	bool is_ptr = is_pcp || (isconst(d) && live.state[d].val > (uintptr)0xFFFFFFFFULL);
 	d = rmw(d);
 
-	if (is_pcp)
+	if (is_ptr)
 		SUB_xxi(d, d, i);  // 64-bit SUB for host pointer
 	else
 		SUB_wwi(d, d, i);

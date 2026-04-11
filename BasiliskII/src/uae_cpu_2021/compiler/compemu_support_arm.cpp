@@ -1044,8 +1044,14 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 
 	/* ARM64: branch/ret endblock chaining — the underlying 64-bit
 	   pointer truncation bug in add_l/sub_l_ri for PC_P has been fixed.
-	   These barriers are no longer needed for correctness but can still
-	   be activated via B2_JIT_RESTORE_BARRIERS=branch,ret for debugging. */
+	   BSR still has a remaining endblock-chaining or return-address bug
+	   that causes a later control-flow divergence into the hardware
+	   polling loop. Barrier bisection (round 2) proved that BSR alone
+	   eliminates the late loop. Containment until root-caused. */
+#if defined(CPU_AARCH64)
+	if ((op & 0xff00) == 0x6100)  /* BSR (all sizes) */
+		return true;
+#endif
 	if (jit_restore_barrier("jsr") && (op & 0xffc0) == 0x4e80)
 		return true;
 	if (jit_restore_barrier("jmp") && (op & 0xffc0) == 0x4ec0)
@@ -6108,6 +6114,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     blockinfo* tbi;
                     const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
                     const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
+
 
                     uintptr cv = jit_canonicalize_target_pc(v);
                     tbi = get_blockinfo_addr_new((void*)cv);
