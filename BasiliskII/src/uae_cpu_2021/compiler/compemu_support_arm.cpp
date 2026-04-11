@@ -5789,8 +5789,21 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             LOAD_U64(REG_WORK3, (uintptr)&(regflags.nzcv));
                             STR_wXi(REG_WORK2, REG_WORK3, 0);
                         }
-                        /* Sync PC to the NEXT instruction */
+                        /* Sync PC to the NEXT instruction — full triple */
                         compemu_raw_set_pc_i((uintptr)pc_hist[i + 1].location);
+#if defined(CPU_AARCH64)
+                        /* ARM64: also store regs.pc and regs.pc_oldp so that
+                           m68k_getpc() in m68k_do_specialties() returns the
+                           correct guest PC. Without this, the stale triple
+                           from block entry causes wrong interrupt delivery. */
+                        {
+                            uae_u32 next_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i + 1].location - (uintptr)pc_hist[0].location);
+                            compemu_raw_mov_l_mi((uintptr)&regs.pc, next_m68k_pc);
+                            LOAD_U64(REG_WORK1, (uintptr)pc_hist[i + 1].location);
+                            uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
+                            STR_xXi(REG_WORK1, R_REGSTRUCT, offs_oldp);
+                        }
+#endif
                         /* Subtract only the cycles retired up to this point. */
                         LOAD_U64(REG_WORK3, (uintptr)&countdown);
                         LDR_wXi(REG_WORK2, REG_WORK3, 0);
@@ -6147,14 +6160,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #if defined(USE_DATA_BUFFER)
                     data_check_end(4, 64);
 #endif
-#if 0 /* no longer needed — endblock_pc_isconst hot path now
-                       re-enters execute_normal on ARM64 */
                     if (final_is_braq && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
+                        /* BRA.B: use safe exit path */
                         compemu_raw_set_pc_i(cv);
                         compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
-                    } else
-#endif
-                    {
+                    } else {
                         tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), cv);
                         write_jmp_target(tba, get_handler(cv));
                         create_jmpdep(bi, 0, tba, cv);

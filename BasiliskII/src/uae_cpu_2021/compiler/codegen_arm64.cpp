@@ -729,18 +729,17 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 		STR_wXi(REG_WORK3, R_REGSTRUCT, offs_pc);     // regs.pc = guest_pc
 	}
 #endif
-	/* ARM64: re-enter execute_normal() instead of direct B to handler.
-	   The target block's compiled code may contain interpreter fallbacks
-	   that use m68k_getpc() with the (pc, pc_oldp) triple. Even with
-	   non-direct handlers and full PC triple stores, the compiled code
-	   itself was generated with assumptions about entry state that may
-	   not hold across block transitions. Re-entering execute_normal()
-	   ensures proper state setup for each block. */
+	/* ARM64: re-enter execute_normal() on the hot path. Direct B chaining
+	   to the target handler skips state validation and causes stale-state
+	   bugs even with the full PC triple stored. The only working approach
+	   currently is to re-enter the C dispatcher for every block exit.
+	   The spcflags mid-block cold path and endblock both store the full
+	   PC triple, so execute_normal sees correct state. */
 	raw_pop_preserved_regs();
 	compemu_raw_jmp((uintptr)execute_normal);
 
 	tba = (uae_u32*)get_target();
-	B_i(0); /* placeholder — not used for hot chain */
+	B_i(0); /* placeholder */
 
 	return tba;
 }
