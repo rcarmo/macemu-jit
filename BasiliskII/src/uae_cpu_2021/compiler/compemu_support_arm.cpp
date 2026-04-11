@@ -1068,6 +1068,14 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 	if (jit_restore_barrier("ret") &&
 		(op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e76 || op == 0x4e77))
 		return true;
+#if defined(CPU_AARCH64)
+	/* ARM64: EMUL_OP opcodes (0x71xx) change guest state (PC, registers)
+	   through the C-side EmulOp() handler. The compiled block's continuation
+	   after the interpreter fallback doesn't know about these state changes.
+	   Force EMUL_OP to end the block and re-enter the dispatcher. */
+	if ((op & 0xff00) == 0x7100)
+		return true;
+#endif
 	if (jit_restore_barrier("movem") && (op & 0xfb80) == 0x4880)
 		return true;
 	if (jit_restore_barrier("aline") && (op & 0xf000) == 0xa000)

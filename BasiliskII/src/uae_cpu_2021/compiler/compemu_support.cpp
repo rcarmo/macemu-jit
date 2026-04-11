@@ -191,7 +191,7 @@ static void jit_trace_dispatch_ring_maybe_dump(unsigned long dispatch_seq, uae_u
 
 	if (jit_dispatch_ring_dumped)
 		return;
-	if (!(guest_pc == 0x0400706a || guest_pc == 0x04007080 || guest_pc == 0x04007116))
+	if (!(guest_pc == 0x0400706a || guest_pc == 0x04007080 || guest_pc == 0x04007116 || guest_pc == 0x0400e1a4))
 		return;
 	jit_dispatch_ring_dumped = true;
 	fprintf(stderr, "DISPATCHRING dump trigger guest_pc=%08x dispatch=%lu count=%lu\n",
