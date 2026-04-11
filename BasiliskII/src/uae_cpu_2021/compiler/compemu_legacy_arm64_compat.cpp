@@ -614,7 +614,7 @@ void do_nothing(void)
 	   runs at the proper cadence even for tight compiled loops. Without
 	   this, ROM hardware-polling loops that run natively never give the
 	   60Hz timer a chance to update emulated hardware registers. */
-	cpu_check_ticks();
+	/* cpu_check_ticks() removed — too expensive on hot path */
 #endif
 	/* Intentionally empty otherwise. */
 }
