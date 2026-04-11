@@ -255,7 +255,7 @@ static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 	   NuBus reads are intercepted in memory.h (returns 0).
 	   These ranges still need interpreter for timer-dependent
 	   polling and hardware init sequencing. */
-	if (pc >= 0x04000000 && pc <= 0x0400dfff)
+	if (pc >= 0x04000000 && pc <= 0x0400ffff)
 		return true;
 	/* 0x0400e000-0x0400ffff: L2 (heap walk, memory manager) */
 	if (pc >= 0x04040000 && pc <= 0x0407ffff)
