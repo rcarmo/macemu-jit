@@ -251,11 +251,10 @@ static inline int jit_max_optlev(void)
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
 #if defined(CPU_AARCH64)
-	/* ROM hardware-polling subroutines that must run at interpreter speed
-	   to allow emulated hardware time to respond. These are NOT JIT bugs
-	   — the compiled code is correct — but the ROM expects hardware
-	   registers to update between polling iterations, which requires
-	   wall-clock time that the JIT's fast execution doesn't provide. */
+	/* ROM ranges that probe unemulated hardware registers (0x50fxxxxx
+	   NuBus/slot space). These loops read memory-mapped I/O that
+	   BasiliskII doesn't model. Interpreter speed gives one_tick()
+	   time to advance emulated state between iterations. */
 	if (pc >= 0x04000000 && pc <= 0x0400ffff)
 		return true;
 	if (pc >= 0x04040000 && pc <= 0x0407ffff)

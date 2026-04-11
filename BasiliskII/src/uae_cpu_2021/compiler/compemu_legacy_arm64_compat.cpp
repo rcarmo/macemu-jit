@@ -610,8 +610,13 @@ void do_nothing(void)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
 	jit_diag_maybe_print();
+	/* Call cpu_check_ticks on every countdown expiry so that one_tick()
+	   runs at the proper cadence even for tight compiled loops. Without
+	   this, ROM hardware-polling loops that run natively never give the
+	   60Hz timer a chance to update emulated hardware registers. */
+	cpu_check_ticks();
 #endif
-	/* Intentionally empty. */
+	/* Intentionally empty otherwise. */
 }
 
 static bool jit_tracewin_enabled()
