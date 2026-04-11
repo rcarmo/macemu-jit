@@ -6109,6 +6109,23 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     uintptr v = live.state[PC_P].val;
                     uae_u32* tba;
                     blockinfo* tbi;
+#if defined(CPU_AARCH64)
+                    {
+                        uintptr base = (uintptr)RAMBaseHost;
+                        uintptr limit = base + RAMSize + ROMSize + 0x100000;
+                        if (v < base || v >= limit || (v & 1)) {
+                            static int bad_const_count = 0;
+                            if (bad_const_count++ < 20)
+                                fprintf(stderr, "JIT_BAD_CONST_PCP block=%08x val=%p base=%p limit=%p\n",
+                                    (unsigned)block_m68k_pc, (void*)v, (void*)base, (void*)limit);
+                            /* Fall through to dynamic path */
+                            r = REG_PC_TMP;
+                            compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
+                            compemu_raw_endblock_pc_inreg(r, scaled_cycles(totcycles));
+                            goto endblock_done;
+                        }
+                    }
+#endif
                     const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
                     const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
 
@@ -6152,6 +6169,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 }
             }
         }
+endblock_done:
 
         remove_from_list(bi);
         if (trace_in_rom) {
