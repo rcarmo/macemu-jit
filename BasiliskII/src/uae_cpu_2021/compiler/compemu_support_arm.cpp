@@ -6080,25 +6080,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_set_pc_i(ct1);
                     compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
                 } else {
-#if defined(CPU_AARCH64)
-                    /* ARM64: store full PC triple + dynamic dispatch for Bcc predicted path */
-                    {
-                        uae_u32 gpc1 = (uae_u32)(ct1 - (uintptr)RAMBaseHost);
-                        compemu_raw_set_pc_i(ct1);
-                        compemu_raw_mov_l_mi((uintptr)&regs.pc, gpc1);
-                        LOAD_U64(REG_WORK1, ct1);
-                        STR_xXi(REG_WORK1, R_REGSTRUCT, (uintptr)&regs.pc_oldp - (uintptr)&regs);
-                    }
-                    {
-                        int rr = REG_PC_TMP;
-                        compemu_raw_mov_l_rm(rr, (uintptr)&regs.pc_p);
-                        compemu_raw_endblock_pc_inreg(rr, scaled_cycles(totcycles));
-                    }
-#else
                     tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
                     write_jmp_target(tba, get_handler(ct1));
                     create_jmpdep(bi, 0, tba, ct1);
-#endif
                 }
 
                 /* not-predicted outcome */
@@ -6120,25 +6104,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_set_pc_i(ct2);
                     compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
                 } else {
-#if defined(CPU_AARCH64)
-                    /* ARM64: store full PC triple + dynamic dispatch for Bcc not-predicted path */
-                    {
-                        uae_u32 gpc2 = (uae_u32)(ct2 - (uintptr)RAMBaseHost);
-                        compemu_raw_set_pc_i(ct2);
-                        compemu_raw_mov_l_mi((uintptr)&regs.pc, gpc2);
-                        LOAD_U64(REG_WORK1, ct2);
-                        STR_xXi(REG_WORK1, R_REGSTRUCT, (uintptr)&regs.pc_oldp - (uintptr)&regs);
-                    }
-                    {
-                        int rr = REG_PC_TMP;
-                        compemu_raw_mov_l_rm(rr, (uintptr)&regs.pc_p);
-                        compemu_raw_endblock_pc_inreg(rr, scaled_cycles(totcycles));
-                    }
-#else
                     tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
                     write_jmp_target(tba, get_handler(ct2));
                     create_jmpdep(bi, 1, tba, ct2);
-#endif
                 }
             } else if (!forced_interpreter_barrier) {
                 if (was_comp) {
@@ -6167,16 +6135,23 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     uintptr v = live.state[PC_P].val;
 #if defined(CPU_AARCH64)
                     /* ARM64: flush(1) already wrote PC_P to regs.pc_p via
-                       writeback_const. Just read it back and use the dynamic
-                       cacheline dispatch. Don't write the PC triple here —
-                       let the endblock_pc_inreg hot path handle it. */
-                    (void)v;
-                    r = REG_PC_TMP;
-                    compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
+                       writeback_const. Use direct B chaining through
+                       endblock_pc_isconst — the full PC triple is stored
+                       on its hot path. Do NOT redundantly write PC_P here
+                       (that was the bug — conflicting with flush's write). */
+                    {
+                    uae_u32* tba;
+                    blockinfo* tbi;
+                    uintptr cv = jit_canonicalize_target_pc(v);
+                    tbi = get_blockinfo_addr_new((void*)cv);
+                    match_states(tbi);
 #if defined(USE_DATA_BUFFER)
                     data_check_end(4, 64);
 #endif
-                    compemu_raw_endblock_pc_inreg(r, scaled_cycles(totcycles));
+                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), cv);
+                    write_jmp_target(tba, get_handler(cv));
+                    create_jmpdep(bi, 0, tba, cv);
+                    }
 #else /* !CPU_AARCH64 */
                     {
                     uae_u32* tba;
