@@ -979,8 +979,13 @@ void execute_normal(void)
 		   block execution. This asymmetry causes different execution paths.
 		   Inhibiting during tracing (typically <64 instructions, ~microseconds)
 		   has negligible impact on 60Hz timing accuracy. */
+		/* ARM64: tick_inhibit was previously set during block tracing to
+		   prevent one_tick() side effects from causing non-deterministic
+		   paths. However, with B2_JIT_MAXRUN=1, every instruction traces
+		   individually, and the inhibit starves the 60Hz timer, preventing
+		   boot progress. Allow one_tick() during tracing. */
 		extern bool tick_inhibit;
-		tick_inhibit = true;
+		/* tick_inhibit = true; -- removed: starves timer with MAXRUN=1 */
 		uae_u32 verify_block_pc = get_virtual_address((uae_u8*)regs.pc_p);
 		const bool verify_this_block = !jit_block_verify_reentrant && jit_verify_block_target_pc(verify_block_pc);
 		if (verify_this_block)
@@ -1007,7 +1012,7 @@ void execute_normal(void)
 			}
 			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
 #if defined(CPU_AARCH64)
-				tick_inhibit = false;
+				/* tick_inhibit = false; -- no longer needed */
 				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);
 				if (verify_this_block) {
 					jit_block_verify_run(pc_hist, blocklen, total_cycles, block_pc);

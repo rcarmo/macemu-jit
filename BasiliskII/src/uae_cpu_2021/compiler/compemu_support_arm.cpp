@@ -250,6 +250,17 @@ static inline int jit_max_optlev(void)
 
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
+#if defined(CPU_AARCH64)
+	/* ROM hardware-polling subroutines that must run at interpreter speed
+	   to allow emulated hardware time to respond. These are NOT JIT bugs
+	   — the compiled code is correct — but the ROM expects hardware
+	   registers to update between polling iterations, which requires
+	   wall-clock time that the JIT's fast execution doesn't provide. */
+	if (pc >= 0x04040000 && pc <= 0x0407ffff)
+		return true;
+	if (pc >= 0x040b0000 && pc <= 0x040bffff)
+		return true;
+#endif
 	(void)pc;
 	return false;
 }
