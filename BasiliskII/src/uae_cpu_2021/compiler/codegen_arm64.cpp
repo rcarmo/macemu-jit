@@ -729,19 +729,18 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 		STR_wXi(REG_WORK3, R_REGSTRUCT, offs_pc);     // regs.pc = guest_pc
 	}
 #endif
-	/* ARM64: instead of direct-chaining to the target block's handler,
-	   pop preserved registers and re-enter execute_normal() which
-	   re-does the cache lookup from the canonical regs.pc_p. This avoids
-	   the direct-B chaining bug where the target handler's interpreter
-	   fallbacks see stale guest state from the source block.
-	   Performance impact: every const-exit block returns to the C
-	   dispatcher instead of hot-chaining. Acceptable until the
-	   underlying direct-chain state propagation bug is fixed. */
+	/* ARM64: re-enter execute_normal() instead of direct B to handler.
+	   The target block's compiled code may contain interpreter fallbacks
+	   that use m68k_getpc() with the (pc, pc_oldp) triple. Even with
+	   non-direct handlers and full PC triple stores, the compiled code
+	   itself was generated with assumptions about entry state that may
+	   not hold across block transitions. Re-entering execute_normal()
+	   ensures proper state setup for each block. */
 	raw_pop_preserved_regs();
 	compemu_raw_jmp((uintptr)execute_normal);
 
 	tba = (uae_u32*)get_target();
-	B_i(0); /* placeholder — not actually chained */
+	B_i(0); /* placeholder — not used for hot chain */
 
 	return tba;
 }

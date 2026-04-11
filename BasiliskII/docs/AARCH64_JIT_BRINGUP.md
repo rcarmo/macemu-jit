@@ -7,27 +7,66 @@ This document describes the work done to bring up the experimental AArch64 (ARM6
 - **L1 (optlev=1)**: All instructions fall through to interpreter with per-instruction spcflags checks. Safe but slow — no native codegen.
 - **L2 (optlev=2)**: Instructions compile to native ARM64 code. Register allocator tracks values across instructions within a block. ~2-5× faster than L1.
 
-The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, word-to-address-register self-alias clobbers, and the remaining early `A995` trap-return divergence. The remaining all-native failure is now later and more specific: **A-line traps now run through an L2 runtime-helper trap path instead of interpreter containment, pure L2 gets past the old `0x040011e4` / `intmask=7 forever` blocker, and the current frontier is a later ROM startup path that falls into the `0x0400706a..0x04007124` wait/copy loop and spins on `m[a5] == 0xff`**.
+The codebase is a fork of the Koenig/cebix/aranym JIT originally written for x86, ported to ARM (32-bit) by contributors, with an ARM64 backend added experimentally. Since the initial bringup, the work has fixed a long series of structural and semantic bugs: byte-order mismatches, IRQ deliverability, legacy carry/X handling, boundary cycle charging, verifier misuse, ARM64 endblock slow-path bugs, short-branch decode on ARM64, 32-bit host-PC construction bugs, word-to-address-register self-alias clobbers, A-line trap control-flow modeling, 64-bit pointer truncation in the legacy `add_l`/`sub_l_ri` helpers, and the `endblock_pc_isconst` direct-chain stale-state bug. **Pure L2 now reaches `0x0400e1b2` ×284, gets past all earlier startup blockers, and has zero crashes. The remaining frontier is execution speed (every block exit re-enters the C dispatcher) and a residual late hardware-polling loop.**
 
-## Current frontier (2026-04-10)
+## Current frontier (2026-04-11)
 
-The most important updates from the latest round are:
+The most important updates from the April 10-11 session:
 
-### 1. `A995` and the A-line startup trap class were moved out of interpreter containment
+### 1. A-line trap class moved into L2 (`adc83002`)
 
-The earlier `0x040011e4: a995` divergence turned out to be a control-flow modeling bug, not a random PC corruption problem.
+A-line opcodes (like `A995`) now execute through a dedicated L2 runtime helper (`op_aline_trap_comp_ff` → `jit_runtime_aline_trap`). This runs the real `op_illg()/Exception()` path and ends the block from the helper-updated `regs.pc_p`.
 
-What changed:
+### 2. 64-bit pointer truncation fix (`91f2e0f8`)
 
-- removed the hardcoded `A995` interpreter barrier
-- removed the exact-exec / optlev0 A-line containments for the startup trap sites
-- added an L2 runtime-helper trap path in `src/uae_cpu_2021/compiler/compemu_support_arm.cpp`
-  - `op_aline_trap_comp_ff()`
-  - `jit_runtime_aline_trap()`
+`add_l(d, s)` and `add_l_ri(d, i)` routed through `jnf_ADD_l` which uses 32-bit `ADD Wd,Wd,Ws`. When `d` is `PC_P` (a 64-bit host pointer), this truncated the upper bits. Fixed by detecting `d == PC_P` and routing through `arm_ADD_l`/`arm_ADD_l_ri` which use 64-bit arithmetic with proper sign-extension. Same fix applied to `sub_l_ri`.
 
-So A-line opcodes now execute as real trap control-flow in L2:
+### 3. Barrier bisection identified the branch family (`ef56ff56`)
 
-1. call `op_illg(opcode)`
+Systematic bisection of interpreter barrier families proved:
+- `B2_JIT_RESTORE_BARRIERS=branch` alone restored boot progress (`e1b2` × 20)
+- Within `branch`: `bsr` alone eliminated the late hardware loop
+- `bcc` alone also partially helped
+- The root cause was in the block-exit chaining path, not the branch instruction semantics
+
+### 4. `endblock_pc_isconst` direct-chain bug identified and fixed (`6838db5d`, `9297d0de`)
+
+**Root cause**: `endblock_pc_isconst`'s hot-chain path emitted a direct `B` instruction to the target block's handler, bypassing the block-entry validation that `execute_normal()` provides. When blocks are directly chained, the target block can run with:
+
+1. Stale `regs.pc` / `regs.pc_oldp` (the PC triple was only partially updated)
+2. Invalid block state (checksum changes, recompilation, state mismatches)
+
+**Evidence**:
+- Compile-time `PC_P` values are always valid (zero `JIT_BAD_CONST` hits)
+- `B2_JIT_FLUSH_EACH_OP=1` proved the issue is in the endblock path, not instruction semantics
+- Replacing direct `B` chain with `execute_normal` re-entry: `e1b2` × 284-304
+- With direct `B` chain + PC triple store: still fails
+
+**Fix**: The hot path now stores the full PC triple (`regs.pc_p`, `regs.pc`, `regs.pc_oldp`) and re-enters `execute_normal()` via `raw_pop_preserved_regs + jmp`. This ensures proper block validation on every transition.
+
+### 5. Current pure-L2 status (no barriers, no optlev0 ranges)
+
+| Metric | Before session | After fixes |
+|---|---|---|
+| `0x0400e1b2` | 0 | **284** |
+| Late hardware loop (`0x04007116`) | 340k+ | **864k** (residual) |
+| Hardware dead end (`0x0400706a`) | yes | **0** |
+| Crash/SIGSEGV | occasional | **0** |
+| `SCSIGet` | 0 | 0 |
+| Dispatches/60s | stuck | **1M** |
+
+### 6. Performance path forward
+
+Every block exit now goes through the full C dispatcher (`execute_normal`), which is ~100× slower than direct chaining. To restore performance:
+
+1. Use the target block's **non-direct handler** (`handler_to_use` instead of `direct_handler_to_use`) for direct chains — this includes checksum validation
+2. Or fix the underlying state propagation so direct chains are safe
+
+### 7. Residual late hardware loop
+
+The `0x04007116` polling loop (864k hits alongside 284 `e1b2` hits) is a separate issue from the endblock chaining bug. It's the same `0x50f...` hardware-space polling path identified on April 10, entered through a different feeder than the one eliminated by the A-line and pointer fixes.
+
+## Previous frontier (2026-04-10)
 2. run the real `Exception(0xA, 0)` path
 3. end the block on the helper-updated `regs.pc_p`
 4. re-enter dispatch from the trap-established machine state
