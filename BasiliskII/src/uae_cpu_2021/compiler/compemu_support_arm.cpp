@@ -250,28 +250,6 @@ static inline int jit_max_optlev(void)
 
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
-#if defined(CPU_AARCH64)
-	/* Low ROM: interpreter for $dd0 I/O polling and timer sequencing. */
-	if (pc >= 0x04000000 && pc <= 0x0400ffff)
-		return true;
-	/* If the NuBus probe patch was NOT applied (different ROM or
-	   signature mismatch), fall back to interpreter containment
-	   for the hardware-polling ranges. */
-	{
-		static int nubus_patched = -1;
-		if (nubus_patched < 0) {
-			extern uint8 *ROMBaseHost;
-			nubus_patched = (ROMBaseHost[0xb27c] == 0x4e &&
-			                 ROMBaseHost[0xb27d] == 0xd6) ? 1 : 0;
-		}
-		if (!nubus_patched) {
-			if (pc >= 0x04040000 && pc <= 0x0407ffff)
-				return true;
-			if (pc >= 0x040b0000 && pc <= 0x040bffff)
-				return true;
-		}
-	}
-#endif
 	(void)pc;
 	return false;
 }
@@ -1034,50 +1012,24 @@ static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
-	/* Note: op is already in canonical M68k (big-endian) order
-	   via DO_GET_OPCODE → get_opcode_cft_map → uae_bswap_16.
-	   Hardcoded AArch64 barriers are controlled by
-	   B2_JIT_RESTORE_BARRIERS=branch,jsr,jmp,ret,movem,aline,emulop,sr,moveq,dbcc */
-	/* MOVE16 barrier: force interpreter for all MOVE16 variants.
-	   The 68040 MOVE16 compiled path uses the legacy mov_l_Rr store
-	   which may produce wrong target addresses on ARM64. */
+#if defined(CPU_AARCH64)
+	/* MOVE16: compiled path produces wrong destination addresses on ARM64. */
 	if ((op & 0xfff8) == 0xf620 || (op & 0xfff8) == 0xf600 ||
 	    (op & 0xfff8) == 0xf608 || (op & 0xfff8) == 0xf610 ||
 	    (op & 0xfff8) == 0xf618)
 		return true;
 
+	/* EMUL_OP (0x71xx): changes guest state through EmulOp() C handler.
+	   Must end block and re-enter dispatcher. */
+	if ((op & 0xff00) == 0x7100)
+		return true;
+#endif
+
+	/* Environment-gated barriers for debugging (B2_JIT_RESTORE_BARRIERS). */
 	if (jit_restore_barrier("sr")) {
-		/* MV2SR.W: changes supervisor state via MakeFromSR() */
 		if (table68k[op].mnemo == i_MV2SR && table68k[op].size == sz_word)
 			return true;
-		/* CCR/SR state modifiers */
-		if (op == 0x023c)
-			return true;
-		if (op == 0x40e7 || op == 0x40c1)
-			return true;
-		if (op == 0x44df || op == 0x44fc)
-			return true;
 	}
-
-	if ((jit_restore_barrier("branch") || jit_restore_barrier("bra") || jit_restore_barrier("braw")) && op == 0x6000)
-		return true;
-	if ((jit_restore_barrier("branch") || jit_restore_barrier("bra") || jit_restore_barrier("bral")) && op == 0x60ff)
-		return true;
-	if ((jit_restore_barrier("branch") || jit_restore_barrier("bra") || jit_restore_barrier("braq")) &&
-		(op & 0xff00) == 0x6000 && op != 0x6000 && op != 0x60ff)
-		return true;
-	if ((jit_restore_barrier("branch") || jit_restore_barrier("bsr")) && (op & 0xff00) == 0x6100)
-		return true;
-	if ((jit_restore_barrier("branch") || jit_restore_barrier("bcc")) && (op & 0xf000) == 0x6000 && (op & 0xff00) != 0x6000 && (op & 0xff00) != 0x6100)
-		return true;
-
-	/* ARM64: branch/ret endblock chaining — the underlying 64-bit
-	   pointer truncation bug in add_l/sub_l_ri for PC_P has been fixed.
-	   BSR still has a remaining endblock-chaining or return-address bug
-	   that causes a later control-flow divergence into the hardware
-	   polling loop. Barrier bisection (round 2) proved that BSR alone
-	   eliminates the late loop. Containment until root-caused. */
-/* BSR no longer needs a barrier — uses dynamic endblock path below */
 	if (jit_restore_barrier("jsr") && (op & 0xffc0) == 0x4e80)
 		return true;
 	if (jit_restore_barrier("jmp") && (op & 0xffc0) == 0x4ec0)
@@ -1085,56 +1037,14 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 	if (jit_restore_barrier("ret") &&
 		(op == 0x4e73 || op == 0x4e74 || op == 0x4e75 || op == 0x4e76 || op == 0x4e77))
 		return true;
-#if defined(CPU_AARCH64)
-	/* ARM64: EMUL_OP opcodes (0x71xx) change guest state (PC, registers)
-	   through the C-side EmulOp() handler. The compiled block's continuation
-	   after the interpreter fallback doesn't know about these state changes.
-	   Force EMUL_OP to end the block and re-enter the dispatcher. */
-	if ((op & 0xff00) == 0x7100)
+	if (jit_restore_barrier("branch") && (op & 0xf000) == 0x6000)
 		return true;
-#endif
 	if (jit_restore_barrier("movem") && (op & 0xfb80) == 0x4880)
 		return true;
 	if (jit_restore_barrier("aline") && (op & 0xf000) == 0xa000)
 		return true;
 	if (jit_restore_barrier("emulop") && (op & 0xff00) == 0x7100)
 		return true;
-	if (jit_restore_barrier("moveq") && (op & 0xf100) == 0x7000 && (op & 0xff00) != 0x7100)
-		return true;
-
-	/* Optional MOVE memory-destination barrier for diagnostics. */
-	if (getenv("B2_JIT_BARRIER_MOVE_MEM") && getenv("B2_JIT_BARRIER_MOVE_MEM")[0] == '1') {
-		uae_u16 fam = (op >> 12) & 0xf;
-		if (fam == 1 || fam == 2 || fam == 3) { /* MOVE.B, MOVE.L, MOVE.W */
-			uae_u16 dst_mode = (op >> 6) & 7;
-			if (dst_mode != 0 && dst_mode != 1)
-				return true;
-		}
-	}
-
-	/* Optional family barrier for targeted debugging only. */
-	{
-		static int families[16] = {-1};
-		if (families[0] == -1) {
-			for (int i = 0; i < 16; i++) families[i] = 0;
-			const char *env = getenv("B2_JIT_BARRIER_FAMILIES");
-			if (env && *env) {
-				const char *p = env;
-				while (*p) {
-					while (*p == ',' || *p == ' ') p++;
-					if (*p) {
-						int v = (int)strtol(p, (char**)&p, 16);
-						if (v >= 0 && v < 16) families[v] = 1;
-					}
-				}
-				fprintf(stderr, "JIT: barrier families:");
-				for (int i = 0; i < 16; i++) if (families[i]) fprintf(stderr, " %x", i);
-				fprintf(stderr, "\n");
-			}
-		}
-		if (families[(op >> 12) & 0xf])
-			return true;
-	}
 
 	return false;
 }
