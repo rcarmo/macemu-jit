@@ -149,25 +149,8 @@ static __inline__ uae_u32 get_word(uaecptr addr)
     return do_get_mem_word(m);
 }
 #define phys_get_word get_word
-static __inline__ uae_u32 fake_50f_status_byte(uaecptr addr, bool *handled)
-{
-    /* Return 0 for all reads from the NuBus/slot hardware space
-       (0x50f00000-0x50ffffff). The ROM probes these addresses during
-       early init; returning 0 means "no hardware present" which lets
-       the probe complete quickly without interpreter containment. */
-    if ((addr & 0xfff00000) == 0x50f00000) {
-        *handled = true;
-        return 0;
-    }
-    *handled = false;
-    return 0;
-}
 static __inline__ uae_u32 get_byte(uaecptr addr)
 {
-    bool handled = false;
-    uae_u32 fake = fake_50f_status_byte(addr, &handled);
-    if (handled)
-        return fake;
     uae_u8 * const m = (uae_u8 *)do_get_real_address(addr);
     return do_get_mem_byte(m);
 }
