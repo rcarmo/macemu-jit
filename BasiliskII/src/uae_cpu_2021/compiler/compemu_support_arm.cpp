@@ -3972,6 +3972,13 @@ static void flush(int save_regs)
     int i;
 
     log_flush();
+    /* ARM64 cross-block fix: at block boundaries, ALWAYS store flags to memory.
+       dont_care_flags() may have cleared flags_are_important mid-block when the
+       liveflags analysis determined no downstream consumer WITHIN this block.
+       But the NEXT block may need flags. Force important before flush_flags()
+       so flags_to_stack() never skips the store at a block boundary. */
+    if (save_regs)
+        live.flags_are_important = 1;
     flush_flags(); /* low level */
     sync_m68k_pc(); /* mid level */
 
