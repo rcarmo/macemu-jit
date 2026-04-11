@@ -6067,9 +6067,25 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_set_pc_i(ct1);
                     compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
                 } else {
+#if defined(CPU_AARCH64)
+                    /* ARM64: store full PC triple + dynamic dispatch for Bcc predicted path */
+                    {
+                        uae_u32 gpc1 = (uae_u32)(ct1 - (uintptr)RAMBaseHost);
+                        compemu_raw_set_pc_i(ct1);
+                        compemu_raw_mov_l_mi((uintptr)&regs.pc, gpc1);
+                        LOAD_U64(REG_WORK1, ct1);
+                        STR_xXi(REG_WORK1, R_REGSTRUCT, (uintptr)&regs.pc_oldp - (uintptr)&regs);
+                    }
+                    {
+                        int rr = REG_PC_TMP;
+                        compemu_raw_mov_l_rm(rr, (uintptr)&regs.pc_p);
+                        compemu_raw_endblock_pc_inreg(rr, scaled_cycles(totcycles));
+                    }
+#else
                     tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
                     write_jmp_target(tba, get_handler(ct1));
                     create_jmpdep(bi, 0, tba, ct1);
+#endif
                 }
 
                 /* not-predicted outcome */
@@ -6091,9 +6107,25 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_set_pc_i(ct2);
                     compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
                 } else {
+#if defined(CPU_AARCH64)
+                    /* ARM64: store full PC triple + dynamic dispatch for Bcc not-predicted path */
+                    {
+                        uae_u32 gpc2 = (uae_u32)(ct2 - (uintptr)RAMBaseHost);
+                        compemu_raw_set_pc_i(ct2);
+                        compemu_raw_mov_l_mi((uintptr)&regs.pc, gpc2);
+                        LOAD_U64(REG_WORK1, ct2);
+                        STR_xXi(REG_WORK1, R_REGSTRUCT, (uintptr)&regs.pc_oldp - (uintptr)&regs);
+                    }
+                    {
+                        int rr = REG_PC_TMP;
+                        compemu_raw_mov_l_rm(rr, (uintptr)&regs.pc_p);
+                        compemu_raw_endblock_pc_inreg(rr, scaled_cycles(totcycles));
+                    }
+#else
                     tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
                     write_jmp_target(tba, get_handler(ct2));
                     create_jmpdep(bi, 1, tba, ct2);
+#endif
                 }
             } else if (!forced_interpreter_barrier) {
                 if (was_comp) {
@@ -6120,55 +6152,45 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_endblock_pc_inreg(r, scaled_cycles(totcycles));
                 } else if (was_comp && isconst(PC_P)) {
                     uintptr v = live.state[PC_P].val;
-                    uae_u32* tba;
-                    blockinfo* tbi;
 #if defined(CPU_AARCH64)
+                    /* ARM64: flush the const PC_P to memory as the full PC
+                       triple, then use the dynamic endblock_pc_inreg path
+                       which reads regs.pc_p at runtime and does a proper
+                       cacheline dispatch. This avoids the direct-B chaining
+                       bug where target blocks see stale entry state.
+                       Performance is equivalent to FLUSH_EACH_OP (100M+
+                       dispatches/60s) without the per-instruction flush. */
                     {
-                        uintptr base = (uintptr)RAMBaseHost;
-                        uintptr limit = base + RAMSize + ROMSize + 0x100000;
-                        if (v < base || v >= limit || (v & 1)) {
-                            static int bad_const_count = 0;
-                            if (bad_const_count++ < 20)
-                                fprintf(stderr, "JIT_BAD_CONST_PCP block=%08x val=%p base=%p limit=%p\n",
-                                    (unsigned)block_m68k_pc, (void*)v, (void*)base, (void*)limit);
-                            /* Fall through to dynamic path */
-                            r = REG_PC_TMP;
-                            compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
-                            compemu_raw_endblock_pc_inreg(r, scaled_cycles(totcycles));
-                            goto endblock_done;
-                        }
+                        uae_u32 guest_pc = (uae_u32)(v - (uintptr)RAMBaseHost);
+                        compemu_raw_set_pc_i(v);  /* regs.pc_p = v */
+                        compemu_raw_mov_l_mi((uintptr)&regs.pc, guest_pc);
+                        LOAD_U64(REG_WORK1, v);
+                        uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
+                        STR_xXi(REG_WORK1, R_REGSTRUCT, offs_oldp);
                     }
-#endif
-                    const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
-                    const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
-
-
-
-                    uintptr cv = jit_canonicalize_target_pc(v);
-                    tbi = get_blockinfo_addr_new((void*)cv);
-                    match_states(tbi);
-                    if (jit_trace_setpc_env()) {
-                        uintptr _base = (uintptr)RAMBaseHost;
-                        uintptr _limit = _base + RAMSize + ROMSize + 0x100000;
-                        if (v < _base || v >= _limit || (v & 1)) {
-                            fprintf(stderr,
-                                "JIT_ENDCONST src=%08x path=fallthrough target=%p canon=%p live_pcp_status=%d\n",
-                                (unsigned)block_m68k_pc, (void*)v, (void*)cv, live.state[PC_P].status);
-                        }
-                    }
-
+                    r = REG_PC_TMP;
+                    compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
 #if defined(USE_DATA_BUFFER)
                     data_check_end(4, 64);
 #endif
-                    if (final_is_braq && !(jit_block_verify_compile_active && block_m68k_pc == jit_block_verify_compile_pc)) {
-                        /* BRA.B: use safe exit path */
-                        compemu_raw_set_pc_i(cv);
-                        compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
-                    } else {
-                        tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), cv);
-                        write_jmp_target(tba, get_handler(cv));
-                        create_jmpdep(bi, 0, tba, cv);
+                    compemu_raw_endblock_pc_inreg(r, scaled_cycles(totcycles));
+#else /* !CPU_AARCH64 */
+                    {
+                    uae_u32* tba;
+                    blockinfo* tbi;
+                    const uae_u16 final_op = DO_GET_OPCODE(pc_hist[blocklen - 1].location);
+                    const bool final_is_braq = ((final_op & 0xff00) == 0x6000 && final_op != 0x6000 && final_op != 0x60ff);
+                    uintptr cv = jit_canonicalize_target_pc(v);
+                    tbi = get_blockinfo_addr_new((void*)cv);
+                    match_states(tbi);
+#if defined(USE_DATA_BUFFER)
+                    data_check_end(4, 64);
+#endif
+                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), cv);
+                    write_jmp_target(tba, get_handler(cv));
+                    create_jmpdep(bi, 0, tba, cv);
                     }
+#endif /* CPU_AARCH64 */
                 } else {
                     r = REG_PC_TMP;
                     compemu_raw_mov_l_rm(r, (uintptr)&regs.pc_p);
