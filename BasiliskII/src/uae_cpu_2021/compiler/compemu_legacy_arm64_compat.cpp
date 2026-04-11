@@ -990,7 +990,10 @@ void execute_normal(void)
 		   individually, and the inhibit starves the 60Hz timer, preventing
 		   boot progress. Allow one_tick() during tracing. */
 		extern bool tick_inhibit;
-		tick_inhibit = true;
+		/* Do NOT inhibit ticks during tracing. With MAXRUN=1 every dispatch
+		   traces one instruction; inhibiting here starves the 60Hz timer
+		   and prevents the Mac OS Device Manager from completing async I/O. */
+		/* tick_inhibit = false; — already false from compile_block */
 		uae_u32 verify_block_pc = get_virtual_address((uae_u8*)regs.pc_p);
 		const bool verify_this_block = !jit_block_verify_reentrant && jit_verify_block_target_pc(verify_block_pc);
 		if (verify_this_block)
