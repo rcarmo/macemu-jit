@@ -1038,6 +1038,13 @@ static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 	   via DO_GET_OPCODE → get_opcode_cft_map → uae_bswap_16.
 	   Hardcoded AArch64 barriers are controlled by
 	   B2_JIT_RESTORE_BARRIERS=branch,jsr,jmp,ret,movem,aline,emulop,sr,moveq,dbcc */
+	/* MOVE16 barrier: force interpreter for all MOVE16 variants.
+	   The 68040 MOVE16 compiled path uses the legacy mov_l_Rr store
+	   which may produce wrong target addresses on ARM64. */
+	if ((op & 0xfff8) == 0xf620 || (op & 0xfff8) == 0xf600 ||
+	    (op & 0xfff8) == 0xf608 || (op & 0xfff8) == 0xf610 ||
+	    (op & 0xfff8) == 0xf618)
+		return true;
 
 	if (jit_restore_barrier("sr")) {
 		/* MV2SR.W: changes supervisor state via MakeFromSR() */

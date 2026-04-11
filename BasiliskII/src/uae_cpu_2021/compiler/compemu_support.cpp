@@ -503,6 +503,26 @@ void m68k_do_compile_execute(void)
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
 #if defined(CPU_AARCH64)
+		/* Detect A7 (stack pointer) corruption immediately after block execution */
+		/* (disabled — not needed for MAXRUN=1 investigation) */
+		/* Heap corruption watchpoint: check 0x2038 every dispatch after _dc=4M */
+		{
+			static uae_u32 heap_watch_val = 0;
+			static int heap_watch_logged = 0;
+			if (_dc > 9000 && _dc < 20000000) {
+				uae_u32 cur = get_long(0x2038);
+				if (heap_watch_val == 0) heap_watch_val = cur; /* init */
+				if (cur != heap_watch_val && heap_watch_logged < 3) {
+					uae_u32 pc_now = m68k_getpc();
+					fprintf(stderr, "HEAP_CORRUPT old=%08x new=%08x pc=%08x prev_pc=%08x d0=%08x d1=%08x a0=%08x a1=%08x a7=%08x sr=%04x _dc=%lu\n",
+						heap_watch_val, cur, pc_now, (unsigned)block_entry_pc,
+						regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[9],
+						regs.regs[15], (unsigned)regs.sr, _dc);
+					heap_watch_val = cur;
+					heap_watch_logged++;
+				}
+			}
+		}
 		if (jit_bad_pcp_guard_enabled()) {
 			uae_u32 guest_pc = 0;
 			uintptr expected_pcp = 0;
