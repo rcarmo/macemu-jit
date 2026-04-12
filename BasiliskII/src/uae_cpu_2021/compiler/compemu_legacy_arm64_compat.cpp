@@ -1046,8 +1046,12 @@ void execute_normal(void)
 			if (!must_end && end_block(opcode)) {
 				uintptr new_pcp = (uintptr)regs.pc_p;
 				uintptr blk_start = (uintptr)pc_hist[0].location;
+				/* Continue past internal branches to build bigger blocks.
+				   Cap at next multiple of 16 below MAXRUN for alignment. */
+				int blk_limit = (maxrun_limit < 48 ? maxrun_limit : 48) & ~15;
+				if (blk_limit < 16) blk_limit = 16;
 				if (new_pcp >= blk_start && new_pcp < blk_start + 512
-				    && blocklen < 48)
+				    && blocklen < blk_limit)
 					continue;
 				must_end = true;
 			}

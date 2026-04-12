@@ -444,6 +444,10 @@ STATIC_INLINE void compemu_raw_jcc_l_oponly(int cc)
 			CC_B_i(cc, 0);
 			break;
 	}
+	/* Emit a NOP after the branch. If write_jmp_target needs to convert
+	   B.cond to a relay (B.!cond +8; B far), it overwrites this NOP
+	   with the unconditional B. */
+	_W(0xd503201f); /* NOP */
 	// emit of target into last branch will be done by caller
 }
 

@@ -768,19 +768,36 @@ STATIC_INLINE void write_jmp_target(uae_u32* jmpaddr, uintptr a)
 	jit_begin_write_window();
 	uintptr off = (a - (uintptr)jmpaddr) >> 2;
 	if((*(jmpaddr) & 0xfc000000) == 0x14000000) {
-		/* branch always */
+		/* branch always — 26-bit offset, ±128MB */
 		off = off & 0x3ffffff;
 		*(jmpaddr) = (*(jmpaddr) & 0xfc000000) | off;
 	} else if((*(jmpaddr) & 0x7c000000) == 0x34000000) {
-		/* TBZ/TBNZ/CBZ/CBNZ */
-		if((a > (uintptr)jmpaddr && off > 0x1fff) || (a < (uintptr)jmpaddr && (~off) > 0x1fff))
-			write_log("JIT: TBZ/TBNZ branch to target too long.\n");
+		/* TBZ/TBNZ/CBZ/CBNZ — 14-bit offset */
 		off = off & 0x3fff;
 		*(jmpaddr) = (*(jmpaddr) & 0xfffc001f) | (off << 5);
+	} else if((*(jmpaddr) & 0xff000010) == 0x54000000) {
+		/* B.cond — 19-bit offset, ±1MB */
+		/* Check if target is in range */
+		intptr soff = (intptr)((a - (uintptr)jmpaddr)) >> 2;
+		if (soff > 0x3ffff || soff < -0x40000) {
+			/* Far target: convert B.cond to B.!cond +8; B far_target.
+			   Overwrites jmpaddr[0] and jmpaddr[1] (the next instruction).
+			   The caller must have reserved space (NOP or dead code) after B.cond. */
+			uae_u32 cond = *(jmpaddr) & 0xf;
+			uae_u32 inv_cond = cond ^ 1; /* invert condition */
+			/* B.!cond +8 = skip the next instruction */
+			*(jmpaddr) = 0x54000040u | inv_cond; /* B.!cond, offset=+2 instructions */
+			/* B far_target (unconditional, 26-bit) */
+			uintptr far_off = (a - (uintptr)(jmpaddr + 1)) >> 2;
+			*(jmpaddr + 1) = 0x14000000u | (far_off & 0x3ffffff);
+			flush_cpu_icache((void *)jmpaddr, (void *)(jmpaddr + 2));
+			jit_end_write_window();
+			return;
+		}
+		off = off & 0x7ffff;
+		*(jmpaddr) = (*(jmpaddr) & 0xff00001f) | (off << 5);
 	} else {
-		/* conditional branch */
-		if((a > (uintptr)jmpaddr && off > 0x3ffff) || (a < (uintptr)jmpaddr && (~off) > 0x3ffff))
-			write_log("JIT: Branch to target too long.\n");
+		/* Unknown branch type — treat as B.cond */
 		off = off & 0x7ffff;
 		*(jmpaddr) = (*(jmpaddr) & 0xff00001f) | (off << 5);
 	}

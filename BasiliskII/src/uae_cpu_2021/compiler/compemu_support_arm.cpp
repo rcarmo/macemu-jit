@@ -6147,7 +6147,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #endif
                 flush(1);                       // Emitted code of this call doesn't modify flags
                 compemu_raw_jcc_l_oponly(cc);   // Last emitted opcode is branch to target
-                branchadd = (uae_u32*)get_target() - 1;
+                branchadd = (uae_u32*)get_target() - 2; /* -2: B.cond is before NOP relay slot */
 
                 /* predicted outcome */
                 uintptr ct1 = jit_canonicalize_target_pc(t1);
