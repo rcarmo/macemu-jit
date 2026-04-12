@@ -250,6 +250,17 @@ static inline int jit_max_optlev(void)
 
 static inline bool jit_force_optlev0_block_exact(uae_u32 pc)
 {
+#if defined(CPU_AARCH64)
+	/* Low ROM 04000000-0400ffff: $dd0 I/O polling, timer init, and early
+	   boot sequences that read unmapped hardware registers. */
+	if (pc >= 0x04000000 && pc <= 0x0400ffff)
+		return true;
+	/* NuBus slot init 040b0000-040bffff: reads unmapped NuBus hardware
+	   registers at 0x50Fxxxxx. ROM patches cover the video probe (0xb27c)
+	   and one slot probe (0xba0b0) but dozens of other polling points remain. */
+	if (pc >= 0x040b0000 && pc <= 0x040bffff)
+		return true;
+#endif
 	(void)pc;
 	return false;
 }

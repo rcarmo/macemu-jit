@@ -1227,6 +1227,15 @@ static bool patch_rom_32(void)
 		D(bug("Patched NuBus video probe at 0xb27c\n"));
 	}
 
+	// Skip NuBus slot hardware probe at ROM offset 0xba0b0.
+	// This code tests d7 bit 17 and probes NuBus slot registers at (a3).
+	// BasiliskII doesn't emulate NuBus hardware; the emulated video uses
+	// the EMUL_OP driver. Change beq.s to bra.s to always skip the probe.
+	if (ROMBaseHost[0xba0b0] == 0x67 && ROMBaseHost[0xba0b1] == 0x24) {
+		ROMBaseHost[0xba0b0] = 0x60;	// beq.s → bra.s (always skip)
+		D(bug("Patched NuBus slot probe at 0xba0b0\n"));
+	}
+
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);
