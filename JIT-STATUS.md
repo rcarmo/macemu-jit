@@ -1,90 +1,73 @@
-# BasiliskII AArch64 JIT — Status Report (2026-04-12)
+# BasiliskII AArch64 JIT — Status Report
 
-## Current State
+## Current State (2026-04-12)
 
-**Build:** ✅ Compiles cleanly with JIT enabled (`-DUSE_JIT -DJIT -DOPTIMIZED_FLAGS`)
-**Binary:** 19MB ELF aarch64, dynamically linked
-**Latest commit:** `863dd5e5` — MOVEM safe codegen
+**Build:** ✅ Compiles cleanly with `--enable-aarch64-jit-experimental`
+**Interpreter:** ✅ Boots Mac OS desktop in ~45 seconds
+**JIT:** ⚠️ Runs but blocked by dispatch overhead — never reaches disk drivers
 
-### What Works
-- JIT compiler initializes and compiles blocks (2000 FT traces observed)
-- ROM loads successfully (Quadra 800, version 1660)
-- Video init, XPRAM, storage drivers — all OK
-- PatchROM completes successfully
-- Emulation starts and runs
-
-### What Doesn't Work
-- **Boot stalls in ROM polling loops** — execution never reaches Mac OS desktop
-- **JIT dispatch may be falling back to interpreter** — billions of instructions run through `m68k_do_execute()` (NOJIT_DIAG output) rather than compiled blocks
-
-## Current Blocker: ROM Polling Loops
-
-Two ROM busy-wait loops prevent boot progression:
-
-### Loop 1: Tick counter wait (ROM offset `0xc098`)
-```
-0xc092: move.l $016a.w,d0    ; load Ticks (VBL 60Hz counter)
-0xc096: add.l  a0,d0          ; d0 = Ticks + delay
-0xc098: cmp.l  $016a.w,d0    ; compare current Ticks
-0xc09c: bgt.s  $-4            ; loop while d0 > Ticks
-```
-**Polls Mac low-memory $016a (Ticks)**, waiting for the VBL tick counter to advance.
-This appears early in boot and consumes billions of interpreter instructions.
-
-### Loop 2: Flag polling (ROM offset `0x2a38`)
-```
-0x2a38: tst.b  $0172          ; test byte at address $0172
-0x2a3c: bne.s  $-4            ; loop while non-zero
-```
-**Polls Mac low-memory $0172**, waiting for a hardware flag to clear.
-The system gets permanently stuck here (~1.885 billion instructions in).
-
-## Architecture Issues
-
-### 1. JIT vs Interpreter Execution Path
-- `Start680x0()` correctly enters `m68k_compile_execute()` when UseJIT=true
-- But `Execute68k()` and `Execute68kTrap()` (called from EMUL_OP handlers) always use `m68k_execute()` — the **interpreter**
-- If EMUL_OP handlers trigger nested 68k execution that enters a polling loop, the interpreter spins forever
-- This is likely the reason for massive interpreter instruction counts
-
-### 2. Uncommitted Changes from Previous Session
-A previous session had destructive uncommitted changes that:
-- Replaced the entire `rom_patches.cpp` (1700 lines) with a 38-line stub
-- Removed JIT defines from the Makefile
-- Changed type definitions in `emul_op.h`
-**These were discarded.** All useful changes were committed properly.
-
-## Commit History (Recent)
+### Commit History (Recent)
 
 | Commit | Description |
 |--------|-------------|
-| `863dd5e5` | MOVEM safe codegen — use writeword/readword instead of native buffer ops |
-| `9517d112` | Fix duplicate if(s_is_d) brace in lea_l_brr 32-bit fallback |
-| `72a55f14` | Fix lea_l_brr 64-bit truncation for PC_P |
+| `8b9787c5` | Revert experimental fast dispatch and big-block tracing |
+| `449112e5` | ISP/MSP sync + bus error Exception(2) + 16MB ROM alloc + software renderer |
+| `82c2de54` | ROM polling patches + JIT dispatch in m68k_execute + NuBus recovery |
+| `863dd5e5` | MOVEM safe codegen |
+| `9517d112` | Fix lea_l_brr brace duplication |
+| `72a55f14` | Fix lea_l_brr 64-bit truncation |
 | `8455f96a` | 64-bit PC_P eviction + MOVEM safe codegen + zero barriers |
-| `4ad2b573` | Native EMUL_OP compiled handler — no EMUL_OP barrier |
 
-## What Needs to Be Done
+### What Works
+- JIT compiler initializes, compiles blocks, runs native ARM64 code
+- ROM loads (Quadra 800, version 1660), XPRAM, storage drivers, video init all OK
+- EMUL_OP_RESET correctly syncs ISP/MSP with a7
+- NuBus slot probing handled via bus error Exception(2) — ROM handler skips empty slots
+- ROM polling loops at $016a / $0172 patched to NOP
 
-### Priority 1: Patch ROM Polling Loops
-Add ROM patches in `rom_patches.cpp` (within the existing `PatchROM` infrastructure) to NOP out or bypass:
-- **$016a tick wait** at ROM offset 0xc098 (4 bytes: `b0b8 016a` → `4e71 4e71`)
-- **$0172 flag poll** at ROM offset 0x2a38 (4 bytes: `4a38 0172` + `66fa` → NOP sequence)
+### Current Blocker: Block Transition Overhead
 
-### Priority 2: Fix Execute68k JIT Dispatch
-`Execute68k()` and `Execute68kTrap()` in `basilisk_glue.cpp` should use `m68k_do_compile_execute()` when UseJIT is true, not the interpreter. This would allow JIT-compiled code to run during EMUL_OP nested execution.
+The JIT compiles blocks of 2-3 instructions (every branch = block boundary). Each block transition goes through:
 
-### Priority 3: Investigate JIT Block Execution
-Even with patches, need to verify:
-- Are compiled blocks actually executing or just being compiled?
-- Does the JIT dispatch loop (`pushall_call_handler`) work correctly on AArch64?
-- Are block chain transitions preserving state properly?
+```
+compiled block → popall (JMP) → execute_normal (C++) → check_for_cache_miss → pushall → compiled block
+```
 
-### Priority 4: Remove Remaining Barriers
-Continue removing fallback containment and EMUL_OP barriers to allow fully native ARM64 JIT execution for all opcode families.
+This C++ round-trip on every branch makes tight loops ~100x slower than the interpreter. The ROM video fill loop at offset 0x7120 (copies 640×480 pixels) never completes in JIT mode.
+
+**Root cause:** The UAE JIT compiler marks all branch/jump opcodes with `COMP_OPCODE_ISJUMP`, which forces a block boundary at every `BEQ`, `BNE`, `DBF`, etc. With `MAXRUN=64`, blocks can be up to 64 sequential (non-branch) instructions, but typical loop bodies contain branches every 2-7 instructions.
+
+### Failed Approaches
+
+1. **Fast native dispatch in popallspace** — Tried emitting ARM64 cache_tags lookup directly in the popall trampoline. Crashed due to ARM64 immediate encoding bugs (TBNZ/CBNZ).
+
+2. **C++ fast dispatch loop in execute_normal** — Called `pushall_call_handler()` from a loop in `execute_normal`. Stack corruption because `popall` tail-jumps back to `execute_normal` instead of returning, losing the C call frame.
+
+3. **Big-block tracing (loop unrolling)** — Continued tracing past internal branches to build larger blocks. Crashed because the compiler's branch handlers emit block-ending code (jump to popall) that corrupts the code stream when more instructions follow.
+
+### What Needs to Happen
+
+**Option A: Native dispatch loop in popallspace (recommended)**
+Replace `popall_execute_normal` with native ARM64 code that:
+1. Loads `regs.pc_p`
+2. Looks up `cache_tags[pc_p & TAGMASK].handler`
+3. If cached: jump directly to handler (no C++ overhead)
+4. If uncached: fall through to C++ `execute_normal` for compilation
+5. Periodically check `spcflags` for interrupt delivery
+
+This needs correct ARM64 instruction encoding — the previous attempt had bugs in TBNZ/CBNZ branch offset patching.
+
+**Option B: Compiler support for internal branches**
+Teach `compile_block` to emit internal branch targets instead of block exits for branches whose target PC is within the traced block. Requires:
+- Marking pc_hist entries as branch targets
+- Emitting native conditional branches to label offsets within the block
+- Updating the liveness/flags analysis to handle non-linear control flow
+
+**Option C: Hybrid — interpreter for init, JIT for steady state**
+Run the interpreter for the first N million instructions (covering ROM init), then switch to JIT. The steady-state Mac OS idle loop is simpler and would benefit from JIT.
 
 ## Test Environment
 - ROM: Quadra800.ROM (1MB, version 1660)
-- Disk: HD200MB (200MB disk image with Mac OS)
-- Display: Xvfb :99 (640x480)
-- Config: `jit true`, `jitcachesize 8192`, `modelid 14`, `cpu 4`
+- Disk: HD200MB (Mac OS 7.x)
+- Display: Xvfb :99, SDL software renderer, 640×480
+- Config: `jit true`, `jitcachesize 8192`, `modelid 14`, `cpu 4`, `fpu true`
