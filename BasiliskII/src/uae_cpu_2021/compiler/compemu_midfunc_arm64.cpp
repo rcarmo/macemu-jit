@@ -269,7 +269,31 @@ MIDFUNC(3,lea_l_brr,(W4 d, RR4 s, IM32 offset))
 		return;
 	}
 
+#if defined(CPU_AARCH64)
+	/* PC_P holds a 64-bit host pointer — must use 64-bit arithmetic. */
+	if (d == PC_P || s == PC_P) {
+		int s_is_d = (s == d);
+		if(s_is_d) {
+			s = d = rmw(d);
+		} else {
+			s = readreg(s);
+			d = writereg(d);
+		}
+		if(offset >= 0 && offset <= 0xfff) {
+			ADD_xxi(d, s, offset);
+		} else if(offset >= -0xfff && offset < 0) {
+			SUB_xxi(d, s, -offset);
+		} else {
+			LOAD_U64(REG_WORK1, (uintptr)(uae_s64)(uae_s32)offset);
+			ADD_xxx(d, s, REG_WORK1);
+		}
+		EXIT_REGS(d,s);
+		return;
+	}
+#endif
+
 	int s_is_d = (s == d);
+	if(s_is_d) {
 	if(s_is_d) {
 		s = d = rmw(d);
 	} else {
