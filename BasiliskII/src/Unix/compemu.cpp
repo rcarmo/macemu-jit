@@ -19975,13 +19975,11 @@ void REGPARAM2 op_4890_0_comp_ff(uae_u32 opcode) /* MVMLE */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20007,15 +20005,13 @@ void REGPARAM2 op_48a0_0_comp_ff(uae_u32 opcode) /* MVMLE */
 {	int srca=dodgy?scratchie++:dstreg+8;
 	if (dodgy) 
 	mov_l_rr(srca,8+dstreg);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			offset-=2;
+			sub_l_ri(srca,2);
 			mov_l_rr(tmp,15-i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
+			writeword(srca,tmp,scratchie);
 		}
-	}			lea_l_brr(8+dstreg,srca,(uae_s32)offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -20040,13 +20036,11 @@ void REGPARAM2 op_48a8_0_comp_ff(uae_u32 opcode) /* MVMLE */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20071,13 +20065,11 @@ void REGPARAM2 op_48b0_0_comp_ff(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20097,13 +20089,11 @@ void REGPARAM2 op_48b8_0_comp_ff(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20123,13 +20113,11 @@ void REGPARAM2 op_48b9_0_comp_ff(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20182,13 +20170,11 @@ void REGPARAM2 op_48d0_0_comp_ff(uae_u32 opcode) /* MVMLE */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20214,15 +20200,13 @@ void REGPARAM2 op_48e0_0_comp_ff(uae_u32 opcode) /* MVMLE */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, 8 + dstreg);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			offset-=4;
+			sub_l_ri(srca,4);
 			mov_l_rr(tmp,15-i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
+			writelong(srca,tmp,scratchie);
 		}
-	}			lea_l_brr(8+dstreg,srca,(uae_s32)offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -20247,13 +20231,11 @@ void REGPARAM2 op_48e8_0_comp_ff(uae_u32 opcode) /* MVMLE */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20278,13 +20260,11 @@ void REGPARAM2 op_48f0_0_comp_ff(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20304,13 +20284,11 @@ void REGPARAM2 op_48f8_0_comp_ff(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -20330,13 +20308,11 @@ void REGPARAM2 op_48f9_0_comp_ff(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -21201,12 +21177,11 @@ void REGPARAM2 op_4c90_0_comp_ff(uae_u32 opcode) /* MVMEL */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -21231,15 +21206,14 @@ void REGPARAM2 op_4c98_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
-	}			lea_l_brr(8+dstreg,srca,offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -21263,12 +21237,11 @@ void REGPARAM2 op_4ca8_0_comp_ff(uae_u32 opcode) /* MVMEL */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -21293,12 +21266,11 @@ void REGPARAM2 op_4cb0_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -21318,12 +21290,11 @@ void REGPARAM2 op_4cb8_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -21343,12 +21314,11 @@ void REGPARAM2 op_4cb9_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -21371,12 +21341,11 @@ void REGPARAM2 op_4cba_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 	uae_s32 PC16off = (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2);
 	mov_l_ri(srca, address + PC16off);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -21400,12 +21369,11 @@ void REGPARAM2 op_4cbb_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 {	mov_l_ri(pctmp,address);
 	calc_disp_ea_020(pctmp, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}}
@@ -21431,11 +21399,10 @@ void REGPARAM2 op_4cd0_0_comp_ff(uae_u32 opcode) /* MVMEL */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -21460,14 +21427,13 @@ void REGPARAM2 op_4cd8_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
-	}			lea_l_brr(8+dstreg,srca,offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -21491,11 +21457,10 @@ void REGPARAM2 op_4ce8_0_comp_ff(uae_u32 opcode) /* MVMEL */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -21520,11 +21485,10 @@ void REGPARAM2 op_4cf0_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -21544,11 +21508,10 @@ void REGPARAM2 op_4cf8_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -21568,11 +21531,10 @@ void REGPARAM2 op_4cf9_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -21595,11 +21557,10 @@ void REGPARAM2 op_4cfa_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 	uae_s32 PC16off = (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2);
 	mov_l_ri(srca, address + PC16off);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -21623,11 +21584,10 @@ void REGPARAM2 op_4cfb_0_comp_ff(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 {	mov_l_ri(pctmp,address);
 	calc_disp_ea_020(pctmp, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}}
@@ -26940,7 +26900,6 @@ void REGPARAM2 op_6101_0_comp_ff(uae_u32 opcode) /* BSR */
 	m68k_pc_offset=0;
 	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
-
 }}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -60239,13 +60198,11 @@ void REGPARAM2 op_4890_0_comp_nf(uae_u32 opcode) /* MVMLE */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60271,15 +60228,13 @@ void REGPARAM2 op_48a0_0_comp_nf(uae_u32 opcode) /* MVMLE */
 {	int srca=dodgy?scratchie++:dstreg+8;
 	if (dodgy) 
 	mov_l_rr(srca,8+dstreg);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			offset-=2;
+			sub_l_ri(srca,2);
 			mov_l_rr(tmp,15-i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
+			writeword(srca,tmp,scratchie);
 		}
-	}			lea_l_brr(8+dstreg,srca,(uae_s32)offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -60304,13 +60259,11 @@ void REGPARAM2 op_48a8_0_comp_nf(uae_u32 opcode) /* MVMLE */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60335,13 +60288,11 @@ void REGPARAM2 op_48b0_0_comp_nf(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60361,13 +60312,11 @@ void REGPARAM2 op_48b8_0_comp_nf(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60387,13 +60336,11 @@ void REGPARAM2 op_48b9_0_comp_nf(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_16(tmp);
-			mov_w_Rr(native,tmp,offset);
-			offset+=2;
+			writeword(srca,tmp,scratchie);
+			add_l_ri(srca,2);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60441,13 +60388,11 @@ void REGPARAM2 op_48d0_0_comp_nf(uae_u32 opcode) /* MVMLE */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60473,15 +60418,13 @@ void REGPARAM2 op_48e0_0_comp_nf(uae_u32 opcode) /* MVMLE */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, 8 + dstreg);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			offset-=4;
+			sub_l_ri(srca,4);
 			mov_l_rr(tmp,15-i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
+			writelong(srca,tmp,scratchie);
 		}
-	}			lea_l_brr(8+dstreg,srca,(uae_s32)offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -60506,13 +60449,11 @@ void REGPARAM2 op_48e8_0_comp_nf(uae_u32 opcode) /* MVMLE */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60537,13 +60478,11 @@ void REGPARAM2 op_48f0_0_comp_nf(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60563,13 +60502,11 @@ void REGPARAM2 op_48f8_0_comp_nf(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -60589,13 +60526,11 @@ void REGPARAM2 op_48f9_0_comp_nf(uae_u32 opcode) /* MVMLE */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
 			mov_l_rr(tmp,i);
-			mid_bswap_32(tmp);
-			mov_l_Rr(native,tmp,offset);
-			offset+=4;
+			writelong(srca,tmp,scratchie);
+			add_l_ri(srca,4);
 		}
 	}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
@@ -61636,12 +61571,11 @@ void REGPARAM2 op_4c90_0_comp_nf(uae_u32 opcode) /* MVMEL */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -61666,15 +61600,14 @@ void REGPARAM2 op_4c98_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
-	}			lea_l_brr(8+dstreg,srca,offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -61698,12 +61631,11 @@ void REGPARAM2 op_4ca8_0_comp_nf(uae_u32 opcode) /* MVMEL */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -61728,12 +61660,11 @@ void REGPARAM2 op_4cb0_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -61753,12 +61684,11 @@ void REGPARAM2 op_4cb8_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -61778,12 +61708,11 @@ void REGPARAM2 op_4cb9_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -61806,12 +61735,11 @@ void REGPARAM2 op_4cba_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 	uae_s32 PC16off = (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2);
 	mov_l_ri(srca, address + PC16off);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}
@@ -61835,12 +61763,11 @@ void REGPARAM2 op_4cbb_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 {	mov_l_ri(pctmp,address);
 	calc_disp_ea_020(pctmp, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_w_rR(i,native,offset);
-			mid_bswap_16(i);
+			readword(srca,i,scratchie);
 			sign_extend_16_rr(i,i);
+			add_l_ri(srca,2);
 			offset+=2;
 		}
 	}}}}
@@ -61866,11 +61793,10 @@ void REGPARAM2 op_4cd0_0_comp_nf(uae_u32 opcode) /* MVMEL */
 {	int srca = dodgy ? scratchie++ : dstreg + 8;
 	if (dodgy)
 		mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -61895,14 +61821,13 @@ void REGPARAM2 op_4cd8_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_rr(srca, dstreg + 8);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
-	}			lea_l_brr(8+dstreg,srca,offset);
+	}			mov_l_rr(8+dstreg,srca);
 }}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -61926,11 +61851,10 @@ void REGPARAM2 op_4ce8_0_comp_nf(uae_u32 opcode) /* MVMEL */
 {	int srca = scratchie++;
 	mov_l_rr(srca, 8 + dstreg);
 	lea_l_brr(srca, srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -61955,11 +61879,10 @@ void REGPARAM2 op_4cf0_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	calc_disp_ea_020(dstreg + 8, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -61979,11 +61902,10 @@ void REGPARAM2 op_4cf8_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2));
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -62003,11 +61925,10 @@ void REGPARAM2 op_4cf9_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	signed char offset=0;
 {	int srca = scratchie++;
 	mov_l_ri(srca, comp_get_ilong((m68k_pc_offset+=4)-4)); /* absl */
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -62030,11 +61951,10 @@ void REGPARAM2 op_4cfa_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 	uae_s32 PC16off = (uae_s32)(uae_s16)comp_get_iword((m68k_pc_offset+=2)-2);
 	mov_l_ri(srca, address + PC16off);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}
@@ -62058,11 +61978,10 @@ void REGPARAM2 op_4cfb_0_comp_nf(uae_u32 opcode) /* MVMEL */
 	uae_u32 address = start_pc + ((char *)comp_pc_p - (char *)start_pc_p) + m68k_pc_offset;
 {	mov_l_ri(pctmp,address);
 	calc_disp_ea_020(pctmp, comp_get_iword((m68k_pc_offset+=2)-2), srca, scratchie);
-	get_n_addr(srca,native,scratchie);
 	for (i=0;i<16;i++) {
 		if ((mask>>i)&1) {
-			mov_l_rR(i,native,offset);
-			mid_bswap_32(i);
+			readlong(srca,i,scratchie);
+			add_l_ri(srca,4);
 			offset+=4;
 		}
 	}}}}
@@ -67135,7 +67054,6 @@ void REGPARAM2 op_6101_0_comp_nf(uae_u32 opcode) /* BSR */
 	m68k_pc_offset=0;
 	add_l(PC_P,src);
 	comp_pc_p=(uae_u8*)(uintptr)get_const(PC_P);
-
 }}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
