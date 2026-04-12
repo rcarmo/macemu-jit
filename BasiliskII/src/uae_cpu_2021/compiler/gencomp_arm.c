@@ -705,6 +705,35 @@ static void genmovemel(uae_u16 opcode) {
 	comprintf("\tsigned char offset=0;\n");
 	genamode(table68k[opcode].dmode, "dstreg", table68k[opcode].size, "src", 2,
 			1);
+
+#if defined(CPU_AARCH64)
+	/* ARM64 fix: avoid get_n_addr + mov_l_rR which caches a 64-bit host
+	   pointer in a 32-bit virtual register. Use readlong()/readword()
+	   which reconstruct the host pointer fresh each time. */
+	comprintf("\tfor (i=0;i<16;i++) {\n"
+			"\t\tif ((mask>>i)&1) {\n");
+	switch (table68k[opcode].size) {
+	case sz_long:
+		comprintf("\t\t\treadlong(srca,i,scratchie);\n"
+				"\t\t\tadd_l_ri(srca,4);\n"
+				"\t\t\toffset+=4;\n");
+		break;
+	case sz_word:
+		comprintf("\t\t\treadword(srca,i,scratchie);\n"
+				"\t\t\tsign_extend_16_rr(i,i);\n"
+				"\t\t\tadd_l_ri(srca,2);\n"
+				"\t\t\toffset+=2;\n");
+		break;
+	default:
+		assert(0);
+		break;
+	}
+	comprintf("\t\t}\n"
+			"\t}");
+	if (table68k[opcode].dmode == Aipi) {
+		comprintf("\t\t\tmov_l_rr(8+dstreg,srca);\n");
+	}
+#else
 	comprintf("\tget_n_addr(srca,native,scratchie);\n");
 
 	comprintf("\tfor (i=0;i<16;i++) {\n"
@@ -730,6 +759,7 @@ static void genmovemel(uae_u16 opcode) {
 	if (table68k[opcode].dmode == Aipi) {
 		comprintf("\t\t\tlea_l_brr(8+dstreg,srca,offset);\n");
 	}
+#endif
 }
 
 static void genmovemle(uae_u16 opcode) {
