@@ -807,9 +807,17 @@ genmovemel (uae_u16 opcode)
     genamode (table68k[opcode].dmode, "dstreg", table68k[opcode].size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_NO_INC);
 #ifdef UAE
 	if (table68k[opcode].size == sz_long)
+	    #if defined(CPU_AARCH64)
+	    comprintf("\tif (0) {\n"); /* ARM64: always use safe readlong/writelong path */
+#else
 	    comprintf("\tif (1 && !special_mem) {\n");
+#endif
 	else
+	    #if defined(CPU_AARCH64)
+	    comprintf("\tif (0) {\n"); /* ARM64: always use safe readlong/writelong path */
+#else
 	    comprintf("\tif (1 && !special_mem) {\n");
+#endif
 #endif
 
     /* Fast but unsafe...  */
@@ -886,9 +894,17 @@ genmovemle (uae_u16 opcode)
        act of cleverness means that movmle must pay attention to special_mem,
        or Genetic Species is a rather boring-looking game ;-) */
 	if (table68k[opcode].size == sz_long)
+	    #if defined(CPU_AARCH64)
+	    comprintf("\tif (0) {\n"); /* ARM64: always use safe readlong/writelong path */
+#else
 	    comprintf("\tif (1 && !special_mem) {\n");
+#endif
 	else
+	    #if defined(CPU_AARCH64)
+	    comprintf("\tif (0) {\n"); /* ARM64: always use safe readlong/writelong path */
+#else
 	    comprintf("\tif (1 && !special_mem) {\n");
+#endif
 #endif
     comprintf("\tget_n_addr(srca,native,scratchie);\n");
 

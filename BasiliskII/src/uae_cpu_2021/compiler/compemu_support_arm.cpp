@@ -1024,7 +1024,8 @@ static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
 #if defined(CPU_AARCH64)
-	/* MOVE16: compiled path produces wrong destination addresses on ARM64. */
+	/* MOVE16: must end block because the interpreter fallback modifies
+	   address registers that the JIT register allocator doesn't track. */
 	if ((op & 0xfff8) == 0xf620 || (op & 0xfff8) == 0xf600 ||
 	    (op & 0xfff8) == 0xf608 || (op & 0xfff8) == 0xf610 ||
 	    (op & 0xfff8) == 0xf618)
