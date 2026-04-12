@@ -1,73 +1,59 @@
-# BasiliskII AArch64 JIT — Status Report
+# BasiliskII AArch64 JIT — Bringup Status
 
-## Current State (2026-04-12)
+## Current State (2026-04-12 21:00 UTC)
 
-**Build:** ✅ Compiles cleanly with `--enable-aarch64-jit-experimental`
-**Interpreter:** ✅ Boots Mac OS desktop in ~45 seconds
-**JIT:** ⚠️ Runs but blocked by dispatch overhead — never reaches disk drivers
+**Build:** ✅ `--enable-aarch64-jit-experimental`
+**Interpreter:** ✅ Boots Mac OS 7.x desktop in ~45s
+**JIT:** ⚠️ Compiles and executes 48-49 instruction blocks natively. Zero crashes. Stuck in ROM init loop — dispatch overhead.
 
-### Commit History (Recent)
+## What Works
+
+- JIT compiler init, 46498 compileable opcodes
+- Big-block tracing: internal branches continue trace (up to 48 insns)
+- Side-exit guards for non-traced branch paths with regalloc save/restore
+- ISP/MSP sync at EMUL_OP_RESET and m68k_reset
+- Bus error Exception(2) for unmapped PC (NuBus probe)
+- Software SDL renderer for headless Xvfb
+- Lazy cache flush (no hard flushes during execution)
+- 16MB ROM allocation covering NuBus probe address space
+
+## Current Blocker
+
+After 14 block compilations, the JIT enters a tight loop at ROM offset `0x9ab0` (data table init). Blocks of 48-49 instructions execute natively with zero errors, but the system never progresses to disk drivers.
+
+The loop compiles repeatedly with slightly different traces (blocklen 48 vs 49), suggesting the loop body varies between iterations. Each block transition still goes through the full C++ `execute_normal()` → `check_for_cache_miss()` → `pushall_call_handler()` path.
+
+## Commit Log
 
 | Commit | Description |
 |--------|-------------|
-| `8b9787c5` | Revert experimental fast dispatch and big-block tracing |
-| `449112e5` | ISP/MSP sync + bus error Exception(2) + 16MB ROM alloc + software renderer |
-| `82c2de54` | ROM polling patches + JIT dispatch in m68k_execute + NuBus recovery |
-| `863dd5e5` | MOVEM safe codegen |
-| `9517d112` | Fix lea_l_brr brace duplication |
-| `72a55f14` | Fix lea_l_brr 64-bit truncation |
-| `8455f96a` | 64-bit PC_P eviction + MOVEM safe codegen + zero barriers |
+| `9059ecd5` | Fix side-exit REG_PC_TMP loading + clean write_jmp_target |
+| `bda52044` | B.cond relay stubs (reverted) + block size mod-16 |
+| `7dd85d12` | Big-block tracing with side exits + lazy cache flush |
+| `904b890c` | Re-enable JIT_COMPILE logging |
+| `449112e5` | ISP/MSP sync + bus error Exception(2) + 16MB ROM + software renderer |
+| `82c2de54` | ROM polling patches + JIT dispatch + NuBus recovery |
 
-### What Works
-- JIT compiler initializes, compiles blocks, runs native ARM64 code
-- ROM loads (Quadra 800, version 1660), XPRAM, storage drivers, video init all OK
-- EMUL_OP_RESET correctly syncs ISP/MSP with a7
-- NuBus slot probing handled via bus error Exception(2) — ROM handler skips empty slots
-- ROM polling loops at $016a / $0172 patched to NOP
+## Architecture
 
-### Current Blocker: Block Transition Overhead
+### Block Compilation
+1. Trace loop (`compemu_legacy_arm64_compat.cpp`): interpreter executes instructions, records `pc_hist[]`. Internal branches (target within ±512 bytes, blocklen < 48) continue tracing instead of ending the block.
+2. `compile_block()`: for each `pc_hist` entry, calls the opcode's compiled handler. Branch handlers call `register_branch(not_taken, taken, cond)` but don't emit native branches.
+3. After each mid-block branch instruction: side-exit guard emitted — `B.cond` to exit stub that loads alternate PC into `REG_PC_TMP` and calls `endblock_pc_inreg`.
+4. Register allocator state saved/restored around side exits via `bigstate`.
+5. Final block instruction: normal endblock with `compemu_raw_jcc_l_oponly` + predicted/not-predicted paths.
 
-The JIT compiles blocks of 2-3 instructions (every branch = block boundary). Each block transition goes through:
-
+### Dispatch Flow
 ```
-compiled block → popall (JMP) → execute_normal (C++) → check_for_cache_miss → pushall → compiled block
+m68k_compile_execute() → pushall_call_handler() → compiled block
+  → popall_execute_normal (JMP) → execute_normal() (C++)
+  → check_for_cache_miss() → pushall_call_handler() → next block...
 ```
 
-This C++ round-trip on every branch makes tight loops ~100x slower than the interpreter. The ROM video fill loop at offset 0x7120 (copies 640×480 pixels) never completes in JIT mode.
-
-**Root cause:** The UAE JIT compiler marks all branch/jump opcodes with `COMP_OPCODE_ISJUMP`, which forces a block boundary at every `BEQ`, `BNE`, `DBF`, etc. With `MAXRUN=64`, blocks can be up to 64 sequential (non-branch) instructions, but typical loop bodies contain branches every 2-7 instructions.
-
-### Failed Approaches
-
-1. **Fast native dispatch in popallspace** — Tried emitting ARM64 cache_tags lookup directly in the popall trampoline. Crashed due to ARM64 immediate encoding bugs (TBNZ/CBNZ).
-
-2. **C++ fast dispatch loop in execute_normal** — Called `pushall_call_handler()` from a loop in `execute_normal`. Stack corruption because `popall` tail-jumps back to `execute_normal` instead of returning, losing the C call frame.
-
-3. **Big-block tracing (loop unrolling)** — Continued tracing past internal branches to build larger blocks. Crashed because the compiler's branch handlers emit block-ending code (jump to popall) that corrupts the code stream when more instructions follow.
-
-### What Needs to Happen
-
-**Option A: Native dispatch loop in popallspace (recommended)**
-Replace `popall_execute_normal` with native ARM64 code that:
-1. Loads `regs.pc_p`
-2. Looks up `cache_tags[pc_p & TAGMASK].handler`
-3. If cached: jump directly to handler (no C++ overhead)
-4. If uncached: fall through to C++ `execute_normal` for compilation
-5. Periodically check `spcflags` for interrupt delivery
-
-This needs correct ARM64 instruction encoding — the previous attempt had bugs in TBNZ/CBNZ branch offset patching.
-
-**Option B: Compiler support for internal branches**
-Teach `compile_block` to emit internal branch targets instead of block exits for branches whose target PC is within the traced block. Requires:
-- Marking pc_hist entries as branch targets
-- Emitting native conditional branches to label offsets within the block
-- Updating the liveness/flags analysis to handle non-linear control flow
-
-**Option C: Hybrid — interpreter for init, JIT for steady state**
-Run the interpreter for the first N million instructions (covering ROM init), then switch to JIT. The steady-state Mac OS idle loop is simpler and would benefit from JIT.
+Each block transition does a full C++ function call round-trip. With 48 instruction blocks containing ~8 loop iterations each, the overhead is ~12% of execution time for tight loops.
 
 ## Test Environment
 - ROM: Quadra800.ROM (1MB, version 1660)
-- Disk: HD200MB (Mac OS 7.x)
+- Disk: HD200MB (Mac OS 7.x, freshly extracted)
 - Display: Xvfb :99, SDL software renderer, 640×480
 - Config: `jit true`, `jitcachesize 8192`, `modelid 14`, `cpu 4`, `fpu true`
