@@ -794,15 +794,20 @@ void exec_nostats(void)
 	{
 		uintptr pcp = (uintptr)regs.pc_p;
 		uintptr base = (uintptr)RAMBaseHost;
-		uintptr limit = base + RAMSize + ROMSize + 0x100000;
+		uintptr limit = base + RAMSize + ROMSize + 0x200000;
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int bad_count = 0;
+			uae_u32 safe_pc = regs.pc & ~1u;
 			if (bad_count++ < 50)
 				fprintf(stderr, "JIT: exec_nostats bad pc_p=%p regs.pc=%08x d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x sr=%04x spc=%08x oldp=%p last_setpc=%p last_kind=%u last_seq=%lu\n",
 					(void*)regs.pc_p, regs.pc,
 					regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[9], regs.regs[10], regs.regs[15],
 					(unsigned)regs.sr, (unsigned)regs.spcflags, (void*)regs.pc_oldp,
 					(void*)jit_last_setpc_value, (unsigned)jit_last_setpc_kind, jit_last_setpc_seq);
+			/* Re-derive pc_p from guest PC */
+			regs.pc = safe_pc;
+			regs.pc_p = get_real_address(safe_pc, 0, sz_word);
+			regs.pc_oldp = regs.pc_p - safe_pc;
 		}
 	}
 #endif
@@ -870,7 +875,7 @@ void execute_normal(void)
 	{
 		uintptr pcp = (uintptr)regs.pc_p;
 		uintptr base = (uintptr)RAMBaseHost;
-		uintptr limit = base + RAMSize + ROMSize + 0x100000;
+		uintptr limit = base + RAMSize + ROMSize + 0x200000; /* NuBus slot ROM space */
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int fix_count = 0;
 			uae_u32 safe_pc = regs.pc & ~1u;
@@ -881,10 +886,23 @@ void execute_normal(void)
 					regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[15],
 					(unsigned)regs.sr, (unsigned)regs.spcflags, (void*)regs.pc_oldp,
 					(void*)jit_last_setpc_value, (unsigned)jit_last_setpc_kind, jit_last_setpc_seq);
-			flush_icache_hard(7);
+			/* Re-derive pc_p from the guest PC */
 			regs.pc = safe_pc;
 			regs.pc_p = get_real_address(safe_pc, 0, sz_word);
-			regs.pc_oldp = regs.pc_p;
+			regs.pc_oldp = regs.pc_p - safe_pc;
+			/* If the derived pc_p is also bad, run one instruction via interpreter
+			   to advance past the problem instead of flushing and looping. */
+			pcp = (uintptr)regs.pc_p;
+			if (pcp < base || pcp >= limit || (pcp & 1)) {
+				/* Guest PC points to unmapped memory (e.g. NuBus slot probe).
+				   Generate a bus error to let the ROM's exception handler
+				   deal with it, just like real hardware would. */
+				static int interp_fallback = 0;
+				if (interp_fallback++ < 5)
+					fprintf(stderr, "JIT: bad_pc_p bus error pc=%08x\n", safe_pc);
+				Exception(2, safe_pc);
+				return;
+			}
 		}
 	}
 #endif

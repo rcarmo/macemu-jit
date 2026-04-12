@@ -1678,6 +1678,36 @@ static bool patch_rom_32(void)
 	*wp++ = htons(M68K_EMUL_OP_IRQ);
 	*wp++ = htons(0x4a80);		// tst.l	d0
 	*wp = htons(0x67f4);		// beq		0x4080a294
+
+	// Patch ROM polling loops that stall boot on emulated hardware
+	// Loop 1: "tst.b $0172 / bne.s $-4" at ROM offset 0x2a38
+	// Waits for low-memory flag $0172 to become zero — never clears in emulation
+	{
+		static const uint8 poll_0172[] = {0x4a, 0x38, 0x01, 0x72, 0x66, 0xfa};
+		base = find_rom_data(0x2a00, 0x2b00, poll_0172, sizeof(poll_0172));
+		if (base) {
+			wp = (uint16 *)(ROMBaseHost + base);
+			*wp++ = htons(M68K_NOP);	// NOP over tst.b $0172
+			*wp++ = htons(M68K_NOP);
+			*wp   = htons(M68K_NOP);	// NOP over bne.s
+			D(bug("Patched $0172 polling loop at ROM offset 0x%06x\n", base));
+		}
+	}
+
+	// Loop 2: "cmp.l $016a.w,d0 / bgt.s $-4" at ROM offset 0xc098
+	// Waits for Ticks counter ($016a) to catch up — spins in interpreter
+	{
+		static const uint8 poll_016a[] = {0xb0, 0xb8, 0x01, 0x6a, 0x6e, 0xfa};
+		base = find_rom_data(0xc000, 0xc200, poll_016a, sizeof(poll_016a));
+		if (base) {
+			wp = (uint16 *)(ROMBaseHost + base);
+			*wp++ = htons(M68K_NOP);	// NOP over cmp.l $016a.w,d0
+			*wp++ = htons(M68K_NOP);
+			*wp   = htons(M68K_NOP);	// NOP over bgt.s
+			D(bug("Patched $016a tick-wait loop at ROM offset 0x%06x\n", base));
+		}
+	}
+
 	return true;
 }
 

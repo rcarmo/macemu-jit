@@ -2264,7 +2264,12 @@ setjmpagain:
 	    if (debugging && !after_exception) debug();
 	    after_exception = false;
 #endif
-	    m68k_do_execute();
+#ifdef USE_JIT
+	    if (UseJIT)
+		m68k_do_compile_execute();
+	    else
+#endif
+		m68k_do_execute();
 	}
     }
     CATCH(prb) {
