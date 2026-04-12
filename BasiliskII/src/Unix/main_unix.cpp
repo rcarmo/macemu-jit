@@ -126,7 +126,7 @@ const char ROM_FILE_NAME[] = "ROM";
 const int SIG_STACK_SIZE = SIGSTKSZ;	// Size of signal stack
 #endif
 const int SCRATCH_MEM_SIZE = 0x10000;	// Size of scratch memory area
-const int ROM_MAX_SIZE = 0x100000;
+const int ROM_MAX_SIZE = 0x1000000;	// ROM (1MB) + NuBus slot probe space (up to 16MB)
 
 
 #if !EMULATED_68K

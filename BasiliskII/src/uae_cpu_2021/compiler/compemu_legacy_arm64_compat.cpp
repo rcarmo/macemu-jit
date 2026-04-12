@@ -794,7 +794,7 @@ void exec_nostats(void)
 	{
 		uintptr pcp = (uintptr)regs.pc_p;
 		uintptr base = (uintptr)RAMBaseHost;
-		uintptr limit = base + RAMSize + ROMSize + 0x200000;
+		uintptr limit = base + RAMSize + ROMSize + 0x1000000;
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int bad_count = 0;
 			uae_u32 safe_pc = regs.pc & ~1u;
@@ -875,7 +875,7 @@ void execute_normal(void)
 	{
 		uintptr pcp = (uintptr)regs.pc_p;
 		uintptr base = (uintptr)RAMBaseHost;
-		uintptr limit = base + RAMSize + ROMSize + 0x200000; /* NuBus slot ROM space */
+		uintptr limit = base + RAMSize + ROMSize + 0x1000000; /* NuBus slot ROM space */
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int fix_count = 0;
 			uae_u32 safe_pc = regs.pc & ~1u;

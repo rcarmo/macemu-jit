@@ -1115,13 +1115,13 @@ static inline uae_u32 jit_hostpc_to_macpc(uintptr hostpc)
 static inline uintptr jit_canonicalize_target_pc(uintptr pc)
 {
     uintptr base = (uintptr)RAMBaseHost;
-    uintptr limit = base + RAMSize + ROMSize + 0x200000;
+    uintptr limit = base + RAMSize + ROMSize + 0x1000000;
     if (pc >= base && pc < limit)
         return pc;
     /* If a guest Mac PC leaked into a const-target path, convert it back
        to the host fetch pointer expected by PC_P / blockinfo. */
     uae_u32 guest = (uae_u32)pc;
-    if ((guest & 1) == 0 && guest < (uae_u32)(RAMSize + ROMSize + 0x200000))
+    if ((guest & 1) == 0 && guest < (uae_u32)(RAMSize + ROMSize + 0x1000000))
         return (uintptr)get_real_address(guest, 0, sz_word);
     return pc;
 }
@@ -1276,7 +1276,7 @@ extern "C" void jit_trace_setpc_value(uintptr value, uae_u32 kind)
     jit_last_setpc_kind = kind;
     jit_last_setpc_seq++;
     uintptr base = (uintptr)RAMBaseHost;
-    uintptr limit = base + RAMSize + ROMSize + 0x200000;
+    uintptr limit = base + RAMSize + ROMSize + 0x1000000;
     bool suspicious = (value < base || value >= limit || (value & 1));
     if (!suspicious && count >= 32)
         return;
@@ -4559,7 +4559,7 @@ int check_for_cache_miss(void)
     {
         uintptr pcp = (uintptr)regs.pc_p;
         uintptr base = (uintptr)RAMBaseHost;
-        uintptr limit = base + RAMSize + ROMSize + 0x200000; /* ROM + NuBus slot ROM space */
+        uintptr limit = base + RAMSize + ROMSize + 0x1000000; /* ROM + NuBus slot ROM space */
         if (pcp < base || pcp >= limit || (pcp & 1)) {
             static int bad_count = 0;
             uae_u32 safe_pc = regs.pc & ~1u;
