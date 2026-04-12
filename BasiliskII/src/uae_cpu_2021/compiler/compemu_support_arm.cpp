@@ -967,6 +967,7 @@ extern "C" void jit_trace_add(uae_u32 pc, uae_u32 opcode);
 extern "C" void jit_trace_pc_hit(uae_u32 pc, uae_u32 tagged_opcode);
 static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode);
 static void op_aline_trap_comp_ff(uae_u32 opcode);
+static void op_emulop_comp_ff(uae_u32 opcode);
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2);
 
 static inline bool jit_force_optlev1_opcode(uae_u16 op)
@@ -1023,17 +1024,13 @@ static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
+	/* ARM64: MOVE16 uses safe readlong/writelong in gencomp.c.
+	   EMUL_OP has a compiled handler (op_emulop_comp_ff).
+	   MOVE16 still needs block-ending to prevent stale register state. */
 #if defined(CPU_AARCH64)
-	/* MOVE16: must end block because the interpreter fallback modifies
-	   address registers that the JIT register allocator doesn't track. */
 	if ((op & 0xfff8) == 0xf620 || (op & 0xfff8) == 0xf600 ||
 	    (op & 0xfff8) == 0xf608 || (op & 0xfff8) == 0xf610 ||
 	    (op & 0xfff8) == 0xf618)
-		return true;
-
-	/* EMUL_OP (0x71xx): changes guest state through EmulOp() C handler.
-	   Must end block and re-enter dispatcher. */
-	if ((op & 0xff00) == 0x7100)
 		return true;
 #endif
 
@@ -3586,7 +3583,37 @@ static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode)
 
 static void jit_runtime_aline_trap(uae_u32 opcode)
 {
-    op_illg(opcode);
+    Exception(0xA, 0);
+}
+
+static void init_comp(void);  /* forward declaration */
+
+static void op_emulop_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    uae_u8 *this_pc_p = comp_pc_p + m68k_pc_offset_thisinst;
+    uae_u32 this_m68k_pc = get_virtual_address(this_pc_p);
+
+    /* Replicate the interpreter fallback path exactly:
+       flush -> reset comp_pc_p -> init_comp -> PC triple -> call cpufunctbl -> end block */
+    flush(1);
+    comp_pc_p = this_pc_p;
+    init_comp();
+
+    compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)cft_map(opcode));
+    compemu_raw_mov_l_rr(REG_PAR2, R_REGSTRUCT);
+    compemu_raw_mov_l_mi((uintptr)&regs.pc, this_m68k_pc);
+    compemu_raw_set_pc_i((uintptr)this_pc_p);
+    compemu_raw_mov_l_rm(REG_WORK1, (uintptr)&regs.pc_p);
+    compemu_raw_mov_l_mr((uintptr)&regs.pc_oldp, REG_WORK1);
+    compemu_raw_call((uintptr)cpufunctbl[cft_map(opcode)]);
+
+    /* Advance past the 2-byte EMUL_OP opcode */
+    compemu_raw_set_pc_i((uintptr)(this_pc_p + 2));
+    live.state[PC_P].realreg = -1;
+    live.state[PC_P].val = 0;
+    set_status(PC_P, INMEM);
+    jit_force_runtime_pc_endblock = true;
 }
 
 static void op_aline_trap_comp_ff(uae_u32 opcode)
@@ -5082,6 +5109,12 @@ void build_comp(void)
         compfunctbl[cft_map(opcode)] = op_aline_trap_comp_ff;
         nfcompfunctbl[cft_map(opcode)] = op_aline_trap_comp_ff;
         prop[cft_map(opcode)].cflow = fl_trap;
+    }
+    /* EMUL_OP (0x71xx): compiled handler that replicates the interpreter
+       fallback path exactly — flush, init_comp, PC triple, cputbl call. */
+    for (opcode = 0x7100; opcode <= 0x71ff; opcode++) {
+        compfunctbl[cft_map(opcode)] = op_emulop_comp_ff;
+        nfcompfunctbl[cft_map(opcode)] = op_emulop_comp_ff;
     }
     /* Keep MV2SR.W on the exact legacy/interpreter path for now; the block
        barrier above preserves correctness after MakeFromSR()-style state
