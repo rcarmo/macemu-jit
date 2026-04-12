@@ -5367,7 +5367,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
         redo_current_block = 0;
         if (current_compile_p >= MAX_COMPILE_PTR)
-            flush_icache_hard(3);
+            flush_icache_lazy(3);
 
         alloc_blockinfos();
 
@@ -5784,6 +5784,43 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                        interrupts are delivered promptly.
                        For shorter intervals, just check spcflags inline. */
 #define JIT_TICK_INTERVAL 64
+
+#if defined(CPU_AARCH64)
+                    /* Mid-block branch side-exit: emit a guard for non-traced path */
+                    if (i < blocklen - 1 && was_comp && next_pc_p && taken_pc_p) {
+                        uintptr next_traced = (uintptr)pc_hist[i + 1].location;
+                        uintptr side_exit_pc = 0;
+                        int side_cond = -1;
+                        if (next_traced == taken_pc_p) {
+                            side_exit_pc = next_pc_p;
+                            side_cond = branch_cc ^ 1;
+                        } else if (next_traced == next_pc_p) {
+                            side_exit_pc = taken_pc_p;
+                            side_cond = branch_cc;
+                        }
+                        if (side_cond >= 0) {
+                            bigstate saved_live = live;
+                            flush(1);
+                            make_flags_live();
+                            /* Emit guard: if (side_cond) goto side_exit */
+                            uae_u8* patch_guard = (uae_u8*)get_target();
+                            CC_B_i(side_cond, 0); /* patched below */
+                            /* Side exit: store PC and endblock */
+                            uae_u8* guard_target = (uae_u8*)get_target();
+                            compemu_raw_set_pc_i(side_exit_pc);
+                            compemu_raw_endblock_pc_inreg(REG_PC_TMP,
+                                scaled_cycles((i + 1) * 4 * CYCLE_UNIT));
+                            /* Patch guard branch */
+                            int goff = (int)(guard_target - patch_guard) / 4;
+                            *(uae_u32*)patch_guard = 0x54000000u
+                                | ((goff & 0x7ffff) << 5) | (side_cond & 0xf);
+                            /* Restore register allocator for traced path */
+                            live = saved_live;
+                        }
+                        next_pc_p = 0;
+                        taken_pc_p = 0;
+                    }
+#endif
                     if (i < blocklen - 1 && was_comp && (i + 1) % JIT_TICK_INTERVAL == 0) {
                         /* Full tick injection: flush state, call cpu_do_check_ticks,
                            check spcflags, and if set, exit block. */
@@ -6277,7 +6314,7 @@ endblock_done:
 
         /* We will flush soon, anyway, so let's do it now */
         if (current_compile_p >= MAX_COMPILE_PTR)
-            flush_icache_hard(3);
+            flush_icache_lazy(3);
 
         bi->status = BI_ACTIVE;
         if (redo_current_block)

@@ -1042,7 +1042,16 @@ void execute_normal(void)
 				}
 				maxrun_limit = env_maxrun;
 			}
-			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
+			bool must_end = SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit;
+			if (!must_end && end_block(opcode)) {
+				uintptr new_pcp = (uintptr)regs.pc_p;
+				uintptr blk_start = (uintptr)pc_hist[0].location;
+				if (new_pcp >= blk_start && new_pcp < blk_start + 512
+				    && blocklen < 48)
+					continue;
+				must_end = true;
+			}
+			if (must_end) {
 #if defined(CPU_AARCH64)
 				tick_inhibit = false;
 				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);
