@@ -870,6 +870,16 @@ void execute_normal(void)
 #if defined(CPU_AARCH64)
 	jit_diag_execute_normal_calls++;
 	jit_diag_dispatch_count++;
+	{
+		static unsigned long en_count = 0;
+		if (++en_count % 500000 == 0) {
+			uae_u32 pc = m68k_getpc();
+			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x\n",
+				en_count, pc, regs.regs[0], regs.regs[1], regs.regs[8],
+				regs.regs[15], (unsigned)regs.sr);
+			fflush(stderr);
+		}
+	}
 	jit_diag_maybe_print();
 	/* If pc_p is outside valid Mac memory range (corrupt), re-derive it. */
 	{
