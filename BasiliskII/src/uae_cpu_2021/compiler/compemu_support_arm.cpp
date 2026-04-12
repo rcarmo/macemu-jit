@@ -5530,8 +5530,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
         } else {
 #if defined(CPU_AARCH64)
             jit_diag_optlev_gt0_blocks++;
-            /* Log which blocks get promoted to actual JIT compilation */
-            {
+            /* Block compilation logging disabled for performance.
+             * Uncomment the fprintf below to re-enable. */
+#if 0
                 fprintf(stderr, "JIT_COMPILE optlev=%d pc=0x%08x blocklen=%d opcodes=",
                     optlev, block_m68k_pc, blocklen);
                 for (int di = 0; di < blocklen && di < 20; di++) {
@@ -5540,6 +5541,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 }
                 fprintf(stderr, "\n");
             }
+#endif  /* 0 — JIT_COMPILE logging */
 #endif
             reg_alloc_run = 0;
             next_pc_p = 0;
@@ -5696,11 +5698,13 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #endif
 #if defined(CPU_AARCH64)
                     uae_u8* _after = get_target();
+#if 0  /* JIT_CODEGEN logging disabled for performance */
                     if (i < 10) {
                         fprintf(stderr, "JIT_CODEGEN pc=0x%08x op=0x%04x jit_range=[%p,%p] size=%ld\n",
                             (unsigned)(uintptr)pc_hist[i].location - (unsigned)(uintptr)ROMBaseHost + ROMBaseMac,
                             opcode, _before, _after, (long)(_after - _before));
                     }
+#endif
                     /* Dump first 3 blocks' native code to file for disassembly */
                     {
                         static int dump_count = 0;

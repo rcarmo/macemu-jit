@@ -1412,6 +1412,8 @@ void m68k_reset (void)
     m68k_areg (regs, 7) = phys_get_long(0x00000000);
 #else
     m68k_areg (regs, 7) = 0x2000;
+    regs.isp = 0x2000;  // Sync ISP with initial supervisor stack
+    regs.msp = 0x2000;  // Also init MSP
 #endif
 #if 0
     m68k_setpc (phys_get_long(0x00000004));

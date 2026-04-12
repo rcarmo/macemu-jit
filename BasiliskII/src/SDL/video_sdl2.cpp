@@ -948,10 +948,9 @@ static SDL_Surface *init_sdl_video(int width, int height, int depth, Uint32 flag
 #elif defined(__MACOSX__) && SDL_VERSION_ATLEAST(2,0,14)
 			SDL_SetHint(SDL_HINT_RENDER_DRIVER, window_flags & SDL_WINDOW_METAL ? "metal" : "opengl");
 #elif defined(__linux__) && (defined(__arm__) || defined(__aarch64__))
-			// Prefer OpenGL ES 2 on ARM Linux (Raspberry Pi, etc.)
-			// The GPU is optimized for GLES, not desktop OpenGL
-			SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
-			printf("Requesting SDL_Renderer driver: opengles2 (ARM Linux default)\n");
+			// Use software renderer on ARM Linux for headless/Xvfb compatibility
+			SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+			printf("Requesting SDL_Renderer driver: software (ARM Linux)\n");
 #else
 			// Let SDL auto-detect the best renderer (will use GPU if available)
 			SDL_SetHint(SDL_HINT_RENDER_DRIVER, "");

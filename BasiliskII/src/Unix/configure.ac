@@ -539,18 +539,8 @@ if [[ "$WANT_GTK" = "no" ]]; then
 fi
 AC_SUBST(STANDALONE_GUI, [$WANT_STANDALONE_GUI])
 
-dnl We use ESD if possible.
-if [[ "x$WANT_ESD" = "xyes" ]]; then
-  AM_PATH_ESD(0.2.8, [
-    AC_DEFINE(ENABLE_ESD, 1, [Define is using ESD.])
-    CFLAGS="$CFLAGS $ESD_CFLAGS"
-    CXXFLAGS="$CXXFLAGS $ESD_CFLAGS"
-    LIBS="$LIBS $ESD_LIBS"
-  ], [
-    AC_MSG_WARN([Could not find ESD, disabling ESD support.])
-    WANT_ESD=no
-  ])
-fi
+dnl ESD support removed (obsolete).
+WANT_ESD=no
 
 dnl We use 64-bit file size support if possible.
 AC_SYS_LARGEFILE

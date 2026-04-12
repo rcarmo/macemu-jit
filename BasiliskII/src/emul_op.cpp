@@ -234,7 +234,11 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			r->a[1] = ROMBaseMac + UniversalInfo;						// UniversalInfo
 			r->a[6] = boot_globs;										// BootGlobs
 			r->a[7] = RAMBaseMac + 0x10000;								// Boot stack
+			regs.isp = r->a[7];											// Sync ISP with boot stack
+			regs.msp = r->a[7];											// Also init MSP
 			tick_inhibit = false;
+			printf("EMUL_OP_RESET done: a7=%08x isp=%08x msp=%08x sr=%04x pc=%08x s=%d m=%d\n",
+			       r->a[7], regs.isp, regs.msp, r->sr, m68k_getpc(), regs.s, regs.m);
 			break;
 		}
 

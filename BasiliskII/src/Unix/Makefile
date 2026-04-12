@@ -18,13 +18,13 @@ DESTDIR =
 CC = gcc
 CXX = g++
 GCR = 
-CFLAGS = -g -O3 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libpng16 -fomit-frame-pointer  -fwrapv
-CXXFLAGS = -g -O3 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libpng16 -fno-rtti -fomit-frame-pointer -fno-exceptions -fno-rtti  -fno-merge-constants -fno-gcse-sm -fwrapv
+CFLAGS = -g -O3 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libpng16 -fomit-frame-pointer -fwrapv
+CXXFLAGS = -g -O3 -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libpng16 -fno-rtti -fomit-frame-pointer -fno-exceptions -fno-rtti -fno-merge-constants -fno-gcse-sm -fwrapv
 CPUINCLUDES_FLAGS=-I../uae_cpu_2021
 CPUINCLUDES_FLAGS:=$(CPUINCLUDES_FLAGS:-I%=-I./%)
 CPPFLAGS =  -I./../include -I./. -I. -I./../CrossPlatform $(CPUINCLUDES_FLAGS) -I./../slirp
 DEFS = -DHAVE_CONFIG_H  -DOS_linux -DDIRECT_ADDRESSING -DCPU_aarch64 -DCPU_AARCH64 -DUNALIGNED_PROFITABLE -DAARCH64_ASSEMBLY -DOPTIMIZED_FLAGS -DUSE_JIT -DJIT -DFPU_MPFR -DUPDATE_UAE -D_REENTRANT -DDATADIR=\"$(datadir)/$(APP)\"
-LDFLAGS =  -no-pie 
+LDFLAGS =  -no-pie
 LIBS = -lm -lrt -lrt  -lSDL2  -lvncserver  -lpng16  -lmpfr -lgmp
 SYSSRCS = ../SDL/video_sdl.cpp ../SDL/video_sdl2.cpp ../SDL/video_sdl3.cpp ../SDL/evdev_input.cpp ../SDL/vnc_server.cpp  extfs_unix.cpp serial_unix.cpp ether_unix.cpp Linux/scsi_linux.cpp ../SDL/audio_sdl.cpp ../SDL/audio_sdl3.cpp  ../dummy/prefs_editor_dummy.cpp   main_unix.cpp prefs_unix.cpp ../dummy/clip_dummy.cpp
 CPUSRCS = ../uae_cpu_2021/basilisk_glue.cpp ../uae_cpu_2021/memory.cpp ../uae_cpu_2021/newcpu.cpp ../uae_cpu_2021/readcpu.cpp ../uae_cpu_2021/fpu/fpu_mpfr.cpp cpustbl.cpp cpudefs.cpp cpuemu1.cpp cpuemu2.cpp cpuemu3.cpp cpuemu4.cpp cpuemu5.cpp cpuemu6.cpp cpuemu7.cpp cpuemu8.cpp cpuemu1_nf.cpp cpuemu2_nf.cpp cpuemu3_nf.cpp cpuemu4_nf.cpp cpuemu5_nf.cpp cpuemu6_nf.cpp cpuemu7_nf.cpp cpuemu8_nf.cpp compemu1.cpp compemu2.cpp compemu3.cpp compemu4.cpp compemu5.cpp compemu6.cpp compemu7.cpp compemu8.cpp ../uae_cpu_2021/compiler/compemu_support.cpp compstbl.o cpustbl_nf.o cpufunctbl.cpp

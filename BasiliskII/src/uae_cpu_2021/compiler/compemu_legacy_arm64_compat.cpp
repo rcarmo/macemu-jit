@@ -875,34 +875,44 @@ void execute_normal(void)
 	{
 		uintptr pcp = (uintptr)regs.pc_p;
 		uintptr base = (uintptr)RAMBaseHost;
-		uintptr limit = base + RAMSize + ROMSize + 0x1000000; /* NuBus slot ROM space */
+		uintptr limit = base + RAMSize + ROMSize + 0x1000000; /* allocation limit */
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int fix_count = 0;
 			uae_u32 safe_pc = regs.pc & ~1u;
 			if (fix_count++ < 50)
 				fprintf(stderr, "JIT: exec_normal bad pc_p=%p regs.pc=%08x safe=%08x "
-					"d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x spc=%08x oldp=%p last_setpc=%p last_kind=%u last_seq=%lu\n",
+					"d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x spc=%08x oldp=%p "
+					"isp=%08x msp=%08x s=%d m=%d\n",
 					(void*)regs.pc_p, regs.pc, safe_pc,
 					regs.regs[0], regs.regs[1], regs.regs[8], regs.regs[15],
 					(unsigned)regs.sr, (unsigned)regs.spcflags, (void*)regs.pc_oldp,
-					(void*)jit_last_setpc_value, (unsigned)jit_last_setpc_kind, jit_last_setpc_seq);
-			/* Re-derive pc_p from the guest PC */
-			regs.pc = safe_pc;
-			regs.pc_p = get_real_address(safe_pc, 0, sz_word);
-			regs.pc_oldp = regs.pc_p - safe_pc;
-			/* If the derived pc_p is also bad, run one instruction via interpreter
-			   to advance past the problem instead of flushing and looping. */
-			pcp = (uintptr)regs.pc_p;
-			if (pcp < base || pcp >= limit || (pcp & 1)) {
+					(unsigned)regs.isp, (unsigned)regs.msp, regs.s, regs.m);
+			/* Check if the guest Mac address is in valid executable memory:
+			   - RAM: 0 <= pc < RAMSize
+			   - ROM: ROMBaseMac <= pc < ROMBaseMac + ROMSize
+			   Anything else (NuBus space, frame buffer, unmapped) is a bus error. */
+			bool valid_mac_pc = (safe_pc < (uae_u32)RAMSize) ||
+				(safe_pc >= (uae_u32)ROMBaseMac && safe_pc < (uae_u32)(ROMBaseMac + ROMSize));
+			if (!valid_mac_pc) {
 				/* Guest PC points to unmapped memory (e.g. NuBus slot probe).
-				   Generate a bus error to let the ROM's exception handler
+				   Generate a bus error exception to let the ROM's handler
 				   deal with it, just like real hardware would. */
-				static int interp_fallback = 0;
-				if (interp_fallback++ < 5)
-					fprintf(stderr, "JIT: bad_pc_p bus error pc=%08x\n", safe_pc);
+				static int buserr_count = 0;
+				if (buserr_count++ < 10)
+					fprintf(stderr, "JIT: bus error for unmapped PC=%08x a7=%08x isp=%08x (triggering Exception 2)\n",
+						safe_pc, m68k_areg(regs, 7), regs.isp);
+				/* Restore a7 from ISP/MSP — the JIT may have desynchronized them */
+				if (regs.s && !regs.m && regs.isp >= 0x1000)
+					m68k_areg(regs, 7) = regs.isp;
+				else if (regs.s && regs.m && regs.msp >= 0x1000)
+					m68k_areg(regs, 7) = regs.msp;
 				Exception(2, safe_pc);
 				return;
 			}
+			/* Valid Mac address — re-derive pc_p from the guest PC */
+			regs.pc = safe_pc;
+			regs.pc_p = get_real_address(safe_pc, 0, sz_word);
+			regs.pc_oldp = regs.pc_p - safe_pc;
 		}
 	}
 #endif
@@ -1021,10 +1031,6 @@ void execute_normal(void)
 			pc_hist[blocklen++].location = (uae_u16 *)regs.pc_p;
 			uae_u32 opcode = GET_OPCODE;
 			(*cpufunctbl[opcode])(opcode);
-			/* Skip cpu_check_ticks during block tracing. The usleep()
-			   in cpu_do_check_ticks causes non-deterministic timing
-			   that varies with block structure, making the boot
-			   sensitive to which families compile natively. */
 			cpu_check_ticks();
 			total_cycles += 4 * CYCLE_UNIT;
 			int maxrun_limit = MAXRUN;
@@ -1036,7 +1042,8 @@ void execute_normal(void)
 				}
 				maxrun_limit = env_maxrun;
 			}
-			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
+			bool must_end = end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit;
+			if (must_end) {
 #if defined(CPU_AARCH64)
 				tick_inhibit = false;
 				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);
