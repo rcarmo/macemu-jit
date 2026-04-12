@@ -294,7 +294,6 @@ MIDFUNC(3,lea_l_brr,(W4 d, RR4 s, IM32 offset))
 
 	int s_is_d = (s == d);
 	if(s_is_d) {
-	if(s_is_d) {
 		s = d = rmw(d);
 	} else {
 		s = readreg(s);
