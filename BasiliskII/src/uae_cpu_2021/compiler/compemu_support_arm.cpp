@@ -5805,9 +5805,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             /* Emit guard: if (side_cond) goto side_exit */
                             uae_u8* patch_guard = (uae_u8*)get_target();
                             CC_B_i(side_cond, 0); /* patched below */
-                            /* Side exit: store PC and endblock */
+                            /* Side exit: load PC and endblock */
                             uae_u8* guard_target = (uae_u8*)get_target();
-                            compemu_raw_set_pc_i(side_exit_pc);
+                            LOAD_U64(REG_PC_TMP, side_exit_pc); /* load into x1 for endblock */
                             compemu_raw_endblock_pc_inreg(REG_PC_TMP,
                                 scaled_cycles((i + 1) * 4 * CYCLE_UNIT));
                             /* Patch guard branch */
@@ -6147,7 +6147,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 #endif
                 flush(1);                       // Emitted code of this call doesn't modify flags
                 compemu_raw_jcc_l_oponly(cc);   // Last emitted opcode is branch to target
-                branchadd = (uae_u32*)get_target() - 2; /* -2: B.cond is before NOP relay slot */
+                branchadd = (uae_u32*)get_target() - 1;
 
                 /* predicted outcome */
                 uintptr ct1 = jit_canonicalize_target_pc(t1);
