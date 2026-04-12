@@ -458,6 +458,8 @@ void m68k_do_compile_execute(void)
 {
 	if (!ensure_aarch64_jit_runtime_ready())
 		jit_abort("ARM64 JIT dispatcher stubs were not initialized before compiled execution");
+	fprintf(stderr, "JIT_ENTRY pc=%08x spc=%08x a7=%08x\n", m68k_getpc(), (unsigned)regs.spcflags, regs.regs[15]);
+	fflush(stderr);
 	static unsigned long _dc = 0;
 #if defined(CPU_AARCH64)
 	extern bool tick_inhibit;
