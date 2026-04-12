@@ -1042,8 +1042,7 @@ void execute_normal(void)
 				}
 				maxrun_limit = env_maxrun;
 			}
-			bool must_end = end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit;
-			if (must_end) {
+			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
 #if defined(CPU_AARCH64)
 				tick_inhibit = false;
 				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);
