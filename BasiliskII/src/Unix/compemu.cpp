@@ -24027,7 +24027,7 @@ void REGPARAM2 op_51c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 {	uintptr v2,v;
 	uintptr v1=get_const(PC_P);
 	v2=get_const(offs);
-	register_branch(v1,v2,3);
+	register_branch(v1,v2,2);
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}}
@@ -64181,7 +64181,7 @@ void REGPARAM2 op_51c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 {	uintptr v2,v;
 	uintptr v1=get_const(PC_P);
 	v2=get_const(offs);
-	register_branch(v1,v2,3);
+	register_branch(v1,v2,2);
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}}

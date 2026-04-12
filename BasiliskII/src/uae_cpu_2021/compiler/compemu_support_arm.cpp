@@ -5783,7 +5783,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                        even inside long compiled blocks, and that pending
                        interrupts are delivered promptly.
                        For shorter intervals, just check spcflags inline. */
-#define JIT_TICK_INTERVAL 64
+#define JIT_TICK_INTERVAL 16
 
 #if defined(CPU_AARCH64)
                     /* Mid-block branch side-exit: emit a guard for non-traced path */

@@ -546,15 +546,6 @@ STATIC_INLINE void compemu_raw_jmp_pc_tag(void)
 	idx = (uintptr)&regs.cache_tags - (uintptr)&regs;
 	LDR_xXi(REG_WORK2, R_REGSTRUCT, idx);
 	LDR_xXxLSLi(REG_WORK1, REG_WORK2, REG_WORK1, 3);
-	/* Check spcflags before direct dispatch */
-	{
-		uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
-		LDR_wXi(REG_WORK3, R_REGSTRUCT, idx_spc);
-		CBZ_wi(REG_WORK3, 2);  /* spcflags == 0: fast path */
-		uae_u32* br_slow = (uae_u32*)get_target();
-		B_i(0);
-		write_jmp_target(br_slow, (uintptr)popall_execute_normal);
-	}
 	BR_x(REG_WORK1);
 }
 
@@ -669,18 +660,7 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	LSL_xxi(rr_pc, rr_pc, 1);
 	uintptr offs = (uintptr)(&regs.cache_tags) - (uintptr)&regs;
 	LDR_xXi(REG_WORK1, R_REGSTRUCT, offs);
-	LDR_xXxLSLi(REG_WORK1, REG_WORK1, rr_pc, 3); // cacheline holds pointer -> multiply with 8
-	/* Check spcflags before direct dispatch — ensures timer interrupts
-	   and other pending events are delivered even in tight loops. */
-	{
-		uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
-		LDR_wXi(REG_WORK3, R_REGSTRUCT, idx_spc);
-		CBZ_wi(REG_WORK3, 2);  /* spcflags == 0: skip to BR (fast path) */
-		/* spcflags set: go to slow path (popall_execute_normal) */
-		uae_u32* br_slow = (uae_u32*)get_target();
-		B_i(0);
-		write_jmp_target(br_slow, (uintptr)popall_execute_normal);
-	}
+	LDR_xXxLSLi(REG_WORK1, REG_WORK1, rr_pc, 3);
 	BR_x(REG_WORK1);
 }
 LENDFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))

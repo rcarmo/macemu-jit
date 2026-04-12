@@ -2189,7 +2189,7 @@ gen_opcode (unsigned int opcode)
 		      "\tuae_u32 v1=get_const(PC_P);\n");
 #endif
 	    comprintf("\tv2=get_const(offs);\n"
-		      "\tregister_branch(v1,v2,%d);\n", NATIVE_CC_CC);
+		      "\tregister_branch(v1,v2,%d);\n", NATIVE_CC_CS);
 	    break;
 
 	 case 8: failure; break;  /* Work out details! FIXME */
