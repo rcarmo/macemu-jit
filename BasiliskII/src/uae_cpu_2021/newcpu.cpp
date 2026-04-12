@@ -1696,33 +1696,7 @@ static void rts68000()
 
 void REGPARAM2 op_illg (uae_u32 opcode)
 {
-	if (opcode == 0xa02d || opcode == 0xa03f || opcode == 0xa051 || opcode == 0xa995) {
-		fprintf(stderr,
-			"ALINE_ILLG op=%04x pc=%08x sr=%04x intmask=%u spc=%08x d0=%08x d1=%08x d2=%08x a0=%08x a1=%08x a7=%08x\n",
-			(unsigned)opcode,
-			(unsigned)m68k_getpc(),
-			(unsigned)regs.sr,
-			(unsigned)regs.intmask,
-			(unsigned)regs.spcflags,
-			(unsigned)m68k_dreg(regs,0),
-			(unsigned)m68k_dreg(regs,1),
-			(unsigned)m68k_dreg(regs,2),
-			(unsigned)m68k_areg(regs,0),
-			(unsigned)m68k_areg(regs,1),
-			(unsigned)m68k_areg(regs,7));
-		if (opcode == 0xa995 && trace_a995_env()) {
-			trace_a995_pending = true;
-			trace_a995_step = 0;
-			trace_a995_origin_pc = (uae_u32)m68k_getpc();
-			fprintf(stderr,
-				"A995_TRACE origin pc=%08x sp=%08x top=%08x top4=%08x sr=%04x\n",
-				(unsigned)trace_a995_origin_pc,
-				(unsigned)m68k_areg(regs,7),
-				(unsigned)get_long(m68k_areg(regs,7)),
-				(unsigned)get_long(m68k_areg(regs,7) + 4),
-				(unsigned)regs.sr);
-		}
-	}
+
 	if ((opcode & 0xF000) == 0xA000) {
 #if 0
 		if (opcode == 0xa0ff)

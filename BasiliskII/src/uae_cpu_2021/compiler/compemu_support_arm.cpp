@@ -3577,9 +3577,9 @@ static void op_movea_l_postinc_an_comp_ff(uae_u32 opcode)
         (uintptr)(comp_pc_p + m68k_pc_offset_thisinst), opcode, 0, false);
 }
 
-static void jit_runtime_aline_trap(uae_u32 opcode)
+static void jit_runtime_aline_trap(uae_u32 /* opcode */)
 {
-    op_illg(opcode);
+    Exception(0xA, 0);
 }
 
 static void op_aline_trap_comp_ff(uae_u32 opcode)
