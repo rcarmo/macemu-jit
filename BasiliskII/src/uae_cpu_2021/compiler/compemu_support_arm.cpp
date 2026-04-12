@@ -4844,8 +4844,12 @@ STATIC_INLINE void create_popalls(void)
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
     popall_execute_normal = get_target();
+    /* No fast dispatch for now - just the slow path */
     raw_pop_preserved_regs();
     compemu_raw_jmp((uintptr)execute_normal);
+
+    fprintf(stderr, "JIT: popall at %p\n", popall_execute_normal);
+    fflush(stderr);
 
     popall_check_checksum_setpc = get_target();
 #if defined(CPU_AARCH64)
@@ -5219,6 +5223,12 @@ void build_comp(void)
 	// jit_install_diag_handler(); // Use BasiliskII SIGSEGV handler for recovery
 	fprintf(stderr, "JIT: popallspace=%p cache_start=%p popall_execute_normal=%p\n",
 		popallspace, popall_combined_cache_start, popall_execute_normal);
+	fflush(stderr);
+	if (popall_execute_normal) {
+		uae_u32 *p = (uae_u32*)popall_execute_normal;
+		for (int d=0;d<20;d++) fprintf(stderr,"  [%02d] %08x\n",d*4,p[d]);
+		fflush(stderr);
+	}
 #endif
 	alloc_cache();
 	if (!compiled_code) {
@@ -5530,9 +5540,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
         } else {
 #if defined(CPU_AARCH64)
             jit_diag_optlev_gt0_blocks++;
-            /* Block compilation logging disabled for performance.
-             * Uncomment the fprintf below to re-enable. */
-#if 0
+            /* Block compilation logging */
+            {
                 fprintf(stderr, "JIT_COMPILE optlev=%d pc=0x%08x blocklen=%d opcodes=",
                     optlev, block_m68k_pc, blocklen);
                 for (int di = 0; di < blocklen && di < 20; di++) {
@@ -5540,8 +5549,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     fprintf(stderr, "%04x ", op);
                 }
                 fprintf(stderr, "\n");
+                fflush(stderr);
             }
-#endif  /* 0 — JIT_COMPILE logging */
 #endif
             reg_alloc_run = 0;
             next_pc_p = 0;
