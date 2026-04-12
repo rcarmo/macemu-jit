@@ -91,7 +91,7 @@
 #define DISABLE_I_FPP
 #define DISABLE_I_FBCC
 #define DISABLE_I_FSCC
-#define DISABLE_I_MOVE16
+/* #define DISABLE_I_MOVE16 -- enabled: ARM64 codegen uses safe readlong/writelong */
 */
 
 #endif /* UAE */
@@ -759,7 +759,11 @@ static void genmov16(uae_u32 opcode, struct instr *curi)
 		comprintf("\tadd_l_ri(dstreg+8,16);\n");
 
 #ifdef UAE
+#if defined(CPU_AARCH64)
+	comprintf("\tif (1) {\n"); /* ARM64: always use safe readlong/writelong path */
+#else
 	comprintf("\tif (special_mem) {\n");
+#endif
 	comprintf("\t\tint tmp=scratchie;\n");
 	comprintf("\tscratchie+=4;\n"
 		  "\treadlong(src,tmp,scratchie);\n"
@@ -777,7 +781,20 @@ static void genmov16(uae_u32 opcode, struct instr *curi)
 		  "\treadlong(src,tmp,scratchie);\n"
 		  "\twritelong_clobber(dst,tmp,scratchie);\n");
 	comprintf("\t} else\n");
-#endif
+#elif defined(CPU_AARCH64)
+	/* ARM64 without UAE: use readlong/writelong directly */
+	start_brace();
+	comprintf("\tint tmp=scratchie++;\n");
+	for (int i = 0; i < 4; i++) {
+		comprintf("\treadlong(src,tmp,scratchie);\n"
+			  "\twritelong_clobber(dst,tmp,scratchie);\n");
+		if (i < 3)
+			comprintf("\tadd_l_ri(src,4);\n"
+				  "\tadd_l_ri(dst,4);\n");
+	}
+	close_brace();
+	return;  /* Skip the unsafe fast path below */
+#else
 	start_brace();
 	comprintf("\tint tmp=scratchie;\n");
 	comprintf("\tscratchie+=4;\n"
@@ -795,6 +812,7 @@ static void genmov16(uae_u32 opcode, struct instr *curi)
 		"\tforget_about(tmp+2);\n"
 		"\tmov_l_Rr(dst,tmp+3,12);\n");
 	close_brace();
+#endif
 }
 
 static void
