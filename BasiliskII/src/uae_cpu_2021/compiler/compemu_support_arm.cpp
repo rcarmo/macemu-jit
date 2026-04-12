@@ -1024,15 +1024,11 @@ static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
-	/* ARM64: MOVE16 uses safe readlong/writelong in gencomp.c.
-	   EMUL_OP has a compiled handler (op_emulop_comp_ff).
-	   MOVE16 still needs block-ending to prevent stale register state. */
-#if defined(CPU_AARCH64)
-	if ((op & 0xfff8) == 0xf620 || (op & 0xfff8) == 0xf600 ||
-	    (op & 0xfff8) == 0xf608 || (op & 0xfff8) == 0xf610 ||
-	    (op & 0xfff8) == 0xf618)
-		return true;
-#endif
+	/* ARM64: zero hardcoded barriers.
+	   MOVE16 uses readlong/writelong in gencomp.c.
+	   EMUL_OP has compiled handler op_emulop_comp_ff.
+	   MOVEM uses readlong/writelong in gencomp.c.
+	   PC_P uses 64-bit eviction/reload in tomem/do_load_reg. */
 
 	/* Environment-gated barriers for debugging (B2_JIT_RESTORE_BARRIERS). */
 	if (jit_restore_barrier("sr")) {
@@ -2711,6 +2707,12 @@ STATIC_INLINE void do_load_reg(int n, int r)
         UBFX_xxii(n, n, 29, 1); /* interpreter bit-29 format -> JIT 0/1 */
         return;
     }
+    /* PC_P holds a 64-bit host pointer — must use 64-bit load. */
+    if (r == PC_P) {
+        LOAD_U64(REG_WORK2, (uintptr)live.state[r].mem);
+        LDR_xXi(n, REG_WORK2, 0);
+        return;
+    }
 #endif
     compemu_raw_mov_l_rm(n, (uintptr)live.state[r].mem);
 }
@@ -2789,6 +2791,14 @@ static void tomem(int r)
         if (r == FLAGX) {
             LSL_wwi(REG_WORK2, rr, 29);
             compemu_raw_mov_l_mr((uintptr)live.state[r].mem, REG_WORK2);
+            set_status(r, CLEAN);
+            return;
+        }
+        /* PC_P holds a 64-bit host pointer — must use 64-bit store.
+           compemu_raw_mov_l_mr uses 32-bit STR which truncates. */
+        if (r == PC_P) {
+            LOAD_U64(REG_WORK2, (uintptr)live.state[r].mem);
+            STR_xXi(rr, REG_WORK2, 0);
             set_status(r, CLEAN);
             return;
         }

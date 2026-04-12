@@ -821,6 +821,29 @@ genmovemel (uae_u16 opcode)
 #endif
 
     /* Fast but unsafe...  */
+#if defined(CPU_AARCH64)
+    comprintf("\tfor (i=0;i<16;i++) {\n"
+              "\t\tif ((mask>>i)&1) {\n");
+    switch(table68k[opcode].size) {
+     case sz_long:
+        comprintf("\t\t\treadlong(srca,i,scratchie);\n"
+                  "\t\t\tadd_l_ri(srca,4);\n"
+                  "\t\t\toffset+=4;\n");
+        break;
+     case sz_word:
+        comprintf("\t\t\treadword(srca,i,scratchie);\n"
+                  "\t\t\tsign_extend_16_rr(i,i);\n"
+                  "\t\t\tadd_l_ri(srca,2);\n"
+                  "\t\t\toffset+=2;\n");
+        break;
+     default: assert(0);
+    }
+    comprintf("\t\t}\n"
+              "\t}");
+    if (table68k[opcode].dmode == Aipi) {
+        comprintf("\t\t\tmov_l_rr(8+dstreg,srca);\n");
+    }
+#else
     comprintf("\tget_n_addr(srca,native,scratchie);\n");
 
     comprintf("\tfor (i=0;i<16;i++) {\n"
@@ -844,6 +867,7 @@ genmovemel (uae_u16 opcode)
     if (table68k[opcode].dmode == Aipi) {
 	comprintf("\t\t\tlea_l_brr(8+dstreg,srca,offset);\n");
     }
+#endif
     /* End fast but unsafe.   */
 
 #ifdef UAE
@@ -906,6 +930,46 @@ genmovemle (uae_u16 opcode)
 	    comprintf("\tif (1 && !special_mem) {\n");
 #endif
 #endif
+#if defined(CPU_AARCH64)
+    if (table68k[opcode].dmode!=Apdi) {
+        comprintf("\tfor (i=0;i<16;i++) {\n"
+                  "\t\tif ((mask>>i)&1) {\n");
+        switch(table68k[opcode].size) {
+         case sz_long:
+            comprintf("\t\t\tmov_l_rr(tmp,i);\n"
+                      "\t\t\twritelong(srca,tmp,scratchie);\n"
+                      "\t\t\tadd_l_ri(srca,4);\n");
+            break;
+         case sz_word:
+            comprintf("\t\t\tmov_l_rr(tmp,i);\n"
+                      "\t\t\twriteword(srca,tmp,scratchie);\n"
+                      "\t\t\tadd_l_ri(srca,2);\n");
+            break;
+         default: assert(0);
+        }
+    } else {
+        comprintf("\tfor (i=0;i<16;i++) {\n"
+                  "\t\tif ((mask>>i)&1) {\n");
+        switch(table68k[opcode].size) {
+         case sz_long:
+            comprintf("\t\t\tsub_l_ri(srca,4);\n"
+                      "\t\t\tmov_l_rr(tmp,15-i);\n"
+                      "\t\t\twritelong(srca,tmp,scratchie);\n");
+            break;
+         case sz_word:
+            comprintf("\t\t\tsub_l_ri(srca,2);\n"
+                      "\t\t\tmov_l_rr(tmp,15-i);\n"
+                      "\t\t\twriteword(srca,tmp,scratchie);\n");
+            break;
+         default: assert(0);
+        }
+    }
+    comprintf("\t\t}\n"
+              "\t}");
+    if (table68k[opcode].dmode == Apdi) {
+        comprintf("\t\t\tmov_l_rr(8+dstreg,srca);\n");
+    }
+#else
     comprintf("\tget_n_addr(srca,native,scratchie);\n");
 
     if (table68k[opcode].dmode!=Apdi) {
@@ -955,6 +1019,7 @@ genmovemle (uae_u16 opcode)
     if (table68k[opcode].dmode == Apdi) {
 	comprintf("\t\t\tlea_l_brr(8+dstreg,srca,(uae_s32)offset);\n");
     }
+#endif
 #ifdef UAE
     comprintf("\t} else {\n");
 
