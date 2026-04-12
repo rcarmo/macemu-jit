@@ -1023,12 +1023,8 @@ static inline bool jit_force_exact_exec_nostats_pc(uae_u32 pc)
 
 static inline bool jit_force_interpreter_barrier_opcode(uae_u16 op)
 {
-#if defined(CPU_AARCH64)
-	/* EMUL_OP (0x71xx): changes guest state through EmulOp() C handler.
-	   Must end block and re-enter dispatcher. */
-	if ((op & 0xff00) == 0x7100)
-		return true;
-#endif
+	/* No hardcoded barriers on ARM64 — all opcodes have native handlers.
+	   Environment-gated barriers remain for debugging. */
 
 	/* Environment-gated barriers for debugging (B2_JIT_RESTORE_BARRIERS). */
 	if (jit_restore_barrier("sr")) {
@@ -3582,6 +3578,32 @@ static void jit_runtime_aline_trap(uae_u32 /* opcode */)
     Exception(0xA, 0);
 }
 
+static void op_emulop_comp_ff(uae_u32 opcode)
+{
+    uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
+    /* EMUL_OP: compiled handler. Flush JIT state, call m68k_emulop,
+       end block. m68k_emulop handles the full register save/restore
+       and EmulOp dispatch. Block ends because EmulOp can modify any
+       guest register. */
+    flush(1);
+    compemu_raw_mov_l_ri(REG_PAR1, opcode);
+    /* Set PC to the EMUL_OP instruction address */
+    compemu_raw_set_pc_i((uintptr)(comp_pc_p + m68k_pc_offset_thisinst));
+    {
+        uae_u32 op_pc = get_virtual_address((uae_u8*)(comp_pc_p + m68k_pc_offset_thisinst));
+        compemu_raw_mov_l_mi((uintptr)&regs.pc, op_pc);
+        compemu_raw_mov_l_rm(REG_WORK1, (uintptr)&regs.pc_p);
+        compemu_raw_mov_l_mr((uintptr)&regs.pc_oldp, REG_WORK1);
+    }
+    compemu_raw_call((uintptr)m68k_emulop);
+    /* m68k_emulop does NOT advance PC. Advance past the 2-byte opcode. */
+    compemu_raw_set_pc_i((uintptr)(comp_pc_p + m68k_pc_offset));
+    live.state[PC_P].realreg = -1;
+    live.state[PC_P].val = 0;
+    set_status(PC_P, INMEM);
+    jit_force_runtime_pc_endblock = true;
+}
+
 static void op_aline_trap_comp_ff(uae_u32 opcode)
 {
     uae_u32 m68k_pc_offset_thisinst = m68k_pc_offset;
@@ -5075,6 +5097,12 @@ void build_comp(void)
         compfunctbl[cft_map(opcode)] = op_aline_trap_comp_ff;
         nfcompfunctbl[cft_map(opcode)] = op_aline_trap_comp_ff;
         prop[cft_map(opcode)].cflow = fl_trap;
+    }
+    /* EMUL_OP (0x71xx): compiled handler that flushes registers,
+       calls m68k_emulop(), and continues the block. */
+    for (opcode = 0x7100; opcode <= 0x71ff; opcode++) {
+        compfunctbl[cft_map(opcode)] = op_emulop_comp_ff;
+        nfcompfunctbl[cft_map(opcode)] = op_emulop_comp_ff;
     }
     /* Keep MV2SR.W on the exact legacy/interpreter path for now; the block
        barrier above preserves correctness after MakeFromSR()-style state
