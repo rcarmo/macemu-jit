@@ -609,14 +609,11 @@ void do_nothing(void)
 #if defined(CPU_AARCH64)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
-	jit_diag_maybe_print();
-	/* Call cpu_check_ticks on every countdown expiry so that one_tick()
-	   runs at the proper cadence even for tight compiled loops. Without
-	   this, ROM hardware-polling loops that run natively never give the
-	   60Hz timer a chance to update emulated hardware registers. */
-	/* one_tick() runs via the tick thread at 60Hz — no cpu_check_ticks needed */
+	/* Reset countdown so the hot path resumes until the next expiry.
+	   Interrupt delivery happens via the 60Hz timer thread + spcflags;
+	   do NOT call cpu_check_ticks here (it blocks via usleep). */
+	countdown = 1000000;
 #endif
-	/* Intentionally empty otherwise. */
 }
 
 static bool jit_tracewin_enabled()

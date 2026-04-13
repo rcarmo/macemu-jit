@@ -111,7 +111,7 @@ static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
    32-bit LDR/STR and checks bit 31 for sign. With a uint16, the high 16
    bits are garbage from adjacent memory, making the countdown sign check
    unpredictable. Use a dedicated int32 variable instead. */
-int32 jit_countdown = 16000;
+int32 jit_countdown = 1000000;
 #define countdown jit_countdown
 
 #if defined(CPU_AARCH64)
@@ -5930,6 +5930,17 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 
 
                 if (failure) {
+                    {
+                        static int fail_log = 0;
+                        if (fail_log < 200) {
+                            fail_log++;
+                            fprintf(stderr, "JIT_FALLBACK op=%04x pc=%08x comptbl=%p optlev=%d allow_l2=%d\n",
+                                (unsigned)opcode, (unsigned)op_m68k_pc,
+                                (void*)(comptbl ? comptbl[cft_map(opcode)] : NULL),
+                                optlev, (int)allow_l2);
+                            fflush(stderr);
+                        }
+                    }
                     if (jit_force_exact_exec_nostats_opcode((uae_u16)opcode)) {
                         if (was_comp) {
                             flush(1);
