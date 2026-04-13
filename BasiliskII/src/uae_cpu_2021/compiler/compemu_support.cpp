@@ -489,14 +489,14 @@ void m68k_do_compile_execute(void)
 			tick_inhibit = false;
 			extern int32 jit_countdown;
 			if (jit_countdown < 0) {
-				jit_countdown = 16000;
+				jit_countdown = 1000000;
 				jit_one_tick();
 			}
 		}
 		{
 			extern int32 jit_countdown;
 			if (jit_countdown < 0)
-				jit_countdown = 16000;
+				jit_countdown = 1000000;
 		}
 #endif
 		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
