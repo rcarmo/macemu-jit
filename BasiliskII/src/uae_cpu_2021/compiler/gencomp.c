@@ -2729,7 +2729,23 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_ROXR:
-	failure;
+	if (curi->smode != immi) {
+	    failure;
+	    break;
+	}
+	mayfail;
+	comprintf("\tdont_care_flags();\n");
+	genamode(curi->smode, "srcreg", curi->size, "cnt", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	genamode(curi->dmode, "dstreg", curi->size, "data", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	switch (curi->size) {
+	case sz_byte:
+	    comprintf("\troxr_b_ri(data, srcreg);\n");
+	    break;
+	default:
+	    failure;
+	    break;
+	}
+	genastore("data", curi->dmode, "dstreg", curi->size, "data");
 	break;
 
      case i_ASRW:

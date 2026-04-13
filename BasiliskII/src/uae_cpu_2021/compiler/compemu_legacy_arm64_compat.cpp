@@ -867,10 +867,10 @@ void execute_normal(void)
 	jit_diag_dispatch_count++;
 	{
 		static unsigned long en_count = 0;
-		if (++en_count % 1000000 == 0) {
+		if (++en_count % 100 == 0) {
 			uae_u32 pc = m68k_getpc();
-			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x\n",
-				en_count, pc, regs.regs[0], regs.regs[1], regs.regs[8],
+			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d2=%08x d4=%08x d5=%08x a0=%08x a7=%08x sr=%04x\n",
+				en_count, pc, regs.regs[0], regs.regs[2], regs.regs[4], regs.regs[5], regs.regs[8],
 				regs.regs[15], (unsigned)regs.sr);
 			fflush(stderr);
 		}

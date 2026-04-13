@@ -40746,6 +40746,36 @@ if (!(needed_flags & FLAG_CZNV)) dont_care_flags();
     if (failure)
         m68k_pc_offset = m68k_pc_offset_thisinst;
 }
+/* ROXRQ.B #<data>,Dn */
+void REGPARAM2 op_e010_0_comp_ff(uae_u32 opcode) /* ROXR */
+{
+#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)
+	uae_u32 srcreg = imm8_table[((opcode >> 1) & 7)];
+#else
+	uae_s32 srcreg = imm8_table[((opcode >> 9) & 7)];
+#endif
+#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)
+	uae_u32 dstreg = (opcode >> 8) & 7;
+#else
+	uae_u32 dstreg = opcode & 7;
+#endif
+	uae_u32 dodgy=0;
+	uae_u32 m68k_pc_offset_thisinst=m68k_pc_offset;
+	m68k_pc_offset+=2;
+{	uae_u8 scratchie=S1;
+	dont_care_flags();
+{	int cnt = scratchie++;
+	mov_l_ri(cnt, srcreg);
+{	int data = dstreg;
+	roxr_b_ri(data, srcreg);
+	if(dstreg != data)
+		mov_b_rr(dstreg, data);
+}}}
+    if (m68k_pc_offset > SYNC_PC_OFFSET)
+        sync_m68k_pc();
+    if (failure)
+        m68k_pc_offset = m68k_pc_offset_thisinst;
+}
 /* RORQ.B #<data>,Dn */
 void REGPARAM2 op_e018_0_comp_ff(uae_u32 opcode) /* ROR */
 {
@@ -79822,6 +79852,36 @@ void REGPARAM2 op_e008_0_comp_nf(uae_u32 opcode) /* LSR */
 	if(dstreg != data)
 		mov_b_rr(dstreg, data);
 }}}}
+    if (m68k_pc_offset > SYNC_PC_OFFSET)
+        sync_m68k_pc();
+    if (failure)
+        m68k_pc_offset = m68k_pc_offset_thisinst;
+}
+/* ROXRQ.B #<data>,Dn */
+void REGPARAM2 op_e010_0_comp_nf(uae_u32 opcode) /* ROXR */
+{
+#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)
+	uae_u32 srcreg = imm8_table[((opcode >> 1) & 7)];
+#else
+	uae_s32 srcreg = imm8_table[((opcode >> 9) & 7)];
+#endif
+#if defined(HAVE_GET_WORD_UNSWAPPED) && !defined(FULLMMU)
+	uae_u32 dstreg = (opcode >> 8) & 7;
+#else
+	uae_u32 dstreg = opcode & 7;
+#endif
+	uae_u32 dodgy=0;
+	uae_u32 m68k_pc_offset_thisinst=m68k_pc_offset;
+	m68k_pc_offset+=2;
+{	uae_u8 scratchie=S1;
+	dont_care_flags();
+{	int cnt = scratchie++;
+	mov_l_ri(cnt, srcreg);
+{	int data = dstreg;
+	roxr_b_ri(data, srcreg);
+	if(dstreg != data)
+		mov_b_rr(dstreg, data);
+}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
     if (failure)
