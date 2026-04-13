@@ -2382,7 +2382,7 @@ static void gen_dbcc(uae_u32 opcode, struct instr *curi, const char* ssize) {
 		comprintf("\tuintptr v2,v;\n"
 				"\tuintptr v1=get_const(PC_P);\n");
 		comprintf("\tv2=get_const(offs);\n"
-				"\tregister_branch(v1,v2,%d);\n", NATIVE_CC_CS);
+				"\tregister_branch(v1,v2,%d);\n", NATIVE_CC_CC);
 		break;
 
 	case 8:

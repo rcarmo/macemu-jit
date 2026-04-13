@@ -872,7 +872,7 @@ void execute_normal(void)
 	jit_diag_dispatch_count++;
 	{
 		static unsigned long en_count = 0;
-		if (++en_count % 500000 == 0) {
+		if (++en_count % 100 == 0) {
 			uae_u32 pc = m68k_getpc();
 			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x\n",
 				en_count, pc, regs.regs[0], regs.regs[1], regs.regs[8],
@@ -1052,20 +1052,7 @@ void execute_normal(void)
 				}
 				maxrun_limit = env_maxrun;
 			}
-			bool must_end = SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit;
-			if (!must_end && end_block(opcode)) {
-				uintptr new_pcp = (uintptr)regs.pc_p;
-				uintptr blk_start = (uintptr)pc_hist[0].location;
-				/* Continue past internal branches to build bigger blocks.
-				   Cap at next multiple of 16 below MAXRUN for alignment. */
-				int blk_limit = (maxrun_limit < 48 ? maxrun_limit : 48) & ~15;
-				if (blk_limit < 16) blk_limit = 16;
-				if (new_pcp >= blk_start && new_pcp < blk_start + 512
-				    && blocklen < blk_limit)
-					continue;
-				must_end = true;
-			}
-			if (must_end) {
+			if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || blocklen >= maxrun_limit) {
 #if defined(CPU_AARCH64)
 				tick_inhibit = false;
 				uae_u32 block_pc = get_virtual_address((uae_u8*)pc_hist[0].location);

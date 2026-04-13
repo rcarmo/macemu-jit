@@ -2630,6 +2630,14 @@ static void flags_to_stack(void)
         jit_abort("flags_to_stack != VALID");
     else {
         trace_flagflow_log("FLAGS_STORE");
+        /* If carry is inverted (ARM64 convention), flip it to M68K convention
+           before storing so that restores always see M68K semantics. */
+        if (flags_carry_inverted) {
+            MRS_NZCV_x(REG_WORK1);
+            EOR_xxCflag(REG_WORK1, REG_WORK1);
+            MSR_NZCV_x(REG_WORK1);
+            flags_carry_inverted = false;
+        }
         int tmp = writereg(FLAGTMP);
         raw_flags_to_reg(tmp);
         unlock2(tmp);
@@ -5540,8 +5548,8 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
         } else {
 #if defined(CPU_AARCH64)
             jit_diag_optlev_gt0_blocks++;
-            /* Block compilation logging */
-            {
+            /* Block compilation logging — disabled for performance */
+#if 0
                 fprintf(stderr, "JIT_COMPILE optlev=%d pc=0x%08x blocklen=%d opcodes=",
                     optlev, block_m68k_pc, blocklen);
                 for (int di = 0; di < blocklen && di < 20; di++) {
@@ -5551,6 +5559,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 fprintf(stderr, "\n");
                 fflush(stderr);
             }
+#endif /* 0 - logging disabled */
 #endif
             reg_alloc_run = 0;
             next_pc_p = 0;
@@ -5783,7 +5792,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                        even inside long compiled blocks, and that pending
                        interrupts are delivered promptly.
                        For shorter intervals, just check spcflags inline. */
-#define JIT_TICK_INTERVAL 16
+#define JIT_TICK_INTERVAL 64
 
 #if defined(CPU_AARCH64)
                     /* Mid-block branch side-exit: emit a guard for non-traced path */

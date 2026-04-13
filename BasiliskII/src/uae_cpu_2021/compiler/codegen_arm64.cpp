@@ -546,6 +546,29 @@ STATIC_INLINE void compemu_raw_jmp_pc_tag(void)
 	idx = (uintptr)&regs.cache_tags - (uintptr)&regs;
 	LDR_xXi(REG_WORK2, R_REGSTRUCT, idx);
 	LDR_xXxLSLi(REG_WORK1, REG_WORK2, REG_WORK1, 3);
+	/* Periodic spcflags check via countdown */
+	{
+		extern int32_t jit_dispatch_countdown;
+		LOAD_U64(REG_WORK3, (uintptr)&jit_dispatch_countdown);
+		LDR_wXi(REG_WORK4, REG_WORK3, 0);
+		SUB_wwi(REG_WORK4, REG_WORK4, 1);
+		STR_wXi(REG_WORK4, REG_WORK3, 0);
+		CMP_wi(REG_WORK4, 0);
+		uae_u8* patch_bgt = (uae_u8*)get_target();
+		BGT_i(0); /* patched below */
+		LOAD_U32(REG_WORK4, 256);
+		STR_wXi(REG_WORK4, REG_WORK3, 0);
+		uintptr idx_spc = (uintptr)&regs.spcflags - (uintptr)&regs;
+		LDR_wXi(REG_WORK3, R_REGSTRUCT, idx_spc);
+		CBZ_wi(REG_WORK3, 2);
+		uae_u32* br_slow = (uae_u32*)get_target();
+		B_i(0);
+		write_jmp_target(br_slow, (uintptr)popall_execute_normal);
+		/* Patch BGT to skip to BR */
+		uae_u8* fast_target = (uae_u8*)get_target();
+		int bgt_off = (int)(fast_target - patch_bgt) / 4;
+		*(uae_u32*)patch_bgt = 0x5400000cu | ((bgt_off & 0x7ffff) << 5); /* B.GT */
+	}
 	BR_x(REG_WORK1);
 }
 
@@ -661,6 +684,28 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	uintptr offs = (uintptr)(&regs.cache_tags) - (uintptr)&regs;
 	LDR_xXi(REG_WORK1, R_REGSTRUCT, offs);
 	LDR_xXxLSLi(REG_WORK1, REG_WORK1, rr_pc, 3);
+	/* Periodic spcflags check via countdown */
+	{
+		extern int32_t jit_dispatch_countdown;
+		LOAD_U64(REG_WORK3, (uintptr)&jit_dispatch_countdown);
+		LDR_wXi(REG_WORK4, REG_WORK3, 0);
+		SUB_wwi(REG_WORK4, REG_WORK4, 1);
+		STR_wXi(REG_WORK4, REG_WORK3, 0);
+		CMP_wi(REG_WORK4, 0);
+		uae_u8* patch_bgt2 = (uae_u8*)get_target();
+		BGT_i(0); /* patched below */
+		LOAD_U32(REG_WORK4, 256);
+		STR_wXi(REG_WORK4, REG_WORK3, 0);
+		uintptr idx_spc2 = (uintptr)&regs.spcflags - (uintptr)&regs;
+		LDR_wXi(REG_WORK3, R_REGSTRUCT, idx_spc2);
+		CBZ_wi(REG_WORK3, 2);
+		uae_u32* br_slow2 = (uae_u32*)get_target();
+		B_i(0);
+		write_jmp_target(br_slow2, (uintptr)popall_execute_normal);
+		uae_u8* fast2 = (uae_u8*)get_target();
+		int bgt2_off = (int)(fast2 - patch_bgt2) / 4;
+		*(uae_u32*)patch_bgt2 = 0x5400000cu | ((bgt2_off & 0x7ffff) << 5);
+	}
 	BR_x(REG_WORK1);
 }
 LENDFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
@@ -1282,3 +1327,8 @@ LOWFUNC(NONE,NONE,2,raw_fp_fscc_ri,(RW4 d, int cc))
 	}
 }
 LENDFUNC(NONE,NONE,2,raw_fp_fscc_ri,(RW4 d, int cc))
+
+/* Global dispatch counter for periodic spcflags checks in direct dispatch.
+ * Decremented by compiled endblock code. When <= 0, spcflags is checked
+ * and the counter is reset. */
+int32_t jit_dispatch_countdown = 256;
