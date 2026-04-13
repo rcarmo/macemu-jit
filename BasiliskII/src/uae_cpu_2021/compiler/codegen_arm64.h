@@ -491,3 +491,5 @@
 #define REV64_dd(Vd,Vn)       _W((0b0000111000 << 22) | (0b100000000010 << 10) | ((Vn) << 5) | (Vd))
 
 #endif /* ARM_ASMA64_H */
+#define LDAR_wXi(Wt,Xn,i)  do { if ((i)==0) { _W(0x88DFFC00u | ((Xn) << 5) | (Wt)); } else { ADD_xxi(REG_WORK1,(Xn),(i)); _W(0x88DFFC00u | (REG_WORK1 << 5) | (Wt)); } } while(0)
+#define LDAR_wX(Wt,Xbase,offset)  do { ADD_xxi(REG_WORK4,(Xbase),(offset)); _W(0x88DFFC00u | (REG_WORK4 << 5) | (Wt)); } while(0)

@@ -1380,6 +1380,15 @@ uint32 ConsumeInterruptFlags(void)
 #if !EMULATED_68K
 void TriggerInterrupt(void)
 {
+#ifdef USE_JIT
+	if (UseJIT) {
+		/* With JIT, bypass the signal-based interrupt model.
+		   Set SPCFLAG_INT directly from the timer thread.
+		   The JIT dispatch checks spcflags and delivers interrupts. */
+		SPCFLAGS_SET(SPCFLAG_INT);
+		return;
+	}
+#endif
 #if defined(HAVE_PTHREADS)
 	pthread_kill(emul_thread, SIG_IRQ);
 #else
@@ -1522,9 +1531,12 @@ static void sigirq_handler(int sig, int code, struct sigcontext *scp)
 {
 #ifdef USE_JIT
 	if (UseJIT) {
-		/* With JIT, signal context has ARM64 registers, not M68K.
-		   Just set the flag — the JIT dispatch loop handles it. */
 		SPCFLAGS_SET(SPCFLAG_INT);
+		{
+			static int irq_log = 0;
+			if (++irq_log <= 5)
+				write(2, "IRQ!\n", 5);
+		}
 		return;
 	}
 #endif
