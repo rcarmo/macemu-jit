@@ -111,7 +111,7 @@ static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
    32-bit LDR/STR and checks bit 31 for sign. With a uint16, the high 16
    bits are garbage from adjacent memory, making the countdown sign check
    unpredictable. Use a dedicated int32 variable instead. */
-int32 jit_countdown = 1;
+int32 jit_countdown = 10000000;
 #define countdown jit_countdown
 
 #if defined(CPU_AARCH64)
@@ -1463,7 +1463,7 @@ uae_u8* current_compile_p = NULL;
 static uae_u8* max_compile_start;
 uae_u8* compiled_code = NULL;
 static uae_s32 reg_alloc_run;
-const int POPALLSPACE_SIZE = 2048; /* That should be enough space */
+const int POPALLSPACE_SIZE = 4096; /* That should be enough space */
 uae_u8* popallspace = NULL;
 
 #if defined(CPU_AARCH64)
@@ -2071,11 +2071,25 @@ static inline blockinfo* get_blockinfo(uae_u32 cl)
 static inline blockinfo* get_blockinfo_addr(void* addr)
 {
     blockinfo* bi = get_blockinfo(cacheline(addr));
+    int safety = 0;
 
     while (bi) {
+        /* Guard against corrupted hash chain pointers */
+        if ((uintptr)bi < 0x1000 || (uintptr)bi > 0x0000FFFFFFFFFFFFUL) {
+            static int warn = 0;
+            if (warn++ < 3)
+                fprintf(stderr, "JIT: corrupt blockinfo chain bi=%p for addr=%p\n", bi, addr);
+            return NULL;
+        }
         if (bi->pc_p == addr)
             return bi;
         bi = bi->next_same_cl;
+        if (++safety > 10000) {
+            static int warn2 = 0;
+            if (warn2++ < 3)
+                fprintf(stderr, "JIT: blockinfo chain too long for addr=%p\n", addr);
+            return NULL;
+        }
     }
     return NULL;
 }
@@ -4910,6 +4924,7 @@ STATIC_INLINE void create_popalls(void)
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
+    popall_exec_nostats = get_target();
     raw_pop_preserved_regs();
     compemu_raw_jmp((uintptr)exec_nostats);
 
@@ -4934,6 +4949,23 @@ STATIC_INLINE void create_popalls(void)
 #endif
 
     // no need to further write into popallspace
+    {
+        uae_u8 *end = (uae_u8*)get_target();
+        size_t popall_code_size = end - popallspace;
+        fprintf(stderr, "POPALL_DUMP size=%lu\n", (unsigned long)popall_code_size);
+        fprintf(stderr, "  pushall=%p exec_norm_setpc=%p exec_norm=%p\n",
+            pushall_call_handler, popall_execute_normal_setpc, popall_execute_normal);
+        fprintf(stderr, "  chk_setpc=%p chk=%p nostats_setpc=%p nostats=%p\n",
+            popall_check_checksum_setpc, popall_check_checksum,
+            popall_exec_nostats_setpc, popall_exec_nostats);
+        fprintf(stderr, "  recomp=%p do_nothing=%p cache_miss=%p exception=%p\n",
+            popall_recompile_block, popall_do_nothing, popall_cache_miss, popall_execute_exception);
+        uae_u32 *p = (uae_u32*)popallspace;
+        for (size_t i = 0; i < popall_code_size && i < 512; i += 4) {
+            fprintf(stderr, "  [%04lx] %08x\n", (unsigned long)i, *p++);
+        }
+        fflush(stderr);
+    }
 #if defined(CPU_AARCH64)
     // ARM64 has separate I-cache and D-cache: we MUST flush the I-cache
     // after writing code before making it executable, or we'll execute
@@ -6212,27 +6244,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
                 }
 
-                if (final_is_dbcc) {
-                    compemu_raw_set_pc_i(ct1);
-                    compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
-                } else {
-                    {
-                        static int isconst_log = 0;
-                        isconst_log++;
-                        uae_u8 *_before_eb = (uae_u8*)get_target();
-                        tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
-                        write_jmp_target(tba, get_handler(ct1));
-                        create_jmpdep(bi, 0, tba, ct1);
-                        if (isconst_log <= 2) {
-                            uae_u8 *_end = (uae_u8*)get_target();
-                            fprintf(stderr, "ENDBLK_DUMP pc=%08x size=%ld\n", (unsigned)block_m68k_pc, (long)(_end - _before_eb));
-                            uae_u32 *p = (uae_u32*)_before_eb;
-                            for (int di = 0; di < 40 && (uae_u8*)(p+1) <= _end; di++, p++)
-                                fprintf(stderr, "  [%02d] %08x\n", di*4, *p);
-                            fflush(stderr);
-                        }
-                    }
-                }
+                /* Use endblock_pc_isconst for ALL blocks (including DBF)
+                   to enable countdown + direct chaining. */
+                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
+                write_jmp_target(tba, get_handler(ct1));
+                create_jmpdep(bi, 0, tba, ct1);
 
                 /* not-predicted outcome */
                 write_jmp_target(branchadd, (uintptr)get_target());
@@ -6249,14 +6265,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     }
                 }
 
-                if (final_is_dbcc) {
-                    compemu_raw_set_pc_i(ct2);
-                    compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
-                } else {
-                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
-                    write_jmp_target(tba, get_handler(ct2));
-                    create_jmpdep(bi, 1, tba, ct2);
-                }
+                tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct2);
+                write_jmp_target(tba, get_handler(ct2));
+                create_jmpdep(bi, 1, tba, ct2);
             } else if (!forced_interpreter_barrier) {
                 if (was_comp) {
                     flush(1);

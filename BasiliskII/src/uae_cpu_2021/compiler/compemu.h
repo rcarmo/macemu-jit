@@ -62,7 +62,7 @@ extern void compiler_dumpstate(void);
 #define TAGMASK 0x0000ffff
 #define TAGSIZE (TAGMASK+1)
 #define MAXRUN 1024
-#define cacheline(x) (((uintptr)x)&TAGMASK)
+#define cacheline(x) (((((uintptr)(x))>>1)&(TAGMASK>>1))<<1)
 
 extern uae_u8* start_pc_p;
 extern uae_u32 start_pc;

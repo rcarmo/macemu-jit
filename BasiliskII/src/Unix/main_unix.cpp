@@ -296,9 +296,20 @@ static sigsegv_return_t sigsegv_handler(sigsegv_info_t *sip)
 	if (((uintptr)fault_address - (uintptr)ROMBaseHost) < ROMSize)
 		return SIGSEGV_RETURN_SKIP_INSTRUCTION;
 
-	// Ignore all other faults, if requested
-	if (PrefsFindBool("ignoresegv"))
+	// JIT or interpreter may access unmapped Mac hardware/probe addresses.
+	// Always skip — aarch64_skip_instruction redirects JIT code to recovery,
+	// and advances PC+4 for interpreter code.
+	{
+		static unsigned long segv_skip_count = 0;
+		segv_skip_count++;
+		if (segv_skip_count <= 5 || segv_skip_count % 500000 == 0) {
+			fprintf(stderr, "SEGV_SKIP[%lu] host=%p mac=%08lx pc=%p\n",
+				segv_skip_count, (void*)fault_address,
+				(unsigned long)(uae_u32)(fault_address - MEMBaseDiff),
+				sigsegv_get_fault_instruction_address(sip));
+		}
 		return SIGSEGV_RETURN_SKIP_INSTRUCTION;
+	}
 #endif
 
 	return SIGSEGV_RETURN_FAILURE;
@@ -850,6 +861,35 @@ int main(int argc, char **argv)
 	MEMBaseDiff = (uintptr)RAMBaseHost;
 	RAMBaseMac = 0;
 	ROMBaseMac = Host2MacAddr(ROMBaseHost);
+	fprintf(stderr, "MEM: MEMBaseDiff=%p RAMBaseHost=%p ROMBaseHost=%p RAMSize=%x ROMSize=%x ROMBaseMac=%x\n",
+		(void*)MEMBaseDiff, RAMBaseHost, ROMBaseHost, (unsigned)RAMSize, (unsigned)ROMSize, (unsigned)ROMBaseMac);
+	fflush(stderr);
+
+	// Map Mac address space ranges so JIT direct addressing doesn't SIGSEGV.
+	// RAM+ROM are already mapped. Map I/O, NuBus, and gap regions.
+	// Use MAP_FIXED_NOREPLACE to avoid clobbering existing heap/JIT mappings.
+	// If a large range fails, try smaller sub-ranges (64MB chunks).
+	{
+		struct { uintptr mac_start; size_t size; const char *name; } io_ranges[] = {
+			{ 0x50000000, 0x0F000000, "I/O" },     // Mac I/O (VIA, SCSI, ASC at 0x50Fxxxxx)
+			{ 0xF0000000, 0x10000000, "NuBus" },   // NuBus/video
+		};
+		for (auto &r : io_ranges) {
+			void *target = (void*)(MEMBaseDiff + r.mac_start);
+			void *result = mmap(target, r.size,
+				PROT_READ | PROT_WRITE,
+				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE,
+				-1, 0);
+			if (result == MAP_FAILED) {
+				fprintf(stderr, "MEM: failed to map %s at %p size=%lx: %s\n",
+					r.name, target, (unsigned long)r.size, strerror(errno));
+			} else {
+				fprintf(stderr, "MEM: mapped %s at %p-%p (Mac 0x%08lx-0x%08lx)\n",
+					r.name, result, (void*)((uintptr)result + r.size),
+					(unsigned long)r.mac_start, (unsigned long)(r.mac_start + r.size));
+			}
+		}
+	}
 #endif
 #if REAL_ADDRESSING
 	RAMBaseMac = Host2MacAddr(RAMBaseHost);
@@ -1931,4 +1971,32 @@ bool ChoiceAlert(const char *text, const char *pos, const char *neg)
 void jit_one_tick(void)
 {
     one_tick();
+}
+
+// SIGILL diagnostic handler
+#include <signal.h>
+static void sigill_handler_diag(int sig, siginfo_t *si, void *ctx) {
+    ucontext_t *uc = (ucontext_t *)ctx;
+    fprintf(stderr, "\n=== SIGILL at PC=0x%lx addr=%p ===\n",
+        (unsigned long)uc->uc_mcontext.pc, si->si_addr);
+    for (int i = 0; i < 31; i++) {
+        fprintf(stderr, "x%02d=0x%016lx ", i, (unsigned long)uc->uc_mcontext.regs[i]);
+        if ((i % 4) == 3) fprintf(stderr, "\n");
+    }
+    fprintf(stderr, "\nInstruction words around PC:\n");
+    uae_u32 *p = (uae_u32*)(uc->uc_mcontext.pc - 16);
+    for (int i = 0; i < 12; i++)
+        fprintf(stderr, "  %s %p: %08x\n", i==4 ? ">>>" : "   ", p+i, p[i]);
+    fprintf(stderr, "=== END ===\n");
+    fflush(stderr);
+    _exit(132);
+}
+
+static void install_sigill_diag() __attribute__((constructor));
+static void install_sigill_diag() {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = sigill_handler_diag;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGILL, &sa, NULL);
 }

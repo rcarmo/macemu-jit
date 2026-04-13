@@ -1019,6 +1019,20 @@ static bool patch_rom_32(void)
 	uint8 *bp;
 	uint32 base;
 
+#if defined(CPU_AARCH64)
+	// ARM64 JIT: patch hardware config table scan panic at 0x4b7e.
+	// With JIT direct addressing, I/O registers return 0 so the machine
+	// type detection fails (D0=0, no table match). Redirect the panic
+	// loop to the success path at 0x4b78 (which jumps to 0x2f52).
+	{
+		uint16 *panic = (uint16 *)(ROMBaseHost + 0x4b7e);
+		if (ntohs(*panic) == 0x60FE) { // BRA.S *
+			*panic = htons(0x60F8);   // BRA.S $4b78 (success path)
+			D(bug("ROM patch: 0x4b7e BRA.S * -> BRA.S $4b78\n"));
+		}
+	}
+#endif
+
 	// Find UniversalInfo
 	static const uint8 universal_dat[] = {0xdc, 0x00, 0x05, 0x05, 0x3f, 0xff, 0x01, 0x00};
 	if ((base = find_rom_data(0x3400, 0x3c00, universal_dat, sizeof(universal_dat))) == 0) return false;

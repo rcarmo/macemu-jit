@@ -609,18 +609,18 @@ void do_nothing(void)
 #if defined(CPU_AARCH64)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
-	countdown = 1;
+	countdown = 10000000;
 	{
-		extern int32_t jit_endblock_inreg_count;
-		static unsigned long dn_log = 0;
-		if (++dn_log <= 5 || dn_log % 10000 == 0) {
-			char buf[128];
-			int n = snprintf(buf, sizeof(buf), "DN[%lu] pc=%08x spc=%x im=%u inreg=%d\n",
-				dn_log, m68k_getpc(), (unsigned)regs.spcflags,
-				(unsigned)regs.intmask, jit_endblock_inreg_count);
-			write(2, buf, n);
+		static unsigned long dn_count = 0;
+		dn_count++;
+		if (dn_count <= 5 || dn_count % 50000 == 0) {
+			fprintf(stderr, "DN[%lu] pc=%08x im=%u spc=%x d0=%08x a7=%08x\n",
+				dn_count, m68k_getpc(), (unsigned)regs.intmask,
+				(unsigned)regs.spcflags, regs.regs[0], regs.regs[15]);
 		}
 	}
+	MakeSR();
+	m68k_do_specialties();
 #endif
 }
 
@@ -876,34 +876,11 @@ void execute_normal(void)
 	jit_diag_execute_normal_calls++;
 	jit_diag_dispatch_count++;
 	/* Handle pending interrupts on every execute_normal entry. */
-	{
-		static unsigned long en_total = 0;
-		en_total++;
-		if (__atomic_load_n(&regs.spcflags, __ATOMIC_ACQUIRE) & SPCFLAG_ALL) {
-			static unsigned long en_spc = 0;
-			en_spc++;
-			if (en_spc <= 5) {
-				char buf[128];
-				int n = snprintf(buf, sizeof(buf),
-					"SPC[%lu/%lu] spc=%x im=%u pc=%08x\n",
-					en_spc, en_total, (unsigned)regs.spcflags,
-					(unsigned)regs.intmask, m68k_getpc());
-				write(2, buf, n);
-			}
-			MakeSR();
-			m68k_do_specialties();
-		}
+	if (__atomic_load_n(&regs.spcflags, __ATOMIC_ACQUIRE) & SPCFLAG_ALL) {
+		MakeSR();
+		m68k_do_specialties();
 	}
-	{
-		static unsigned long en_count = 0;
-		if (++en_count % 100 == 0) {
-			uae_u32 pc = m68k_getpc();
-			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d2=%08x d4=%08x d5=%08x a0=%08x a7=%08x sr=%04x\n",
-				en_count, pc, regs.regs[0], regs.regs[2], regs.regs[4], regs.regs[5], regs.regs[8],
-				regs.regs[15], (unsigned)regs.sr);
-			fflush(stderr);
-		}
-	}
+
 	jit_diag_maybe_print();
 	/* If pc_p is outside valid Mac memory range (corrupt), re-derive it. */
 	{
