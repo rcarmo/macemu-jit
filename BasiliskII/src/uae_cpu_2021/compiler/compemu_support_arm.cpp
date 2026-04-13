@@ -111,7 +111,7 @@ static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
    32-bit LDR/STR and checks bit 31 for sign. With a uint16, the high 16
    bits are garbage from adjacent memory, making the countdown sign check
    unpredictable. Use a dedicated int32 variable instead. */
-int32 jit_countdown = 1000000;
+int32 jit_countdown = 1;
 #define countdown jit_countdown
 
 #if defined(CPU_AARCH64)
@@ -6216,9 +6216,22 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                     compemu_raw_set_pc_i(ct1);
                     compemu_raw_execute_normal_cycles((uintptr)&regs.pc_p, scaled_cycles(totcycles));
                 } else {
-                    tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
-                    write_jmp_target(tba, get_handler(ct1));
-                    create_jmpdep(bi, 0, tba, ct1);
+                    {
+                        static int isconst_log = 0;
+                        isconst_log++;
+                        uae_u8 *_before_eb = (uae_u8*)get_target();
+                        tba = compemu_raw_endblock_pc_isconst(scaled_cycles(totcycles), ct1);
+                        write_jmp_target(tba, get_handler(ct1));
+                        create_jmpdep(bi, 0, tba, ct1);
+                        if (isconst_log <= 2) {
+                            uae_u8 *_end = (uae_u8*)get_target();
+                            fprintf(stderr, "ENDBLK_DUMP pc=%08x size=%ld\n", (unsigned)block_m68k_pc, (long)(_end - _before_eb));
+                            uae_u32 *p = (uae_u32*)_before_eb;
+                            for (int di = 0; di < 40 && (uae_u8*)(p+1) <= _end; di++, p++)
+                                fprintf(stderr, "  [%02d] %08x\n", di*4, *p);
+                            fflush(stderr);
+                        }
+                    }
                 }
 
                 /* not-predicted outcome */

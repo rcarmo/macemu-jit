@@ -636,7 +636,7 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	/* Check spcflags on hot path */
 	{
 		uintptr idx_spc_hot = (uintptr)&regs.spcflags - (uintptr)&regs;
-		LDAR_wX(REG_WORK4, R_REGSTRUCT, idx_spc_hot);
+		{ _W(0xd5033bbf); } LDR_wXi(REG_WORK4, R_REGSTRUCT, idx_spc_hot);
 		CBZ_wi(REG_WORK4, 2);
 		uae_u32* br_dn_hot = (uae_u32*)get_target();
 		B_i(0);
@@ -721,7 +721,7 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 	/* Check spcflags on hot path */
 	{
 		uintptr idx_spc_hot2 = (uintptr)&regs.spcflags - (uintptr)&regs;
-		LDAR_wX(REG_WORK4, R_REGSTRUCT, idx_spc_hot2);
+		{ _W(0xd5033bbf); } LDR_wXi(REG_WORK4, R_REGSTRUCT, idx_spc_hot2);
 		CBZ_wi(REG_WORK4, 2);
 		uae_u32* br_dn_hot2 = (uae_u32*)get_target();
 		B_i(0);

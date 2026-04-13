@@ -609,7 +609,7 @@ void do_nothing(void)
 #if defined(CPU_AARCH64)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
-	countdown = 1000000;
+	countdown = 1;
 	{
 		extern int32_t jit_endblock_inreg_count;
 		static unsigned long dn_log = 0;
