@@ -609,10 +609,8 @@ void do_nothing(void)
 #if defined(CPU_AARCH64)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
-	/* Reset countdown so the hot path resumes until the next expiry.
-	   Interrupt delivery happens via the 60Hz timer thread + spcflags;
-	   do NOT call cpu_check_ticks here (it blocks via usleep). */
 	countdown = 1000000;
+	jit_diag_maybe_print();
 #endif
 }
 
@@ -869,7 +867,7 @@ void execute_normal(void)
 	jit_diag_dispatch_count++;
 	{
 		static unsigned long en_count = 0;
-		if (++en_count % 100 == 0) {
+		if (++en_count % 1000000 == 0) {
 			uae_u32 pc = m68k_getpc();
 			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x\n",
 				en_count, pc, regs.regs[0], regs.regs[1], regs.regs[8],

@@ -1567,6 +1567,9 @@ static void jit_diag_maybe_print(void)
 {
     if (!jit_diag_enabled())
         return;
+    static unsigned long call_count = 0;
+    if (++call_count % 100000 != 0)
+        return;
     if (jit_diag_start_time == 0)
         jit_diag_start_time = time(NULL);
     time_t now = time(NULL);
@@ -5183,6 +5186,55 @@ void build_comp(void)
         }
     }
 
+    /* Propagate compiled handlers from base opcodes to variants.
+       gencomp generates handlers for base opcodes only (e.g., e008 for LSR.B).
+       Variant opcodes (e.g., e214 = LSR.B #1,D4) need to be mapped via
+       table68k[opcode].handler to the base handler. */
+    for (opcode = 0; opcode < 65536; opcode++) {
+        if (table68k[opcode].mnemo == i_ILLG || table68k[opcode].handler == -1)
+            continue;
+        if (!compfunctbl[cft_map(opcode)] && table68k[opcode].handler != -1) {
+            /* Follow the handler chain — may need multiple hops */
+            int base = table68k[opcode].handler;
+            int hops = 0;
+            while (base >= 0 && base < 65536 && !compfunctbl[base] && hops < 10) {
+                if (table68k[base].handler == -1 || table68k[base].handler == base)
+                    break;
+                base = table68k[base].handler;
+                hops++;
+            }
+            compop_func *f = (base >= 0 && base < 65536) ? compfunctbl[base] : NULL;
+            compop_func *nff = (base >= 0 && base < 65536) ? nfcompfunctbl[base] : NULL;
+            /* If chain failed, search by instruction family (same mnemo) */
+            if (!f) {
+                int mnemo = table68k[opcode].mnemo;
+                for (int probe = 0; probe < 65536 && !f; probe++) {
+                    if (table68k[probe].mnemo == mnemo && compfunctbl[probe]) {
+                        f = compfunctbl[probe];
+                        nff = nfcompfunctbl[probe];
+                        base = probe;
+                    }
+                }
+            }
+            if (f) {
+                compfunctbl[cft_map(opcode)] = f;
+                nfcompfunctbl[cft_map(opcode)] = nff;
+            }
+            if (base >= 0 && base < 65536) {
+                prop[cft_map(opcode)].cflow = prop[base].cflow;
+            }
+            prop[cft_map(opcode)].set_flags = table68k[opcode].flagdead;
+            prop[cft_map(opcode)].use_flags = table68k[opcode].flaglive;
+        }
+    }
+
+    /* DEBUG: check e214 handler propagation */
+    {
+        int h = table68k[0xe214].handler;
+        fprintf(stderr, "DEBUG: e214 handler=%d(0x%x) compfunctbl[e214]=%p compfunctbl[handler]=%p compfunctbl[e008]=%p\n",
+            h, h, (void*)compfunctbl[cft_map(0xe214)], (void*)(h>=0 ? compfunctbl[h] : NULL), (void*)compfunctbl[cft_map(0xe008)]);
+        fflush(stderr);
+    }
     int count = 0;
     for (opcode = 0; opcode < 65536; opcode++) {
         if (compfunctbl[cft_map(opcode)])
@@ -5190,33 +5242,10 @@ void build_comp(void)
     }
 
 #if defined(CPU_AARCH64)
-    /* ARM64: NULL out compiled handlers for instruction families whose
-       L2 native codegen is known to be buggy. These will always go through
-       the interpreter fallback path even at optlev=2. */
-    {
-        int nulled = 0;
-        for (opcode = 0; opcode < 65536; opcode++) {
-            uae_u16 lop = (uae_u16)opcode; /* logical opcode */
-            bool needs_null = false;
-            /* Shifts/rotates: confirmed ARM64 codegen issues */
-            if (table68k[opcode].mnemo == i_ASL || table68k[opcode].mnemo == i_ASR ||
-                table68k[opcode].mnemo == i_LSL || table68k[opcode].mnemo == i_LSR ||
-                table68k[opcode].mnemo == i_ROL || table68k[opcode].mnemo == i_ROR ||
-                table68k[opcode].mnemo == i_ROXL || table68k[opcode].mnemo == i_ROXR ||
-                table68k[opcode].mnemo == i_ASLW || table68k[opcode].mnemo == i_ASRW ||
-                table68k[opcode].mnemo == i_LSLW || table68k[opcode].mnemo == i_LSRW ||
-                table68k[opcode].mnemo == i_ROLW || table68k[opcode].mnemo == i_RORW ||
-                table68k[opcode].mnemo == i_ROXLW || table68k[opcode].mnemo == i_ROXRW)
-                needs_null = true;
-            if (needs_null && compfunctbl[cft_map(opcode)]) {
-                compfunctbl[cft_map(opcode)] = NULL;
-                nfcompfunctbl[cft_map(opcode)] = NULL;
-                nulled++;
-            }
-        }
-        if (nulled > 0)
-            jit_log("<JIT compiler> : nulled %d ARM64-buggy shift/rotate compiled handlers", nulled);
-    }
+    /* ARM64: shift/rotate handlers were previously nulled due to suspected
+       codegen bugs. Re-enabled now that carry flag handling is fixed.
+       If specific shifts still cause issues, null them individually. */
+    jit_log("<JIT compiler> : shift/rotate handlers ENABLED for ARM64");
 #endif
 
     jit_log("<JIT compiler> : supposedly %d compileable opcodes!", count);
