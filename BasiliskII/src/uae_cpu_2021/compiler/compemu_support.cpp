@@ -484,6 +484,13 @@ void m68k_do_compile_execute(void)
 #endif
 		((compiled_handler)(pushall_call_handler))();
 		_dc++;
+		{
+			static unsigned long dc_log = 0;
+			if (++dc_log % 10000 == 0)
+				fprintf(stderr, "DC[%lu] pc=%08x sr=%04x intmask=%u spc=%08x\n",
+					dc_log, m68k_getpc(), (unsigned)regs.sr, (unsigned)regs.intmask,
+					(unsigned)regs.spcflags);
+		}
 #if defined(CPU_AARCH64)
 		if (use_sync_ticks) {
 			tick_inhibit = false;
@@ -500,6 +507,11 @@ void m68k_do_compile_execute(void)
 		}
 #endif
 		if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
+			/* Sync M68K SR from JIT flags before handling interrupts.
+			   The compiled code may have changed intmask via MOVE to SR
+			   but regs.sr in memory is stale. MakeSR reads regflags
+			   and reconstructs regs.sr. */
+			MakeSR();
 			if (m68k_do_specialties())
 				return;
 		}

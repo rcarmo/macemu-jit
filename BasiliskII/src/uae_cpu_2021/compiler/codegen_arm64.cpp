@@ -626,6 +626,15 @@ LOWFUNC(NONE,NONE,2,compemu_raw_endblock_pc_inreg,(RR4 rr_pc, IM32 cycles))
 	write_jmp_target(branchadd, (uintptr)popall_do_nothing);
 
 	write_jmp_target(branch_hot, (uintptr)get_target());
+	/* Check spcflags on hot path */
+	{
+		uintptr idx_spc_hot = (uintptr)&regs.spcflags - (uintptr)&regs;
+		LDR_wXi(REG_WORK4, R_REGSTRUCT, idx_spc_hot);
+		CBZ_wi(REG_WORK4, 2);
+		uae_u32* br_dn_hot = (uae_u32*)get_target();
+		B_i(0);
+		write_jmp_target(br_dn_hot, (uintptr)popall_do_nothing);
+	}
 	if (jit_trace_setpc_env()) {
 		STR_xXpre(rr_pc, RSP_INDEX, -16);
 		MOV_xx(REG_PAR1, rr_pc);
@@ -702,6 +711,15 @@ STATIC_INLINE uae_u32* compemu_raw_endblock_pc_isconst(IM32 cycles, IMPTR v)
 	write_jmp_target(branchadd, (uintptr)popall_do_nothing);
 
 	write_jmp_target(branch_hot, (uintptr)get_target());
+	/* Check spcflags on hot path */
+	{
+		uintptr idx_spc_hot2 = (uintptr)&regs.spcflags - (uintptr)&regs;
+		LDR_wXi(REG_WORK4, R_REGSTRUCT, idx_spc_hot2);
+		CBZ_wi(REG_WORK4, 2);
+		uae_u32* br_dn_hot2 = (uae_u32*)get_target();
+		B_i(0);
+		write_jmp_target(br_dn_hot2, (uintptr)popall_do_nothing);
+	}
 	if (jit_trace_setpc_env()) {
 		LOAD_U64(REG_PAR1, v);
 		LOAD_U32(REG_PAR2, 5);

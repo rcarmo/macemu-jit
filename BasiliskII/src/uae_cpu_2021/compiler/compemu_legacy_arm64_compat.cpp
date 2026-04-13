@@ -609,8 +609,13 @@ void do_nothing(void)
 #if defined(CPU_AARCH64)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
-	countdown = 1000000;
-	jit_diag_maybe_print();
+	countdown = 100;
+	{
+		static unsigned long dn_log = 0;
+		if (++dn_log <= 5 || dn_log % 10000 == 0)
+			fprintf(stderr, "DN[%lu] pc=%08x spc=%08x intmask=%u\n",
+				dn_log, m68k_getpc(), (unsigned)regs.spcflags, (unsigned)regs.intmask);
+	}
 #endif
 }
 
@@ -865,9 +870,18 @@ void execute_normal(void)
 #if defined(CPU_AARCH64)
 	jit_diag_execute_normal_calls++;
 	jit_diag_dispatch_count++;
+	/* Handle pending interrupts on every execute_normal entry.
+	   This is critical because compiled blocks that exit via
+	   execute_normal_cycles bypass m68k_do_compile_execute's
+	   spcflags check entirely. Without this, timer interrupts
+	   are never delivered and the ROM hangs. */
+	if (SPCFLAGS_TEST(SPCFLAG_ALL)) {
+		MakeSR();
+		m68k_do_specialties();
+	}
 	{
 		static unsigned long en_count = 0;
-		if (++en_count % 100000 == 0) {
+		if (++en_count % 10000 == 0) {
 			uae_u32 pc = m68k_getpc();
 			fprintf(stderr, "EN[%lu] pc=%08x d0=%08x d2=%08x d4=%08x d5=%08x a0=%08x a7=%08x sr=%04x\n",
 				en_count, pc, regs.regs[0], regs.regs[2], regs.regs[4], regs.regs[5], regs.regs[8],

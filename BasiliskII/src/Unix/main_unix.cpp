@@ -1520,6 +1520,14 @@ bool tick_inhibit;
 
 static void sigirq_handler(int sig, int code, struct sigcontext *scp)
 {
+#ifdef USE_JIT
+	if (UseJIT) {
+		/* With JIT, signal context has ARM64 registers, not M68K.
+		   Just set the flag — the JIT dispatch loop handles it. */
+		SPCFLAGS_SET(SPCFLAG_INT);
+		return;
+	}
+#endif
 	// Interrupts disabled? Then do nothing
 	if (EmulatedSR & 0x0700)
 		return;
