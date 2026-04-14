@@ -922,15 +922,16 @@ int main(int argc, char **argv)
 		//   Host 0x10000000-0x1A013FFF: RAM + ROM + vm_alloc RESERVED (PROT_NONE)
 		//   Host 0x1A014000-0x1A815000: JIT cache (allocated later by JIT init)
 		//   Host 0x1A815000-0x1FFFFFFF: unmapped
-		// Mac 0x08000000-0x0FFFFFFF maps to host 0x18000000-0x1FFFFFFF.
-		// Strategy: mprotect the PROT_NONE reserved region, mmap the unmapped tail.
-		// The JIT cache region (0x1A014000-0x1A815000 = Mac 0x0A014000-0x0A815000)
-		// is also in this range but will be overwritten by the JIT with real code.
-		{
+		// Mac 0x08000000-0x0FFFFFFF: low NuBus slot mirror.
+		// On real hardware, empty slots bus-error; SIGSEGV-skipped reads leave stale
+		// register values causing SP corruption. Fill with 0xFF (empty-slot sentinel).
+		// ONLY when RAM doesn't cover this range: skip if RAMSize > 0x08000000 (128 MB)
+		// because with large RAM the region is valid Mac RAM and must not be clobbered.
+		if (RAMSize <= 0x08000000) {
 			uintptr_t lo_host_base  = MEMBaseDiff + 0x08000000UL; // host 0x18000000
 			uintptr_t lo_host_end   = MEMBaseDiff + 0x10000000UL; // host 0x20000000
-			uintptr_t reserved_end  = MEMBaseDiff + 0x0A014000UL; // host 0x1A014000 (end of reserved)
-			uintptr_t unmapped_start= MEMBaseDiff + 0x0A815000UL; // host 0x1A815000 (after JIT cache)
+			uintptr_t reserved_end  = MEMBaseDiff + 0x0A014000UL; // end of vm_alloc RESERVED
+			uintptr_t unmapped_start= MEMBaseDiff + 0x0A815000UL; // after JIT cache
 
 			// Part 1: mprotect the PROT_NONE reserved region → R/W, fill 0xFF
 			if (mprotect((void *)lo_host_base, reserved_end - lo_host_base,
@@ -962,8 +963,10 @@ int main(int argc, char **argv)
 		// Lower word 0xFFFF = no match in ROM scan table → uses clean fallback entry.
 		{
 			uint8_t *cfg = (uint8_t *)(MEMBaseDiff + 0x5FFFFFFCUL);
-			cfg[0] = 0xA5; cfg[1] = 0x5A;  // upper word (big-endian)
-			cfg[2] = 0xFF; cfg[3] = 0xFF;  // lower word: 0xFFFF = no table match
+			cfg[0] = 0xA5; cfg[1] = 0x5A;  // upper word (big-endian): valid hw signature
+			cfg[2] = 0x10; cfg[3] = 0x03;  // lower word: 0x1003 = scan table entry[3]
+			                                // flags=0x0000773f (bit29=0 → no sound-driver
+			                                // init → MAC[0x02ba] stays 0 → clean trap path)
 			void *page = (void *)((uintptr_t)cfg & ~0xFFFUL);
 			if (mprotect(page, 0x1000, PROT_READ) == 0)
 				fprintf(stderr, "MEM: 0x5ffffffc set to 0xA55AFFFF (PROT_READ)\n");

@@ -1251,6 +1251,19 @@ static bool patch_rom_32(void)
 		D(bug("Patched NuBus slot probe at 0xba0b0\n"));
 	}
 
+	// Skip NuBus hardware scanner loop at ROM+0xb9874 (function entry).
+	// The function at 0xb9874 starts with lea -256(sp),sp and later changes
+	// the VBR — patching the body at 0xb98e0 with RTS pops from the modified
+	// stack (exception-vector data) causing a bad return address.
+	// Patch the entry itself with JMP(A6) (threaded-code return) so the
+	// scanner is skipped before any stack or VBR changes.
+	// Guard: 4fef ff00 = lea -256(sp),sp at the entry.
+	if (ROMBaseHost[0xb9874] == 0x4f && ROMBaseHost[0xb9875] == 0xef &&
+	    ROMBaseHost[0xb9876] == 0xff && ROMBaseHost[0xb9877] == 0x00) {
+		*(uint16 *)(ROMBaseHost + 0xb9874) = htons(0x4ed6); // JMP (A6)
+		fprintf(stderr, "ROM: patched NuBus scanner entry at 0xb9874 (JMP A6)\n");
+	}
+
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);
