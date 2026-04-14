@@ -910,6 +910,14 @@ int main(int argc, char **argv)
 				for (size_t i = 0; i < nwords; i++)
 					p[i] = htonl(0x70004e75);  // moveq #0,d0; rts (big-endian)
 				fprintf(stderr, "MEM: stub 0x04100000-0x4FFFFFFF filled (moveq;rts)\n");
+				// Fix 0x27020010 handler: ori.b #0x80,MAC[0x0c2c]; moveq #0,d0; rts
+				// Sets the 'sound-manager-ready' bit when this trap is dispatched.
+				// ori.b #0x80,(0x0c2c).W = 0038 0080 0c2c (correct encoding)
+				uint8_t *h = (uint8_t *)stub + (0x27020010UL - 0x04100000UL);
+				h[0]=0x00; h[1]=0x38; h[2]=0x00; h[3]=0x80;
+				h[4]=0x0c; h[5]=0x2c;  // ori.b #0x80, MAC[0x0c2c]
+				h[6]=0x70; h[7]=0x00;  // moveq #0, d0
+				h[8]=0x4e; h[9]=0x75;  // rts
 			} else {
 				fprintf(stderr, "MEM: stub mmap failed: %s\n", strerror(errno));
 			}
@@ -918,12 +926,6 @@ int main(int argc, char **argv)
 		// Pre-populate I/O hardware registers with Quadra 800 values so the ROM
 		// boot reads correct data instead of zeros.
 		uint8_t *io_base = (uint8_t *)(MEMBaseDiff + 0x50000000UL);
-
-		// Ensure sound-init path at ROM+0x280e isn't triggered by a stale
-		// MAC[0x02ba] pointer. The ROM reads this as a 4-byte sound-driver
-		// dispatch table; if non-zero it calls uninstalled A-line traps.
-		// Zero it here so the safe path (MAC[0x02ba]==0) is taken on first entry.
-		*(uint32_t *)(MEMBaseDiff + 0x02baUL) = 0;
 
 		// VIA1 at 0x50F00000: PortA = 0x7F (all inputs, no outputs asserted)
 		// Quadra 800 VIA1 is at 0x50F00000; registers are 512-byte spaced.
@@ -994,7 +996,7 @@ int main(int argc, char **argv)
 		{
 			uint8_t *cfg = (uint8_t *)(MEMBaseDiff + 0x5FFFFFFCUL);
 			cfg[0] = 0xA5; cfg[1] = 0x5A;  // upper word (big-endian): valid hw signature
-			cfg[2] = 0x10; cfg[3] = 0x03;  // lower word: 0x1003 = scan table entry[3]
+			cfg[2] = 0xFF; cfg[3] = 0xFF;  // lower word: 0xFFFF = entry[21], fast empty driver install
 			                                // flags=0x0000773f (bit29=0 → no sound-driver
 			                                // init → MAC[0x02ba] stays 0 → clean trap path)
 			void *page = (void *)((uintptr_t)cfg & ~0xFFFUL);
