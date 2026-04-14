@@ -891,36 +891,40 @@ int main(int argc, char **argv)
 			}
 		}
 
-		// Stub region for System-file trap handlers installed beyond the 64 MB RAM
-		// boundary. System 7.5 installs some handlers at addresses like 0x27020010
-		// (valid on the 640 MB machine the disk was imaged from). If the Mac jumps
-		// there it bus-errors and retries forever. Map the region and fill it with
-		// 'moveq #0,d0; rts' (0x7000 4e75) so every call returns D0=0 (success).
-		// Range 0x04100000-0x4FFFFFFF covers the gap between ROM and I/O.
+		// Stub region: map all address ranges outside RAM/ROM/I/O with
+		// 'moveq #0,d0; rts' so System 7.5 trap handlers installed at high
+		// addresses (e.g. 0x27020010, 0x9Bxxxxxx from a 640MB disk image)
+		// return cleanly instead of crashing or SIGSEGV-looping.
 		if (RAMSize <= 0x08000000) {  // only needed when RAM < 128 MB
-			uintptr_t stub_host = MEMBaseDiff + 0x04100000UL;
-			size_t    stub_size = 0x4BF00000UL;  // up to MAC 0x4FFFFFFF
-			void *stub = mmap((void *)stub_host, stub_size,
-				PROT_READ | PROT_WRITE,
-				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED,
-				-1, 0);
-			if (stub != MAP_FAILED) {
-				uint32_t *p = (uint32_t *)stub;
-				size_t nwords = stub_size / 4;
-				for (size_t i = 0; i < nwords; i++)
-					p[i] = htonl(0x70004e75);  // moveq #0,d0; rts (big-endian)
-				fprintf(stderr, "MEM: stub 0x04100000-0x4FFFFFFF filled (moveq;rts)\n");
-				// Fix 0x27020010 handler: ori.b #0x80,MAC[0x0c2c]; moveq #0,d0; rts
-				// Sets the 'sound-manager-ready' bit when this trap is dispatched.
-				// ori.b #0x80,(0x0c2c).W = 0038 0080 0c2c (correct encoding)
-				uint8_t *h = (uint8_t *)stub + (0x27020010UL - 0x04100000UL);
-				h[0]=0x00; h[1]=0x38; h[2]=0x00; h[3]=0x80;
-				h[4]=0x0c; h[5]=0x2c;  // ori.b #0x80, MAC[0x0c2c]
-				h[6]=0x70; h[7]=0x00;  // moveq #0, d0
-				h[8]=0x4e; h[9]=0x75;  // rts
-			} else {
-				fprintf(stderr, "MEM: stub mmap failed: %s\n", strerror(errno));
+			struct { uintptr_t mac_start; size_t size; const char *name; } stubs[] = {
+				{ 0x0A100000, 0x45F00000, "stub-lo" },  // Past scratch → I/O (0x04100000-0x4FFFFFFF)
+				{ 0x60000000, 0x30000000, "stub-60" },  // 0x60000000-0x8FFFFFFF
+				{ 0x90000000, 0x60000000, "stub-90" },  // NuBus slots 9-E (0x90000000-0xEFFFFFFF)
+			};
+			for (auto &s : stubs) {
+				uintptr_t host = MEMBaseDiff + s.mac_start;
+				void *m = mmap((void *)host, s.size,
+					PROT_READ | PROT_WRITE,
+					MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED,  // overwrite any PROT_NONE placeholders
+					-1, 0);
+				if (m != MAP_FAILED) {
+					uint32_t *p = (uint32_t *)m;
+					size_t n = s.size / 4;
+					for (size_t i = 0; i < n; i++)
+						p[i] = htonl(0x70004e75);  // moveq #0,d0; rts
+					fprintf(stderr, "MEM: stub %s filled (moveq;rts)\n", s.name);
+				} else {
+					fprintf(stderr, "MEM: stub %s mmap failed: %s\n", s.name, strerror(errno));
+				}
 			}
+			// Fix 0x27020010 handler: ori.b #0x80,MAC[0x0c2c]; moveq #0,d0; rts
+			// Sets the 'sound-manager-ready' bit that the A-line busy-wait polls.
+			uint8_t *h = (uint8_t *)(MEMBaseDiff + 0x27020010UL);
+			h[0]=0x00; h[1]=0x38; h[2]=0x00; h[3]=0x80;
+			h[4]=0x0c; h[5]=0x2c;  // ori.b #0x80, MAC[0x0c2c]
+			h[6]=0x70; h[7]=0x00;  // moveq #0, d0
+			h[8]=0x4e; h[9]=0x75;  // rts
+			fprintf(stderr, "MEM: 0x27020010 handler installed\n");
 		}
 
 		// Pre-populate I/O hardware registers with Quadra 800 values so the ROM
