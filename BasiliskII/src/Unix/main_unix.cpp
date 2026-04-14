@@ -872,6 +872,7 @@ int main(int argc, char **argv)
 	{
 		struct { uintptr mac_start; size_t size; const char *name; } io_ranges[] = {
 			{ 0x50000000, 0x0F000000, "I/O" },     // Mac I/O (VIA, SCSI, ASC at 0x50Fxxxxx)
+			{ 0x5F000000, 0x01000000, "I/O-hi" },  // Machine config registers (0x5ffffffc)
 			{ 0xF0000000, 0x10000000, "NuBus" },   // NuBus/video
 		};
 		for (auto &r : io_ranges) {
@@ -888,6 +889,86 @@ int main(int argc, char **argv)
 					r.name, result, (void*)((uintptr)result + r.size),
 					(unsigned long)r.mac_start, (unsigned long)(r.mac_start + r.size));
 			}
+		}
+
+		// Pre-populate I/O hardware registers with Quadra 800 values so the ROM
+		// boot reads correct data instead of zeros.
+		uint8_t *io_base = (uint8_t *)(MEMBaseDiff + 0x50000000UL);
+
+		// VIA1 at 0x50F00000: PortA = 0x7F (all inputs, no outputs asserted)
+		// Quadra 800 VIA1 is at 0x50F00000; registers are 512-byte spaced.
+		io_base[0x00F00000] = 0x7F;  // VIA1 PortA
+		io_base[0x00F00200] = 0xFF;  // VIA1 PortB (all bits high = default/idle)
+		io_base[0x00F00400] = 0xFF;  // VIA1 DDRA (direction)
+		io_base[0x00F00600] = 0xFF;  // VIA1 DDRB
+
+		// VIA2 at 0x50F26000: PortA bits encode machine type.
+		// Quadra 800 board ID bits give PortA = 0xE2 on real hardware.
+		io_base[0x00F26000] = 0xE2;  // VIA2 PortA — machine board ID
+		io_base[0x00F26200] = 0x82;  // VIA2 PortB — bit7=1 ready, bit1=power
+		io_base[0x00F26400] = 0xFF;  // VIA2 DDRA
+		io_base[0x00F26600] = 0xFF;  // VIA2 DDRB
+		fprintf(stderr, "MEM: VIA1/VIA2 registers set for Quadra 800\n");
+
+		// Map low NuBus mirror (Mac 0x08000000-0x0FFFFFFF) with 0xFF bytes.
+		// On real Quadra hardware empty NuBus slots generate bus errors; the ROM
+		// scanner uses a private exception table to handle them.  Without that
+		// 68k path in BasiliskII, SIGSEGV-skips on unmapped addresses leave stale
+		// register values causing control-flow corruption (SP = 0x616e...).  0xFF
+		// is the pull-up bus value; the declaration ROM format byte 0xFF means
+		// "no valid ROM" so the scanner skips the slot cleanly.
+		//
+		// Memory layout at startup (MEMBaseDiff = 0x10000000, RAMSize = 64 MB):
+		//   Host 0x10000000-0x1A013FFF: RAM + ROM + vm_alloc RESERVED (PROT_NONE)
+		//   Host 0x1A014000-0x1A815000: JIT cache (allocated later by JIT init)
+		//   Host 0x1A815000-0x1FFFFFFF: unmapped
+		// Mac 0x08000000-0x0FFFFFFF maps to host 0x18000000-0x1FFFFFFF.
+		// Strategy: mprotect the PROT_NONE reserved region, mmap the unmapped tail.
+		// The JIT cache region (0x1A014000-0x1A815000 = Mac 0x0A014000-0x0A815000)
+		// is also in this range but will be overwritten by the JIT with real code.
+		{
+			uintptr_t lo_host_base  = MEMBaseDiff + 0x08000000UL; // host 0x18000000
+			uintptr_t lo_host_end   = MEMBaseDiff + 0x10000000UL; // host 0x20000000
+			uintptr_t reserved_end  = MEMBaseDiff + 0x0A014000UL; // host 0x1A014000 (end of reserved)
+			uintptr_t unmapped_start= MEMBaseDiff + 0x0A815000UL; // host 0x1A815000 (after JIT cache)
+
+			// Part 1: mprotect the PROT_NONE reserved region → R/W, fill 0xFF
+			if (mprotect((void *)lo_host_base, reserved_end - lo_host_base,
+			             PROT_READ | PROT_WRITE) == 0) {
+				memset((void *)lo_host_base, 0xFF, reserved_end - lo_host_base);
+				fprintf(stderr, "MEM: NuBus-lo 0x08000000-0x0A013FFF filled 0xFF (mprotect)\n");
+			} else {
+				fprintf(stderr, "MEM: NuBus-lo mprotect failed: %s\n", strerror(errno));
+			}
+			// (JIT cache gap 0x0A014000-0x0A815000 is skipped; JIT overwrites it)
+
+			// Part 2: mmap the unmapped tail → R/W, fill 0xFF
+			size_t tail_size = lo_host_end - unmapped_start;
+			void *tail = mmap((void *)unmapped_start, tail_size,
+				PROT_READ | PROT_WRITE,
+				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED,
+				-1, 0);
+			if (tail != MAP_FAILED) {
+				memset(tail, 0xFF, tail_size);
+				fprintf(stderr, "MEM: NuBus-lo 0x0A815000-0x0FFFFFFF filled 0xFF (mmap)\n");
+			} else {
+				fprintf(stderr, "MEM: NuBus-lo tail mmap failed: %s\n", strerror(errno));
+			}
+		}
+
+		// Machine type register at 0x5ffffffc.
+		// Upper word 0xA55A = valid hardware signature; probe only succeeds if
+		// reads are stable (page PROT_READ → writes SIGSEGV-skipped, value unchanged).
+		// Lower word 0xFFFF = no match in ROM scan table → uses clean fallback entry.
+		{
+			uint8_t *cfg = (uint8_t *)(MEMBaseDiff + 0x5FFFFFFCUL);
+			cfg[0] = 0xA5; cfg[1] = 0x5A;  // upper word (big-endian)
+			cfg[2] = 0xFF; cfg[3] = 0xFF;  // lower word: 0xFFFF = no table match
+			void *page = (void *)((uintptr_t)cfg & ~0xFFFUL);
+			if (mprotect(page, 0x1000, PROT_READ) == 0)
+				fprintf(stderr, "MEM: 0x5ffffffc set to 0xA55AFFFF (PROT_READ)\n");
+			else
+				fprintf(stderr, "MEM: mprotect 0x5ffffffc failed: %s\n", strerror(errno));
 		}
 	}
 #endif

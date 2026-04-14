@@ -1020,15 +1020,16 @@ static bool patch_rom_32(void)
 	uint32 base;
 
 #if defined(CPU_AARCH64)
-	// ARM64 JIT: patch hardware config table scan panic at 0x4b7e.
-	// With JIT direct addressing, I/O registers return 0 so the machine
-	// type detection fails (D0=0, no table match). Redirect the panic
-	// loop to the success path at 0x4b78 (which jumps to 0x2f52).
+	// ARM64 JIT: 0x5ffffffc is pre-populated with 0xA55AFFFF (PROT_READ).
+	// ROM probe succeeds; machine scan runs with D0=0xA55AFFFF (lower word 0xFFFF
+	// = no table match). The scan exhausts all entries and hits the panic BRA at
+	// 0x4b7e. Redirect it to the success path at 0x4b78 (jmp 0x2f52) so the
+	// all-zero fallback entry [21] is used for a clean driver-install path.
 	{
 		uint16 *panic = (uint16 *)(ROMBaseHost + 0x4b7e);
 		if (ntohs(*panic) == 0x60FE) { // BRA.S *
 			*panic = htons(0x60F8);   // BRA.S $4b78 (success path)
-			D(bug("ROM patch: 0x4b7e BRA.S * -> BRA.S $4b78\n"));
+			D(bug("ROM: 0x4b7e panic redirected to success path 0x4b78\n"));
 		}
 	}
 #endif
@@ -1348,16 +1349,10 @@ static bool patch_rom_32(void)
 		*wp = htons(M68K_NOP);
 	}
 
-	// Don't read ModelID from 0x5ffffffc
-	static const uint8 model_id2_dat[] = {0x45, 0xf9, 0x5f, 0xff, 0xff, 0xfc, 0x20, 0x12};
-	base = find_rom_data(0x4000, 0x5000, model_id2_dat, sizeof(model_id2_dat));
-	D(bug("model_id2 %08lx\n", base));
-	if (base) {		// ROM27/32
-		wp = (uint16 *)(ROMBaseHost + base + 6);
-		*wp++ = htons(0x7000);	// moveq	#0,d0
-		*wp++ = htons(0xb040);	// cmp.w	d0,d0
-		*wp = htons(0x4ed6);	// jmp		(a6)
-	}
+	// Machine type register at 0x5ffffffc is pre-populated with 0xA55AFFFF in main_unix.cpp
+	// (PROT_READ so probe write is SIGSEGV-skipped → reads stable → probe succeeds).
+	// No ROM patch needed: let the hardware read work as designed.
+	D(bug("model_id2: using live 0x5ffffffc hardware register (0xA55AFFFF)\n"));
 
 	// Install slot ROM
 	if (!InstallSlotROM())
