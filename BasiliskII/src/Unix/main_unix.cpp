@@ -891,9 +891,39 @@ int main(int argc, char **argv)
 			}
 		}
 
+		// Stub region for System-file trap handlers installed beyond the 64 MB RAM
+		// boundary. System 7.5 installs some handlers at addresses like 0x27020010
+		// (valid on the 640 MB machine the disk was imaged from). If the Mac jumps
+		// there it bus-errors and retries forever. Map the region and fill it with
+		// 'moveq #0,d0; rts' (0x7000 4e75) so every call returns D0=0 (success).
+		// Range 0x04100000-0x4FFFFFFF covers the gap between ROM and I/O.
+		if (RAMSize <= 0x08000000) {  // only needed when RAM < 128 MB
+			uintptr_t stub_host = MEMBaseDiff + 0x04100000UL;
+			size_t    stub_size = 0x4BF00000UL;  // up to MAC 0x4FFFFFFF
+			void *stub = mmap((void *)stub_host, stub_size,
+				PROT_READ | PROT_WRITE,
+				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED,
+				-1, 0);
+			if (stub != MAP_FAILED) {
+				uint32_t *p = (uint32_t *)stub;
+				size_t nwords = stub_size / 4;
+				for (size_t i = 0; i < nwords; i++)
+					p[i] = htonl(0x70004e75);  // moveq #0,d0; rts (big-endian)
+				fprintf(stderr, "MEM: stub 0x04100000-0x4FFFFFFF filled (moveq;rts)\n");
+			} else {
+				fprintf(stderr, "MEM: stub mmap failed: %s\n", strerror(errno));
+			}
+		}
+
 		// Pre-populate I/O hardware registers with Quadra 800 values so the ROM
 		// boot reads correct data instead of zeros.
 		uint8_t *io_base = (uint8_t *)(MEMBaseDiff + 0x50000000UL);
+
+		// Ensure sound-init path at ROM+0x280e isn't triggered by a stale
+		// MAC[0x02ba] pointer. The ROM reads this as a 4-byte sound-driver
+		// dispatch table; if non-zero it calls uninstalled A-line traps.
+		// Zero it here so the safe path (MAC[0x02ba]==0) is taken on first entry.
+		*(uint32_t *)(MEMBaseDiff + 0x02baUL) = 0;
 
 		// VIA1 at 0x50F00000: PortA = 0x7F (all inputs, no outputs asserted)
 		// Quadra 800 VIA1 is at 0x50F00000; registers are 512-byte spaced.

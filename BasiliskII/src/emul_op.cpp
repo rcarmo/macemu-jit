@@ -211,6 +211,11 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			TimerReset();
 			EtherReset();
 			AudioReset();
+			// Zero sound-dispatch pointer so ROM+0x280e takes the safe path.
+			// This is a diagnostic: if the crash at 0x27020010 moves, something
+			// writes MAC[0x02ba] during boot. Print its value first.
+			fprintf(stderr, "RESET: MAC[0x02ba]=%08x\n", ReadMacInt32(0x02ba));
+			WriteMacInt32(0x02ba, 0);
 #ifdef USE_SDL_AUDIO
 			PlayStartupSound();
 #endif

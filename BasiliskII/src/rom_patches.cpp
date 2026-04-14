@@ -1264,6 +1264,32 @@ static bool patch_rom_32(void)
 		fprintf(stderr, "ROM: patched NuBus scanner entry at 0xb9874 (JMP A6)\n");
 	}
 
+	// NOP the A-line sound traps called from ROM+0x280e when MAC[0x02ba] != 0.
+	// The ROM's A-line handler calls _SndAddModifier (0xa86e) and _SndDoCommand
+	// (0xa86d) from the sound/ADB init path. With nosound=true or before the
+	// Sound Manager is installed, these traps dispatch to an uninitialised or
+	// out-of-range jump-table entry (0x27020010 in our disk image), crashing.
+	// Guard: check both trap words are the expected values before patching.
+	if (ntohs(*(uint16 *)(ROMBaseHost + 0x284a)) == 0xa86e)
+		*(uint16 *)(ROMBaseHost + 0x284a) = htons(M68K_NOP);
+	if (ntohs(*(uint16 *)(ROMBaseHost + 0x2856)) == 0xa86d)
+		*(uint16 *)(ROMBaseHost + 0x2856) = htons(M68K_NOP);
+
+	// The dispatch at ROM+0xb986e is the terminal stub of the safe init path
+	// (MAC[0x02ba]==0 branch). It executes 'ori.b #-1,-(A0); jmp (A6)' and
+	// returns via A6 without setting D0. The retry loop at ROM+0x27a8 checks
+	// D0 and retries forever if D0 != 0. Patch to 'moveq #0,d0; nop; rts'
+	// so D0=0 (success) is returned via the jsr return address on the stack.
+	if (ROMBaseHost[0xb986e] == 0x00 && ROMBaseHost[0xb986f] == 0x20 &&
+	    ROMBaseHost[0xb9870] == 0x7c && ROMBaseHost[0xb9871] == 0xff &&
+	    ROMBaseHost[0xb9872] == 0x4e && ROMBaseHost[0xb9873] == 0xd6) {
+		uint8 *p = ROMBaseHost + 0xb986e;
+		p[0] = 0x70; p[1] = 0x00;  // moveq #0,d0  — D0=success
+		p[2] = 0x4e; p[3] = 0x71;  // nop
+		p[4] = 0x4e; p[5] = 0x75;  // rts  — pops jsr return addr
+		fprintf(stderr, "ROM: patched 0xb986e: ori->moveq #0,d0 + rts (exit retry loop)\n");
+	}
+
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);

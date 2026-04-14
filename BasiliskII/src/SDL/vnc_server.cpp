@@ -509,6 +509,11 @@ void VNCServerInitFromPrefs()
 		printf("WARNING: vncserver=true but this build was made without libvncserver support\n");
 		vnc_warned_unavailable = true;
 	}
+#else
+	// Start the VNC server immediately so clients can connect before
+	// the first framebuffer update (e.g. during Mac OS boot).
+	if (vnc_enabled)
+		vnc_ensure_server(640, 480, 32, 640 * 4);
 #endif
 }
 
