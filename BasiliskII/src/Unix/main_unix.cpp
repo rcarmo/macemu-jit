@@ -891,42 +891,6 @@ int main(int argc, char **argv)
 			}
 		}
 
-		// Stub region: map all address ranges outside RAM/ROM/I/O with
-		// 'moveq #0,d0; rts' so System 7.5 trap handlers installed at high
-		// addresses (e.g. 0x27020010, 0x9Bxxxxxx from a 640MB disk image)
-		// return cleanly instead of crashing or SIGSEGV-looping.
-		if (RAMSize <= 0x08000000) {  // only needed when RAM < 128 MB
-			struct { uintptr_t mac_start; size_t size; const char *name; } stubs[] = {
-				{ 0x0A100000, 0x45F00000, "stub-lo" },  // Past scratch → I/O (0x04100000-0x4FFFFFFF)
-				{ 0x60000000, 0x30000000, "stub-60" },  // 0x60000000-0x8FFFFFFF
-				{ 0x90000000, 0x60000000, "stub-90" },  // NuBus slots 9-E (0x90000000-0xEFFFFFFF)
-			};
-			for (auto &s : stubs) {
-				uintptr_t host = MEMBaseDiff + s.mac_start;
-				void *m = mmap((void *)host, s.size,
-					PROT_READ | PROT_WRITE,
-					MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED,  // overwrite any PROT_NONE placeholders
-					-1, 0);
-				if (m != MAP_FAILED) {
-					uint32_t *p = (uint32_t *)m;
-					size_t n = s.size / 4;
-					for (size_t i = 0; i < n; i++)
-						p[i] = htonl(0x70004e75);  // moveq #0,d0; rts
-					fprintf(stderr, "MEM: stub %s filled (moveq;rts)\n", s.name);
-				} else {
-					fprintf(stderr, "MEM: stub %s mmap failed: %s\n", s.name, strerror(errno));
-				}
-			}
-			// Fix 0x27020010 handler: ori.b #0x80,MAC[0x0c2c]; moveq #0,d0; rts
-			// Sets the 'sound-manager-ready' bit that the A-line busy-wait polls.
-			uint8_t *h = (uint8_t *)(MEMBaseDiff + 0x27020010UL);
-			h[0]=0x00; h[1]=0x38; h[2]=0x00; h[3]=0x80;
-			h[4]=0x0c; h[5]=0x2c;  // ori.b #0x80, MAC[0x0c2c]
-			h[6]=0x70; h[7]=0x00;  // moveq #0, d0
-			h[8]=0x4e; h[9]=0x75;  // rts
-			fprintf(stderr, "MEM: 0x27020010 handler installed\n");
-		}
-
 		// Pre-populate I/O hardware registers with Quadra 800 values so the ROM
 		// boot reads correct data instead of zeros.
 		uint8_t *io_base = (uint8_t *)(MEMBaseDiff + 0x50000000UL);
@@ -1000,7 +964,7 @@ int main(int argc, char **argv)
 		{
 			uint8_t *cfg = (uint8_t *)(MEMBaseDiff + 0x5FFFFFFCUL);
 			cfg[0] = 0xA5; cfg[1] = 0x5A;  // upper word (big-endian): valid hw signature
-			cfg[2] = 0xFF; cfg[3] = 0xFF;  // lower word: 0xFFFF = entry[21], fast empty driver install
+			cfg[2] = 0x10; cfg[3] = 0x03;  // lower word: 0x1003 = scan table entry[3]
 			                                // flags=0x0000773f (bit29=0 → no sound-driver
 			                                // init → MAC[0x02ba] stays 0 → clean trap path)
 			void *page = (void *)((uintptr_t)cfg & ~0xFFFUL);

@@ -1264,27 +1264,6 @@ static bool patch_rom_32(void)
 		fprintf(stderr, "ROM: patched NuBus scanner entry at 0xb9874 (JMP A6)\n");
 	}
 
-	// ROM+0x284a/_SndAddModifier and ROM+0x2856/_SndDoCommand: these traps
-	// dispatch via the Mac OS jump table. The stub region at 0x04100000-0x4FFFFFFF
-	// (filled with moveq #0,d0; rts) handles them cleanly via D0=0 return.
-	// With machine-type entry[21] (0xFFFF, all-zero flags) these traps are not
-	// called during early boot, so no explicit NOP is needed here.
-
-	// The dispatch at ROM+0xb986e is the terminal stub of the safe init path
-	// (MAC[0x02ba]==0 branch). It executes 'ori.b #-1,-(A0); jmp (A6)' and
-	// returns via A6 without setting D0. The retry loop at ROM+0x27a8 checks
-	// D0 and retries forever if D0 != 0. Patch to 'moveq #0,d0; nop; rts'
-	// so D0=0 (success) is returned via the jsr return address on the stack.
-	if (ROMBaseHost[0xb986e] == 0x00 && ROMBaseHost[0xb986f] == 0x20 &&
-	    ROMBaseHost[0xb9870] == 0x7c && ROMBaseHost[0xb9871] == 0xff &&
-	    ROMBaseHost[0xb9872] == 0x4e && ROMBaseHost[0xb9873] == 0xd6) {
-		uint8 *p = ROMBaseHost + 0xb986e;
-		p[0] = 0x70; p[1] = 0x00;  // moveq #0,d0  — D0=success
-		p[2] = 0x4e; p[3] = 0x71;  // nop
-		p[4] = 0x4e; p[5] = 0xd6;  // jmp (A6) — threaded-code return
-		fprintf(stderr, "ROM: patched 0xb986e: ori->moveq #0,d0 + jmp(A6) (exit retry loop)\n");
-	}
-
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);
