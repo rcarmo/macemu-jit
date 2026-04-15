@@ -32,15 +32,25 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 119 vectors across:
+`run.sh` currently covers 120 vectors across:
 - Decode/dispatch sanity (`nop`)
 - Bit manipulation boundary behavior (`bitops`, `bitops_chg`, high-bit immediate `bitops_highbit`, high-bit toggle `bitops_chg_highbit`)
-- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long + byte/word-boundary-wrap checks, `quick_ops` incl. word+word-wrap+byte+byte-wrap+address-register variants, `compare` + `cmpi` size + negative-byte/word boundary forms, `muldiv`, `movem`, `misc`, `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long variants, `tst` size forms on negative and zero inputs)
+- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long + byte/word-boundary-wrap checks, `quick_ops` incl. word+word-wrap+byte+byte-wrap+address-register variants, `compare` + `cmpi` size + negative byte/word/long boundary forms, `muldiv`, `movem`, `misc`, `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long variants, `tst` size forms on negative and zero inputs)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)
 - Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, plus bounded `dbne`/`dbeq` and `dbvc`/`dbvs` loops, and deterministic `dbvc`/`dbvs` non-taken condition-true paths)
 
 All vectors are designed to terminate without unbounded loops.
+
+## Harness integrity checks
+
+Before executing vectors, `run.sh` performs deterministic preflight validation:
+- no duplicate test names in `TEST_ORDER`
+- every ordered test has both `TESTS[...]` bytecode and `SENTINEL_A6[...]`
+- each sentinel is an 8-hex-digit value
+- sentinel values are unique across vectors
+
+Any invariant violation aborts with machine-parseable failure metrics (`infra_fail=1`) instead of silently running a malformed suite.
 
 ## Constraints
 

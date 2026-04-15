@@ -16,11 +16,12 @@ trap cleanup EXIT
 emit_failure_metrics() {
     local build_ok="$1"
     local reason="$2"
+    local infra_fail="${3:-$(( build_ok == 1 ? 0 : 1 ))}"
     echo "METRIC build_ok=$build_ok"
     echo "METRIC pass=0"
     echo "METRIC fail=0"
     echo "METRIC total=0"
-    echo "METRIC infra_fail=$(( build_ok == 1 ? 0 : 1 ))"
+    echo "METRIC infra_fail=$infra_fail"
     echo "METRIC score=0"
     echo "$reason" >&2
     exit 0
@@ -166,7 +167,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_beq_taken muldiv movem misc flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_word_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_word_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -210,6 +211,8 @@ TESTS[cmpi_sizes]="7001 0C00 0001 0C40 0001 0C80 0000 0001"
 TESTS[cmpi_byte_negative]="70FF 0C00 00FF 6702 7207 7408"
 # CMPI_WORD_NEGATIVE: verify CMPI.W sign/boundary behavior against 0xffff and BEQ taken path
 TESTS[cmpi_word_negative]="70FF 0C40 FFFF 6702 7207 7408"
+# CMPI_LONG_NEGATIVE: verify CMPI.L sign/boundary behavior against 0xffffffff and BEQ taken path
+TESTS[cmpi_long_negative]="70FF 0C80 FFFF FFFF 6702 7207 7408"
 # CMPI_BEQ_TAKEN: compare equal immediate then take BEQ short path
 TESTS[cmpi_beq_taken]="7000 0C80 0000 0000 6702 7207 7408"
 # MULDIV: MOVEQ #7,D0; MULU.W #3,D0; MOVEQ #21,D1; DIVU.W #3,D1
@@ -429,6 +432,7 @@ SENTINEL_A6[compare_negative]="a6010033"
 SENTINEL_A6[cmpi_sizes]="a6010045"
 SENTINEL_A6[cmpi_byte_negative]="a6010071"
 SENTINEL_A6[cmpi_word_negative]="a6010072"
+SENTINEL_A6[cmpi_long_negative]="a6010078"
 SENTINEL_A6[cmpi_beq_taken]="a601005b"
 SENTINEL_A6[muldiv]="a6010007"
 SENTINEL_A6[movem]="a6010008"
@@ -527,6 +531,32 @@ SENTINEL_A6[dbvc_not_taken_v_clear]="a6010054"
 SENTINEL_A6[dbvs_not_taken_v_set]="a6010055"
 SENTINEL_A6[dbne_loop_z_set]="a601003c"
 SENTINEL_A6[dbeq_loop_z_clear]="a601003d"
+
+# Preflight harness invariants: deterministic mapping and sentinel hygiene.
+declare -A _seen_test_names=()
+declare -A _seen_sentinels=()
+for name in "${TEST_ORDER[@]}"; do
+    if [ -n "${_seen_test_names[$name]+x}" ]; then
+        emit_failure_metrics 1 "duplicate test name in TEST_ORDER: $name" 1
+    fi
+    _seen_test_names[$name]=1
+
+    if [ -z "${TESTS[$name]+x}" ]; then
+        emit_failure_metrics 1 "missing TESTS entry for test: $name" 1
+    fi
+    if [ -z "${SENTINEL_A6[$name]+x}" ]; then
+        emit_failure_metrics 1 "missing SENTINEL_A6 entry for test: $name" 1
+    fi
+
+    sentinel="${SENTINEL_A6[$name]}"
+    if ! [[ "$sentinel" =~ ^[0-9a-fA-F]{8}$ ]]; then
+        emit_failure_metrics 1 "invalid sentinel format for $name: $sentinel" 1
+    fi
+    if [ -n "${_seen_sentinels[$sentinel]+x}" ]; then
+        emit_failure_metrics 1 "duplicate sentinel value detected: $sentinel" 1
+    fi
+    _seen_sentinels[$sentinel]=1
+done
 
 # ---- Run all test cases and score --------------------------------------------
 PASS=0
