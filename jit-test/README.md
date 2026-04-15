@@ -32,13 +32,13 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 129 vectors across:
+`run.sh` currently covers 131 vectors across:
 - Decode/dispatch sanity (`nop`)
 - Bit manipulation boundary behavior (`bitops`, `bitops_chg`, high-bit immediate `bitops_highbit`, high-bit toggle `bitops_chg_highbit`)
 - Core arithmetic/data movement (`move` + `moveq_signext`, `alu`, `addi/subi` incl. byte/word/long + byte/word-boundary-wrap checks, `quick_ops` incl. word+word-wrap+long-wrap+byte+byte-wrap+address-register variants, `compare` + `cmpi` size + negative byte/word/long boundary forms, `muldiv`, `movem`, `misc` + `swap_roundtrip`, `clr` size forms (`clr_sizes`), `neg` size forms (`neg_sizes`), `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long variants, `tst` size forms on negative and zero inputs)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`) plus CCR-preservation interactions (`SLT`→`BLT`, `SCS`→`BCS`, `SNE`→`BNE`, `SEQ`→`BEQ` with unchanged flags)
-- Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, plus bounded `dbne`/`dbeq` and `dbvc`/`dbvs` loops, and deterministic `dbvc`/`dbvs` non-taken condition-true paths)
+- Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, bounded carry-flag DBcc paths (`dbcc` loop when C=1 false-condition, deterministic `dbcs` condition-true non-taken), plus bounded `dbne`/`dbeq` and `dbvc`/`dbvs` loops, and deterministic `dbvc`/`dbvs` non-taken condition-true paths)
 
 All vectors are designed to terminate without unbounded loops.
 
