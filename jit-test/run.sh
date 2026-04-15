@@ -166,7 +166,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes cmpi_beq_taken muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes cmpi_beq_taken muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -242,72 +242,96 @@ TESTS[bpl_taken]="7001 6A02 7209 7402"
 TESTS[bpl_not_taken]="70FF 6A02 7203"
 # BPL_W_TAKEN: word-displacement BPL with N=0 should branch and skip MOVEQ #9,D1
 TESTS[bpl_w_taken]="7001 6A00 0002 7209 7402"
+# BPL_W_NOT_TAKEN: word-displacement BPL with N=1 should not branch
+TESTS[bpl_w_not_taken]="70FF 6A00 0002 7203"
 # BMI_TAKEN: N=1 (MOVEQ #-1) so BMI should branch and skip MOVEQ #9,D1
 TESTS[bmi_taken]="70FF 6B02 7209 7402"
 # BMI_NOT_TAKEN: N=0 so BMI should not branch
 TESTS[bmi_not_taken]="7001 6B02 7203"
 # BMI_W_TAKEN: word-displacement BMI with N=1 should branch and skip MOVEQ #9,D1
 TESTS[bmi_w_taken]="70FF 6B00 0002 7209 7402"
+# BMI_W_NOT_TAKEN: word-displacement BMI with N=0 should not branch
+TESTS[bmi_w_not_taken]="7001 6B00 0002 7203"
 # BVC_TAKEN: V=0 in this sequence, so BVC should branch and skip MOVEQ #9,D1
 TESTS[bvc_taken]="7001 6802 7209 7402"
 # BVC_NOT_TAKEN_OVERFLOW: 0x7fffffff + 1 sets V=1; BVC should not branch
 TESTS[bvc_not_taken_overflow]="203C 7FFF FFFF 5280 6802 7207"
 # BVC_W_TAKEN: word-displacement BVC with V=0 should branch and skip MOVEQ #9,D1
 TESTS[bvc_w_taken]="7001 6800 0002 7209 7402"
+# BVC_W_NOT_TAKEN_OVERFLOW: word-displacement BVC with V=1 should not branch
+TESTS[bvc_w_not_taken_overflow]="203C 7FFF FFFF 5280 6800 0002 7207"
 # BVS_TAKEN_OVERFLOW: 0x7fffffff + 1 sets V=1; BVS should branch and skip MOVEQ #7,D1
 TESTS[bvs_taken_overflow]="203C 7FFF FFFF 5280 6902 7207 7408"
 # BVS_NOT_TAKEN: V=0 in this sequence, so BVS should not branch
 TESTS[bvs_not_taken]="7001 6902 7203"
 # BVS_W_TAKEN_OVERFLOW: word-displacement BVS with V=1 should branch and skip MOVEQ #7,D1
 TESTS[bvs_w_taken_overflow]="203C 7FFF FFFF 5280 6900 0002 7207 7408"
+# BVS_W_NOT_TAKEN: word-displacement BVS with V=0 should not branch
+TESTS[bvs_w_not_taken]="7001 6900 0002 7203"
 # BGE_TAKEN: N==V==0, so BGE should branch and skip MOVEQ #9,D1
 TESTS[bge_taken]="7001 6C02 7209 7402"
 # BGE_NOT_TAKEN: CMPI.L #2,D0 yields N=1,V=0; BGE should not branch
 TESTS[bge_not_taken]="7001 0C80 0000 0002 6C02 7207"
 # BGE_W_TAKEN: word-displacement BGE with N==V==0 should branch and skip MOVEQ #9,D1
 TESTS[bge_w_taken]="7001 6C00 0002 7209 7402"
+# BGE_W_NOT_TAKEN: word-displacement BGE with N!=V should not branch
+TESTS[bge_w_not_taken]="7001 0C80 0000 0002 6C00 0002 7207"
 # BLT_TAKEN: CMPI.L #2,D0 yields N=1,V=0; BLT should branch and skip MOVEQ #7,D1
 TESTS[blt_taken]="7001 0C80 0000 0002 6D02 7207 7408"
 # BLT_NOT_TAKEN: N==V==0, so BLT should not branch
 TESTS[blt_not_taken]="7001 6D02 7203"
 # BLT_W_TAKEN: word-displacement BLT with N!=V should branch and skip MOVEQ #7,D1
 TESTS[blt_w_taken]="7001 0C80 0000 0002 6D00 0002 7207 7408"
+# BLT_W_NOT_TAKEN: word-displacement BLT with N==V==0 should not branch
+TESTS[blt_w_not_taken]="7001 6D00 0002 7203"
 # BGT_TAKEN: Z==0 and N==V==0, so BGT should branch and skip MOVEQ #9,D1
 TESTS[bgt_taken]="7001 6E02 7209 7402"
 # BGT_NOT_TAKEN: CMP.L D0,D0 sets Z=1; BGT should not branch
 TESTS[bgt_not_taken]="7001 B080 6E02 7207"
 # BGT_W_TAKEN: word-displacement BGT with Z==0,N==V==0 should branch and skip MOVEQ #9,D1
 TESTS[bgt_w_taken]="7001 6E00 0002 7209 7402"
+# BGT_W_NOT_TAKEN: word-displacement BGT with Z=1 should not branch
+TESTS[bgt_w_not_taken]="7001 B080 6E00 0002 7207"
 # BLE_TAKEN: CMP.L D0,D0 sets Z=1; BLE should branch and skip MOVEQ #7,D1
 TESTS[ble_taken]="7001 B080 6F02 7207 7408"
 # BLE_NOT_TAKEN: Z==0 and N==V==0, so BLE should not branch
 TESTS[ble_not_taken]="7001 6F02 7203"
 # BLE_W_TAKEN: word-displacement BLE with Z=1 should branch and skip MOVEQ #7,D1
 TESTS[ble_w_taken]="7001 B080 6F00 0002 7207 7408"
+# BLE_W_NOT_TAKEN: word-displacement BLE with Z==0,N==V==0 should not branch
+TESTS[ble_w_not_taken]="7001 6F00 0002 7203"
 # BCC_TAKEN: CMPI.L #0,D0 sets C=0; BCC should branch and skip MOVEQ #7,D1
 TESTS[bcc_taken]="7001 0C80 0000 0000 6402 7207 7408"
 # BCC_NOT_TAKEN: CMPI.L #2,D0 sets C=1; BCC should not branch
 TESTS[bcc_not_taken]="7001 0C80 0000 0002 6402 7207"
 # BCC_W_TAKEN: word-displacement BCC with C=0 should branch and skip MOVEQ #7,D1
 TESTS[bcc_w_taken]="7001 0C80 0000 0000 6400 0002 7207 7408"
+# BCC_W_NOT_TAKEN: word-displacement BCC with C=1 should not branch
+TESTS[bcc_w_not_taken]="7001 0C80 0000 0002 6400 0002 7207"
 # BCS_TAKEN: CMPI.L #2,D0 sets C=1; BCS should branch and skip MOVEQ #7,D1
 TESTS[bcs_taken]="7001 0C80 0000 0002 6502 7207 7408"
 # BCS_NOT_TAKEN: CMPI.L #0,D0 sets C=0; BCS should not branch
 TESTS[bcs_not_taken]="7001 0C80 0000 0000 6502 7207"
 # BCS_W_TAKEN: word-displacement BCS with C=1 should branch and skip MOVEQ #7,D1
 TESTS[bcs_w_taken]="7001 0C80 0000 0002 6500 0002 7207 7408"
+# BCS_W_NOT_TAKEN: word-displacement BCS with C=0 should not branch
+TESTS[bcs_w_not_taken]="7001 0C80 0000 0000 6500 0002 7207"
 # BHI_TAKEN: CMPI.L #0,D0 sets C=0,Z=0; BHI should branch and skip MOVEQ #7,D1
 TESTS[bhi_taken]="7001 0C80 0000 0000 6202 7207 7408"
 # BHI_NOT_TAKEN: CMP.L D0,D0 sets Z=1; BHI should not branch
 TESTS[bhi_not_taken]="7001 B080 6202 7207"
 # BHI_W_TAKEN: word-displacement BHI with C=0,Z=0 should branch and skip MOVEQ #7,D1
 TESTS[bhi_w_taken]="7001 0C80 0000 0000 6200 0002 7207 7408"
+# BHI_W_NOT_TAKEN: word-displacement BHI with Z=1 should not branch
+TESTS[bhi_w_not_taken]="7001 B080 6200 0002 7207"
 # BLS_TAKEN: CMP.L D0,D0 sets Z=1; BLS should branch and skip MOVEQ #7,D1
 TESTS[bls_taken]="7001 B080 6302 7207 7408"
 # BLS_NOT_TAKEN: CMPI.L #0,D0 sets C=0,Z=0; BLS should not branch
 TESTS[bls_not_taken]="7001 0C80 0000 0000 6302 7207"
 # BLS_W_TAKEN: word-displacement BLS with Z=1 should branch and skip MOVEQ #7,D1
 TESTS[bls_w_taken]="7001 B080 6300 0002 7207 7408"
+# BLS_W_NOT_TAKEN: word-displacement BLS with C=0,Z=0 should not branch
+TESTS[bls_w_not_taken]="7001 0C80 0000 0000 6300 0002 7207"
 # SCC_BASIC: MOVEQ #0,D0/D1; ST D0 (set true); SF D1 (set false)
 TESTS[scc_basic]="7000 7200 50C0 51C1"
 # SCC_EQ_NE: set Z=1, then SNE should be false and SEQ should be true
@@ -389,39 +413,51 @@ SENTINEL_A6[beq_w_not_taken]="a6010042"
 SENTINEL_A6[bpl_taken]="a6010012"
 SENTINEL_A6[bpl_not_taken]="a6010029"
 SENTINEL_A6[bpl_w_taken]="a6010046"
+SENTINEL_A6[bpl_w_not_taken]="a601005c"
 SENTINEL_A6[bmi_taken]="a601002a"
 SENTINEL_A6[bmi_not_taken]="a6010013"
 SENTINEL_A6[bmi_w_taken]="a6010047"
+SENTINEL_A6[bmi_w_not_taken]="a601005d"
 SENTINEL_A6[bvc_taken]="a6010014"
 SENTINEL_A6[bvc_not_taken_overflow]="a601002b"
 SENTINEL_A6[bvc_w_taken]="a6010048"
+SENTINEL_A6[bvc_w_not_taken_overflow]="a601005e"
 SENTINEL_A6[bvs_taken_overflow]="a601002c"
 SENTINEL_A6[bvs_not_taken]="a6010015"
 SENTINEL_A6[bvs_w_taken_overflow]="a6010049"
+SENTINEL_A6[bvs_w_not_taken]="a601005f"
 SENTINEL_A6[bge_taken]="a6010016"
 SENTINEL_A6[bge_not_taken]="a6010025"
 SENTINEL_A6[bge_w_taken]="a601004a"
+SENTINEL_A6[bge_w_not_taken]="a6010060"
 SENTINEL_A6[blt_taken]="a6010026"
 SENTINEL_A6[blt_not_taken]="a6010017"
 SENTINEL_A6[blt_w_taken]="a601004b"
+SENTINEL_A6[blt_w_not_taken]="a6010061"
 SENTINEL_A6[bgt_taken]="a6010018"
 SENTINEL_A6[bgt_not_taken]="a6010027"
 SENTINEL_A6[bgt_w_taken]="a601004c"
+SENTINEL_A6[bgt_w_not_taken]="a6010062"
 SENTINEL_A6[ble_taken]="a6010028"
 SENTINEL_A6[ble_not_taken]="a6010019"
 SENTINEL_A6[ble_w_taken]="a601004d"
+SENTINEL_A6[ble_w_not_taken]="a6010063"
 SENTINEL_A6[bcc_taken]="a601001a"
 SENTINEL_A6[bcc_not_taken]="a601001b"
 SENTINEL_A6[bcc_w_taken]="a601004e"
+SENTINEL_A6[bcc_w_not_taken]="a6010064"
 SENTINEL_A6[bcs_taken]="a601001c"
 SENTINEL_A6[bcs_not_taken]="a601001d"
 SENTINEL_A6[bcs_w_taken]="a601004f"
+SENTINEL_A6[bcs_w_not_taken]="a6010065"
 SENTINEL_A6[bhi_taken]="a6010022"
 SENTINEL_A6[bhi_not_taken]="a6010023"
 SENTINEL_A6[bhi_w_taken]="a6010050"
+SENTINEL_A6[bhi_w_not_taken]="a6010066"
 SENTINEL_A6[bls_taken]="a6010024"
 SENTINEL_A6[bls_not_taken]="a601002d"
 SENTINEL_A6[bls_w_taken]="a6010051"
+SENTINEL_A6[bls_w_not_taken]="a6010067"
 SENTINEL_A6[scc_basic]="a601001e"
 SENTINEL_A6[scc_eq_ne]="a601002e"
 SENTINEL_A6[scc_carry]="a601002f"
