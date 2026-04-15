@@ -19,6 +19,7 @@ Harness-first scope: prioritize benchmark correctness/completeness over emulator
 - `METRIC score=<int>` — `floor(pass * 100 / total)` (0 when `total=0`)
 - `METRIC infra_fail=<int>` — subset of failures caused by harness/runtime issues
 - `METRIC build_ok=<0|1>` — whether build/setup succeeded before test execution
+- Infra/equivalence breakdown counters for triage (`fail_equiv`, `infra_timeout`, `infra_emu_exit`, `infra_no_regdump`, `infra_multi_regdump`, `infra_sentinel`, `infra_other`)
 
 ## Harness model
 
@@ -31,9 +32,9 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 85 vectors across:
-- Core arithmetic/data movement (`move`, `alu`, `addi/subi`, `quick_ops`, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
-- Branch condition behavior (`bra` short+word, `bne/beq` short+word, and both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`)
+`run.sh` currently covers 88 vectors across:
+- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long checks, `quick_ops` incl. word variant, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
+- Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)
 - Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, plus bounded `dbne`/`dbeq` and `dbvc`/`dbvs` loops, and deterministic `dbvc`/`dbvs` non-taken condition-true paths)
 

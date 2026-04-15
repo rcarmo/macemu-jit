@@ -4,10 +4,9 @@
 set -euo pipefail
 
 UNIX_DIR="$(cd "$(dirname "$0")/../BasiliskII/src/Unix" && pwd)"
-ROM="/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM"
-DISK="/workspace/fixtures/basilisk/images/HD200MB"
-RUN_DIR="/tmp/ar-jit-opcodes-$$"
-mkdir -p "$RUN_DIR"
+ROM="${B2_TEST_ROM:-/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM}"
+DISK="${B2_TEST_DISK:-/workspace/fixtures/basilisk/images/HD200MB}"
+RUN_DIR="$(mktemp -d /tmp/ar-jit-opcodes-XXXXXX)"
 
 cleanup() {
     rm -rf "$RUN_DIR"
@@ -21,7 +20,7 @@ emit_failure_metrics() {
     echo "METRIC pass=0"
     echo "METRIC fail=0"
     echo "METRIC total=0"
-    echo "METRIC infra_fail=0"
+    echo "METRIC infra_fail=$(( build_ok == 1 ? 0 : 1 ))"
     echo "METRIC score=0"
     echo "$reason" >&2
     exit 0
@@ -79,7 +78,9 @@ run_test() {
     local outfile="$5"
 
     local td="$RUN_DIR/test-${name}-jit${use_jit}"
+    local reason_file="${outfile}.reason"
     mkdir -p "$td"
+    echo "ok" > "$reason_file"
 
     # Append a non-CCR-clobbering sentinel write (MOVEA.L #imm, A6).
     # Opcode: 2C7C <imm_hi16> <imm_lo16>
@@ -109,24 +110,45 @@ EOF
     # Hard timeout: terminate after 30s, kill after 5s grace.
     # Some BasiliskII runs ignore TERM or survive in a separate process group,
     # so follow with a targeted pkill sweep.
-    SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME="$td" \
+    local emu_rc=0
+    if ! SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME="$td" \
       B2_TEST_HEX="$full_hex" \
       B2_TEST_DUMP=1 \
       timeout -k 5s 30s "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
-      > "$td/emu.log" 2>&1 || true
+      > "$td/emu.log" 2>&1; then
+        emu_rc=$?
+    fi
 
     pkill -f "$UNIX_DIR/BasiliskII --config $td/prefs" 2>/dev/null || true
     sleep 0.2
 
+    if [ "$emu_rc" -eq 124 ] || [ "$emu_rc" -eq 137 ]; then
+        echo "timeout" > "$reason_file"
+        echo "INFRA $name jit=$use_jit: timeout (rc=$emu_rc)" >&2
+        return 1
+    fi
+    if [ "$emu_rc" -ne 0 ]; then
+        echo "emu_exit_$emu_rc" > "$reason_file"
+        echo "INFRA $name jit=$use_jit: emulator exited non-zero (rc=$emu_rc)" >&2
+        return 1
+    fi
+
     local dump_count
     dump_count=$(grep -c "^REGDUMP:" "$td/emu.log" 2>/dev/null || true)
-    if [ "$dump_count" -ne 1 ]; then
+    if [ "$dump_count" -eq 0 ]; then
+        echo "no_regdump" > "$reason_file"
+        echo "INFRA $name jit=$use_jit: missing REGDUMP" >&2
+        return 1
+    fi
+    if [ "$dump_count" -gt 1 ]; then
+        echo "multi_regdump" > "$reason_file"
         echo "INFRA $name jit=$use_jit: expected 1 REGDUMP, got $dump_count" >&2
         return 1
     fi
 
     grep "^REGDUMP:" "$td/emu.log" > "$outfile"
     if ! grep -qi "A6=$sentinel_a6" "$outfile"; then
+        echo "sentinel_mismatch" > "$reason_file"
         echo "INFRA $name jit=$use_jit: sentinel A6 mismatch (expected $sentinel_a6)" >&2
         return 1
     fi
@@ -144,7 +166,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(move alu alu_overflow addi_subi_long addi_subi_word shift bitops bitops_chg branch compare compare_negative cmpi_sizes muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops dbra dbra_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # MOVE: MOVEQ #0x42,D0; MOVE.L D0,D1; MOVEQ #-1,D2; MOVE.W D2,D3
 TESTS[move]="7042 2200 74FF 3602"
@@ -156,6 +178,8 @@ TESTS[alu_overflow]="707F 5280 5180"
 TESTS[addi_subi_long]="7005 0680 0000 0003 0480 0000 0001"
 # ADDI_SUBI_WORD: MOVEQ #0,D0; ADDI.W #0x1234,D0; SUBI.W #0x20,D0
 TESTS[addi_subi_word]="7000 0640 1234 0440 0020"
+# ADDI_SUBI_BYTE: byte-sized immediate arithmetic with explicit CMPI.B verification
+TESTS[addi_subi_byte]="7000 0600 007F 0400 0001 0C00 007E"
 # SHIFT: MOVEQ #8,D0; LSL.L #1,D0; LSR.L #2,D0; ASR.L #1,D0; ROL.L #1,D0
 TESTS[shift]="7008 E388 E888 E080 E398"
 # BITOPS: MOVEQ #0,D0; BSET #3,D0; BTST #3,D0; BCLR #3,D0; BTST #3,D0
@@ -164,6 +188,8 @@ TESTS[bitops]="7000 08C0 0003 0800 0003 0880 0003 0800 0003"
 TESTS[bitops_chg]="7000 0840 0000 0840 0000 0800 0000"
 # BRANCH: MOVEQ #0,D0; CMP.L D0,D0; BEQ.S +2; MOVEQ #1,D0 (should skip); MOVEQ #2,D1
 TESTS[branch]="7000 B080 6702 7001 7202"
+# BRANCH_CHAIN: BEQ taken then BNE not-taken under same flags (Z remains set)
+TESTS[branch_chain]="7001 B080 6702 7207 6602 7408"
 # COMPARE: MOVEQ #5,D0; MOVEQ #3,D1; CMP.L D1,D0; TST.L D0; CMPI.L #5,D0
 TESTS[compare]="7005 7203 B081 4A80 0C80 0000 0005"
 # COMPARE_NEGATIVE: compare against -1 and verify BNE not-taken path
@@ -298,6 +324,8 @@ TESTS[scc_ge_lt]="7001 0C80 0000 0002 5CC1 5DC2"
 TESTS[scc_gt_le]="7001 B080 5EC1 5FC2"
 # QUICK_OPS: MOVEQ #5,D0; ADDQ.L #1,D0; SUBQ.L #1,D0; MOVE.L D0,D1
 TESTS[quick_ops]="7005 5280 5180 2200"
+# QUICK_OPS_WORD: word-sized add/sub quick on D0 low word, then move.w to D1
+TESTS[quick_ops_word]="70FF 5240 5140 3200"
 # DBRA: MOVEQ #1,D0; DBRA D0,+2 (taken once, skips MOVEQ #9,D1); NOP
 TESTS[dbra]="7001 51C8 0002 7209 4E71"
 # DBRA_NOT_TAKEN: MOVEQ #0,D0; DBRA D0,+2 should not branch (counter reaches -1)
@@ -323,10 +351,12 @@ SENTINEL_A6[alu]="a6010002"
 SENTINEL_A6[alu_overflow]="a6010031"
 SENTINEL_A6[addi_subi_long]="a6010043"
 SENTINEL_A6[addi_subi_word]="a6010044"
+SENTINEL_A6[addi_subi_byte]="a6010056"
 SENTINEL_A6[shift]="a6010003"
 SENTINEL_A6[bitops]="a6010004"
 SENTINEL_A6[bitops_chg]="a6010032"
 SENTINEL_A6[branch]="a6010005"
+SENTINEL_A6[branch_chain]="a6010057"
 SENTINEL_A6[compare]="a6010006"
 SENTINEL_A6[compare_negative]="a6010033"
 SENTINEL_A6[cmpi_sizes]="a6010045"
@@ -394,6 +424,7 @@ SENTINEL_A6[scc_pl_mi]="a6010037"
 SENTINEL_A6[scc_ge_lt]="a6010038"
 SENTINEL_A6[scc_gt_le]="a6010039"
 SENTINEL_A6[quick_ops]="a601001f"
+SENTINEL_A6[quick_ops_word]="a6010058"
 SENTINEL_A6[dbra]="a6010020"
 SENTINEL_A6[dbra_not_taken]="a6010021"
 SENTINEL_A6[dbra_three_iter]="a6010030"
@@ -408,6 +439,13 @@ SENTINEL_A6[dbeq_loop_z_clear]="a601003d"
 PASS=0
 FAIL=0
 INFRA_FAIL=0
+EQUIV_FAIL=0
+INFRA_TIMEOUT=0
+INFRA_EMU_EXIT=0
+INFRA_NO_REGDUMP=0
+INFRA_MULTI_REGDUMP=0
+INFRA_SENTINEL=0
+INFRA_OTHER=0
 TOTAL=${#TEST_ORDER[@]}
 
 for name in "${TEST_ORDER[@]}"; do
@@ -430,11 +468,29 @@ for name in "${TEST_ORDER[@]}"; do
             echo "  DIFF for $name:" >&2
             diff "$ifile" "$jfile" >&2 || true
             FAIL=$((FAIL+1))
+            EQUIV_FAIL=$((EQUIV_FAIL+1))
         fi
     else
         echo "METRIC opcode_${name}=-1"  # harness infrastructure issue
         FAIL=$((FAIL+1))
         INFRA_FAIL=$((INFRA_FAIL+1))
+
+        interp_reason=$(cat "${ifile}.reason" 2>/dev/null || echo "unknown")
+        jit_reason=$(cat "${jfile}.reason" 2>/dev/null || echo "unknown")
+        if [[ "$interp_reason,$jit_reason" == *"timeout"* ]]; then
+            INFRA_TIMEOUT=$((INFRA_TIMEOUT+1))
+        elif [[ "$interp_reason,$jit_reason" == *"emu_exit_"* ]]; then
+            INFRA_EMU_EXIT=$((INFRA_EMU_EXIT+1))
+        elif [[ "$interp_reason,$jit_reason" == *"no_regdump"* ]]; then
+            INFRA_NO_REGDUMP=$((INFRA_NO_REGDUMP+1))
+        elif [[ "$interp_reason,$jit_reason" == *"multi_regdump"* ]]; then
+            INFRA_MULTI_REGDUMP=$((INFRA_MULTI_REGDUMP+1))
+        elif [[ "$interp_reason,$jit_reason" == *"sentinel_mismatch"* ]]; then
+            INFRA_SENTINEL=$((INFRA_SENTINEL+1))
+        else
+            INFRA_OTHER=$((INFRA_OTHER+1))
+        fi
+        echo "INFRA $name: interp_reason=$interp_reason jit_reason=$jit_reason" >&2
     fi
 done
 
@@ -449,4 +505,11 @@ echo "METRIC pass=$PASS"
 echo "METRIC fail=$FAIL"
 echo "METRIC total=$TOTAL"
 echo "METRIC infra_fail=$INFRA_FAIL"
+echo "METRIC fail_equiv=$EQUIV_FAIL"
+echo "METRIC infra_timeout=$INFRA_TIMEOUT"
+echo "METRIC infra_emu_exit=$INFRA_EMU_EXIT"
+echo "METRIC infra_no_regdump=$INFRA_NO_REGDUMP"
+echo "METRIC infra_multi_regdump=$INFRA_MULTI_REGDUMP"
+echo "METRIC infra_sentinel=$INFRA_SENTINEL"
+echo "METRIC infra_other=$INFRA_OTHER"
 echo "METRIC score=$SCORE"
