@@ -11,11 +11,33 @@ mkdir -p "$RUN_DIR"
 
 # ---- Build -------------------------------------------------------------------
 cd "$UNIX_DIR"
-if [ ! -f Makefile ]; then
-    ac_cv_have_asm_extended_signals=yes \
-      ./configure --with-uae-core=2021 --enable-aarch64-jit-experimental --disable-vosf \
-      >/dev/null 2>&1
+
+# Fresh git worktrees may contain a stale Makefile without config.h, or may be
+# missing ./configure entirely until autogen.sh is run. Normalize that first.
+if [ ! -x ./configure ] && [ -x ./autogen.sh ]; then
+    NO_CONFIGURE=1 ./autogen.sh >"$RUN_DIR/autogen.log" 2>&1 || true
 fi
+
+if [ ! -f config.h ] || [ ! -f Makefile ]; then
+    if [ ! -x ./configure ]; then
+        echo "METRIC build_ok=0"
+        echo "METRIC score=0"
+        echo "missing ./configure after autogen" >&2
+        tail -20 "$RUN_DIR/autogen.log" >&2 || true
+        rm -rf "$RUN_DIR"
+        exit 0
+    fi
+    if ! ac_cv_have_asm_extended_signals=yes \
+      ./configure --with-uae-core=2021 --enable-aarch64-jit-experimental --disable-vosf \
+      >"$RUN_DIR/configure.log" 2>&1; then
+        echo "METRIC build_ok=0"
+        echo "METRIC score=0"
+        tail -20 "$RUN_DIR/configure.log" >&2 || true
+        rm -rf "$RUN_DIR"
+        exit 0
+    fi
+fi
+
 if ! make -j12 >"$RUN_DIR/build.log" 2>&1; then
     echo "METRIC build_ok=0"
     echo "METRIC score=0"
