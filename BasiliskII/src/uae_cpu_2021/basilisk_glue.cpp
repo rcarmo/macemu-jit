@@ -32,6 +32,8 @@
 #include "newcpu.h"
 #include "compiler/compemu.h"
 
+#include <ctype.h>
+#include <stdlib.h>
 #include <string.h>
 
 static bool trace_d6_enabled_glue()
@@ -173,9 +175,100 @@ void InitFrameBufferMapping(void)
  *  Reset and start 680x0 emulation (doesn't return)
  */
 
+static bool test_dump_enabled_glue()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("B2_TEST_DUMP") && *getenv("B2_TEST_DUMP") && strcmp(getenv("B2_TEST_DUMP"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool parse_test_hex_words_glue(const char *hex, uint16 *out_words, size_t max_words, size_t *out_count)
+{
+	size_t n = 0;
+	const char *p = hex;
+	while (*p) {
+		while (*p && (isspace((unsigned char)*p) || *p == ',' || *p == ';' || *p == ':'))
+			p++;
+		if (!*p)
+			break;
+		if (n >= max_words)
+			return false;
+		char *end = NULL;
+		unsigned long v = strtoul(p, &end, 16);
+		if (end == p || v > 0xffff)
+			return false;
+		out_words[n++] = (uint16)v;
+		p = end;
+	}
+	*out_count = n;
+	return n > 0;
+}
+
+static bool run_opcode_test_mode_glue()
+{
+	const char *hex = getenv("B2_TEST_HEX");
+	if (!(hex && *hex))
+		return false;
+
+	uint16 words[1024];
+	size_t n_words = 0;
+	if (!parse_test_hex_words_glue(hex, words, lengthof(words), &n_words)) {
+		fprintf(stderr, "B2_TEST_HEX parse failed\n");
+		quit_program = 1;
+		return true;
+	}
+
+	const uaecptr test_addr = RAMBaseMac + 0x1000;
+	const uaecptr stack_addr = RAMBaseMac + RAMSize - 0x2000;
+	for (size_t i = 0; i < n_words; i++)
+		put_word(test_addr + (uaecptr)(i * 2), words[i]);
+	put_word(test_addr + (uaecptr)(n_words * 2), M68K_EXEC_RETURN);
+
+	for (int i = 0; i < 8; i++) {
+		m68k_dreg(regs, i) = 0;
+		m68k_areg(regs, i) = 0;
+	}
+	m68k_areg(regs, 7) = stack_addr;
+	regs.usp = regs.isp = regs.msp = stack_addr;
+	regs.sr = 0x2700;
+	MakeFromSR();
+	regs.stopped = 0;
+	SPCFLAGS_CLEAR(SPCFLAG_STOP | SPCFLAG_BRK | SPCFLAG_DOTRACE | SPCFLAG_TRACE);
+
+	m68k_setpc(test_addr);
+	fill_prefetch_0();
+	quit_program = 0;
+#if USE_JIT
+	if (UseJIT)
+		m68k_compile_execute();
+	else
+#endif
+		m68k_execute();
+
+	if (test_dump_enabled_glue()) {
+		MakeSR();
+		fprintf(stderr,
+			"REGDUMP: D0=%08x D1=%08x D2=%08x D3=%08x D4=%08x D5=%08x D6=%08x D7=%08x "
+			"A0=%08x A1=%08x A2=%08x A3=%08x A4=%08x A5=%08x A6=%08x SR=%04x\n",
+			(unsigned)m68k_dreg(regs, 0), (unsigned)m68k_dreg(regs, 1),
+			(unsigned)m68k_dreg(regs, 2), (unsigned)m68k_dreg(regs, 3),
+			(unsigned)m68k_dreg(regs, 4), (unsigned)m68k_dreg(regs, 5),
+			(unsigned)m68k_dreg(regs, 6), (unsigned)m68k_dreg(regs, 7),
+			(unsigned)m68k_areg(regs, 0), (unsigned)m68k_areg(regs, 1),
+			(unsigned)m68k_areg(regs, 2), (unsigned)m68k_areg(regs, 3),
+			(unsigned)m68k_areg(regs, 4), (unsigned)m68k_areg(regs, 5),
+			(unsigned)m68k_areg(regs, 6), (unsigned)regs.sr);
+	}
+
+	return true;
+}
+
 void Start680x0(void)
 {
 	m68k_reset();
+	if (run_opcode_test_mode_glue())
+		return;
 #if USE_JIT
     if (UseJIT)
 	m68k_compile_execute();
