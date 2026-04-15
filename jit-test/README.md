@@ -32,9 +32,9 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 118 vectors across:
+`run.sh` currently covers 119 vectors across:
 - Decode/dispatch sanity (`nop`)
-- Bit manipulation boundary behavior (`bitops`, `bitops_chg`, high-bit immediate `bitops_highbit`)
+- Bit manipulation boundary behavior (`bitops`, `bitops_chg`, high-bit immediate `bitops_highbit`, high-bit toggle `bitops_chg_highbit`)
 - Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long + byte/word-boundary-wrap checks, `quick_ops` incl. word+word-wrap+byte+byte-wrap+address-register variants, `compare` + `cmpi` size + negative-byte/word boundary forms, `muldiv`, `movem`, `misc`, `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long variants, `tst` size forms on negative and zero inputs)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)

@@ -166,7 +166,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_beq_taken muldiv movem misc flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_word_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_beq_taken muldiv movem misc flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_word_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -194,6 +194,8 @@ TESTS[bitops]="7000 08C0 0003 0800 0003 0880 0003 0800 0003"
 TESTS[bitops_chg]="7000 0840 0000 0840 0000 0800 0000"
 # BITOPS_HIGHBIT: exercise immediate bit operations on bit 31 (long-width boundary)
 TESTS[bitops_highbit]="7000 08C0 001F 0800 001F 0880 001F 0800 001F"
+# BITOPS_CHG_HIGHBIT: toggle bit 31 twice with BCHG immediate and verify BTST executes
+TESTS[bitops_chg_highbit]="7000 0840 001F 0840 001F 0800 001F"
 # BRANCH: MOVEQ #0,D0; CMP.L D0,D0; BEQ.S +2; MOVEQ #1,D0 (should skip); MOVEQ #2,D1
 TESTS[branch]="7000 B080 6702 7001 7202"
 # BRANCH_CHAIN: BEQ taken then BNE not-taken under same flags (Z remains set)
@@ -419,6 +421,7 @@ SENTINEL_A6[shift]="a6010003"
 SENTINEL_A6[bitops]="a6010004"
 SENTINEL_A6[bitops_chg]="a6010032"
 SENTINEL_A6[bitops_highbit]="a601006d"
+SENTINEL_A6[bitops_chg_highbit]="a6010077"
 SENTINEL_A6[branch]="a6010005"
 SENTINEL_A6[branch_chain]="a6010057"
 SENTINEL_A6[compare]="a6010006"
