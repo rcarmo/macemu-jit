@@ -1,54 +1,45 @@
-# BasiliskII AArch64 JIT — Opcode Correctness Autoresearch
+# BasiliskII AArch64 JIT — Opcode Equivalence Harness
 
 ## Goal
 
-Achieve maximum M68K opcode correctness in the AArch64 JIT by:
-1. Building a test harness that runs M68K programs in both interpreter and JIT mode
-2. Comparing register/flag state output between the two
-3. Identifying and fixing opcodes where JIT output diverges from interpreter
+Keep `jit-test/run.sh` trustworthy and deterministic so every run emits numeric metrics:
+- `score`
+- `pass`
+- `fail`
+- `total`
 
-## Metric
+Harness-first scope: prioritize benchmark correctness/completeness over emulator product behavior.
 
-`score` = number of opcode test cases where JIT output exactly matches interpreter output.
+## Metric contract
 
-Target: all test cases pass (score == total_tests).
+`jit-test/run.sh` always emits:
+- `METRIC pass=<int>` — number of opcode vectors where JIT and interpreter REGDUMP match
+- `METRIC fail=<int>` — vectors with mismatch or harness infra error
+- `METRIC total=<int>` — number of vectors executed
+- `METRIC score=<int>` — `floor(pass * 100 / total)` (0 when `total=0`)
+- `METRIC infra_fail=<int>` — subset of failures caused by harness/runtime issues
+- `METRIC build_ok=<0|1>` — whether build/setup succeeded before test execution
 
-## Key Constraint
+## Harness model
 
-**Do NOT add ROM patches, stub regions, or MAC RAM pre-sets to work around JIT bugs.**
-Fix the JIT opcode handler directly. Every fix must be verifiable by the test harness.
+For each test vector:
+1. Build BasiliskII (configures if needed)
+2. Run bytecode in interpreter mode (`jit false`) and JIT mode (`jit true`)
+3. Require exactly one `REGDUMP:` line in each run
+4. Verify sentinel write to A6 occurred
+5. Diff full REGDUMP lines to decide pass/fail
 
-## Repository state
+## Current deterministic vectors
 
-- Source: `/workspace/projects/macemu/BasiliskII/`
-- Clean baseline: commit `4946daac`
-- Build dir: `/workspace/projects/macemu/BasiliskII/src/Unix`
-- ROM: `/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM`
-- Disk: `/workspace/fixtures/basilisk/images/HD200MB`
+`run.sh` currently covers 32 vectors across:
+- Core arithmetic/data movement (`move`, `alu`, `quick_ops`, `compare`, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
+- Branch condition behavior (`bra_taken`, `bne/beq`, `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`)
+- Loop control (`dbra` taken and terminal non-taken)
 
-## Test harness design
+All vectors are designed to terminate without unbounded loops.
 
-See `autoresearch.sh` for implementation. Each iteration:
-1. Writes M68K test bytecode into the test harness
-2. Runs under interpreter (jit false) → captures register dump
-3. Runs under JIT (jit true) → captures register dump
-4. Diffs the dumps — any difference is a JIT bug
-5. Reports METRIC lines for scoring
+## Constraints
 
-## Opcode test cases
-
-One test per opcode class. Each sets known register state, executes the opcode(s),
-then the harness dumps D0-D7, A0-A6, SR.
-
-| ID | Opcodes | Key flags to check |
-|----|---------|-------------------|
-| move | MOVE.L/W/B, MOVEA, MOVEQ, MOVEM | N, Z |
-| alu | ADD, SUB, AND, OR, EOR, NOT, NEG | N, Z, C, V, X |
-| shift | LSL, LSR, ASL, ASR, ROL, ROR, ROXL, ROXR | N, Z, C, X |
-| bitops | BTST, BSET, BCLR, BCHG | Z only |
-| branch | Bcc (all conditions), DBcc | condition codes |
-| compare | CMP, CMPA, CMPI, TST | N, Z, C, V |
-| muldiv | MULU, MULS, DIVU, DIVS | N, Z, V |
-| movem | MOVEM predecrement, postincrement | register values |
-| misc | EXG, SWAP, EXT, CLR, ABCD, SBCD | N, Z, C, X |
-| flags | ANDI/EORI/ORI to SR, MOVE to/from SR | SR value |
+- No ROM patches, stub-region hacks, or RAM presets to mask bugs.
+- Keep outputs machine-parseable and numeric.
+- Keep vectors deterministic and bounded-time.
