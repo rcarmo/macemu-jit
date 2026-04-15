@@ -205,6 +205,28 @@ static bool parse_test_hex_words_glue(const char *hex, uint16 *out_words, size_t
 	return n > 0;
 }
 
+static bool parse_test_hex_longs_glue(const char *hex, uint32 *out_longs, size_t max_longs, size_t *out_count)
+{
+	size_t n = 0;
+	const char *p = hex;
+	while (*p) {
+		while (*p && (isspace((unsigned char)*p) || *p == ',' || *p == ';' || *p == ':'))
+			p++;
+		if (!*p)
+			break;
+		if (n >= max_longs)
+			return false;
+		char *end = NULL;
+		unsigned long v = strtoul(p, &end, 16);
+		if (end == p || v > 0xffffffffUL)
+			return false;
+		out_longs[n++] = (uint32)v;
+		p = end;
+	}
+	*out_count = n;
+	return n > 0;
+}
+
 static bool run_opcode_test_mode_glue()
 {
 	const char *hex = getenv("B2_TEST_HEX");
@@ -232,6 +254,25 @@ static bool run_opcode_test_mode_glue()
 	m68k_areg(regs, 7) = stack_addr;
 	regs.usp = regs.isp = regs.msp = stack_addr;
 	regs.sr = 0x2700;
+
+	const char *init = getenv("B2_TEST_INIT");
+	if (init && *init) {
+		uint32 init_words[17]; /* D0-D7, A0-A7, optional SR */
+		size_t init_count = 0;
+		if (!parse_test_hex_longs_glue(init, init_words, lengthof(init_words), &init_count) ||
+			(init_count != 16 && init_count != 17)) {
+			fprintf(stderr, "B2_TEST_INIT parse failed (need 16 or 17 hex words)\n");
+			quit_program = 1;
+			return true;
+		}
+		for (int i = 0; i < 8; i++)
+			m68k_dreg(regs, i) = init_words[i];
+		for (int i = 0; i < 8; i++)
+			m68k_areg(regs, i) = init_words[8 + i];
+		if (init_count == 17)
+			regs.sr = (uint16)(init_words[16] & 0xffff);
+		regs.usp = regs.isp = regs.msp = m68k_areg(regs, 7);
+	}
 	MakeFromSR();
 	regs.stopped = 0;
 	SPCFLAGS_CLEAR(SPCFLAG_STOP | SPCFLAG_BRK | SPCFLAG_DOTRACE | SPCFLAG_TRACE);
