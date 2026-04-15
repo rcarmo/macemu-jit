@@ -32,10 +32,10 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 110 vectors across:
+`run.sh` currently covers 112 vectors across:
 - Decode/dispatch sanity (`nop`)
 - Bit manipulation boundary behavior (`bitops`, `bitops_chg`, high-bit immediate `bitops_highbit`)
-- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long checks, `quick_ops` incl. word+byte+address-register variants, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long forms, `tst` size forms)
+- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long + byte-boundary-wrap checks, `quick_ops` incl. word+byte+byte-wrap+address-register variants, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long forms, `tst` size forms)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)
 - Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, plus bounded `dbne`/`dbeq` and `dbvc`/`dbvs` loops, and deterministic `dbvc`/`dbvs` non-taken condition-true paths)
