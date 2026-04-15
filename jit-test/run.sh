@@ -112,9 +112,17 @@ EOF
     # Some BasiliskII runs ignore TERM or survive in a separate process group,
     # so follow with a targeted pkill sweep.
     local emu_rc=0
-    if ! SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME="$td" \
-      B2_TEST_HEX="$full_hex" \
-      B2_TEST_DUMP=1 \
+    local -a env_vars=(
+        SDL_VIDEODRIVER=x11
+        DISPLAY=:99
+        HOME="$td"
+        B2_TEST_HEX="$full_hex"
+        B2_TEST_DUMP=1
+    )
+    if [ "$use_jit" = "true" ]; then
+        env_vars+=(B2_JIT_FORCE_TRANSLATE=1)
+    fi
+    if ! env "${env_vars[@]}" \
       timeout -k 5s 30s "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
       > "$td/emu.log" 2>&1; then
         emu_rc=$?
@@ -167,12 +175,97 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_long_wrap addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_sizes_zero cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes clr_byte_preserve_upper clr_word_preserve_upper neg_sizes neg_zero_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_byte_highbit imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero tst_positive bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_long_neg_roundtrip quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear moveq_edges alu_negative_roundtrip imm_logic_word_highbit branch_chain_z_clear branch_chain_carry_set branch_chain_overflow_set scc_ccr_preserve_bvs_taken dbra_four_iter scc_ccr_preserve_bvc_taken scc_ccr_preserve_bhi_taken scc_ccr_preserve_bls_taken dbra_five_iter branch_chain_eq_then_ne branch_chain_carry_clear imm_logic_long_highbit dbra_six_iter not_sizes not_word_preserve_upper not_byte_preserve_upper scc_ccr_preserve_bpl_taken scc_ccr_preserve_bmi_taken scc_ccr_preserve_bge_taken scc_ccr_preserve_bgt_taken scc_ccr_preserve_ble_taken nop_triplet)
+declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_long_wrap addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_sizes_zero cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes clr_byte_preserve_upper clr_word_preserve_upper neg_sizes neg_zero_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_byte_highbit imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero tst_positive bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_long_neg_roundtrip quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear moveq_edges alu_negative_roundtrip imm_logic_word_highbit branch_chain_z_clear branch_chain_carry_set branch_chain_overflow_set scc_ccr_preserve_bvs_taken dbra_four_iter scc_ccr_preserve_bvc_taken scc_ccr_preserve_bhi_taken scc_ccr_preserve_bls_taken dbra_five_iter branch_chain_eq_then_ne branch_chain_carry_clear imm_logic_long_highbit dbra_six_iter not_sizes not_word_preserve_upper not_byte_preserve_upper scc_ccr_preserve_bpl_taken scc_ccr_preserve_bmi_taken scc_ccr_preserve_bge_taken scc_ccr_preserve_bgt_taken scc_ccr_preserve_ble_taken nop_triplet roxl_x_propagation roxr_x_propagation roxl_count_2 asl_overflow lsr_count_32 asr_count_0 ror_word rol_word btst_reg_high_bit muls_neg_neg muls_zero divs_neg_neg divs_overflow abcd_basic sbcd_basic negx_with_x negx_zero addx_basic subx_basic ext_word ext_long)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
 # NOP_TRIPLET: additional decode/dispatch stream-length sanity for repeated NOPs
 TESTS[nop_triplet]="4E71 4E71 4E71"
+# --- HIGH-RISK OPCODE VECTORS ---
+# ROXL_X_PROPAGATION: ORI #0x10,CCR (set X); MOVEQ #1,D0; ROXL.L #1,D0
+# X=1 rotates into bit 0, so D0 should become 3, and X/C reflect bit 31 (was 0)
+# ORI.B #imm,CCR = 003C 0010; MOVEQ #1,D0 = 7001; ROXL.L #1,D0 = E390
+TESTS[roxl_x_propagation]="003C 0010 7001 E390"
+# ROXR_X_PROPAGATION: ORI #0x10,CCR (set X); MOVEQ #2,D0; ROXR.L #1,D0
+# X=1 rotates into bit 31, so D0=0x80000001, X/C reflect old bit 0 (was 0)
+# ORI.B #imm,CCR = 003C 0010; MOVEQ #2,D0 = 7002; ROXR.L #1,D0 = E290
+TESTS[roxr_x_propagation]="003C 0010 7002 E290"
+# ROXL_COUNT_2: ORI #0x10,CCR (set X); MOVEQ #3,D0; ROXL.L #2,D0
+# Rotate left by 2 through X: bit pattern exercise
+# ROXL.L #2,D0 = E590
+TESTS[roxl_count_2]="003C 0010 7003 E590"
+# ASL_OVERFLOW: MOVEQ #0x40,D0; SWAP D0 (D0=0x00400000...wait)
+# Actually: MOVE.L #0x40000000,D0; ASL.L #1,D0 → should set V=1
+# MOVE.L #imm,D0 = 203C 4000 0000; ASL.L #1,D0 = E380
+TESTS[asl_overflow]="203C 4000 0000 E380"
+# LSR_COUNT_32: MOVEQ #-1,D0 (0xFFFFFFFF); MOVEQ #32,D1 (0x20); LSR.L D1,D0
+# Shift count=32 for .L → D0 should become 0, C=MSB of original
+# MOVEQ #-1,D0 = 70FF; MOVEQ #32,D1 = 7220; LSR.L D1,D0 = E2A8
+TESTS[lsr_count_32]="70FF 7220 E2A8"
+# ASR_COUNT_0: MOVEQ #-1,D0; MOVEQ #0,D1; ASR.L D1,D0
+# Shift count=0 → D0 unchanged, C cleared
+# MOVEQ #-1,D0 = 70FF; MOVEQ #0,D1 = 7200; ASR.L D1,D0 = E2A0
+TESTS[asr_count_0]="70FF 7200 E2A0"
+# ROR_WORD: MOVE.L #0x00010000,D0; ROR.W #1,D0
+# ROR.W operates on low word only; upper word preserved
+# MOVE.L #0x00010000,D0 = 203C 0001 0000; ROR.W #1,D0 = E258
+TESTS[ror_word]="203C 0001 0000 E258"
+# ROL_WORD: MOVE.L #0xFFFF8001,D0; ROL.W #1,D0
+# ROL.W on low word 0x8001 → 0x0003, upper word 0xFFFF preserved
+# MOVE.L #0xFFFF8001,D0 = 203C FFFF 8001; ROL.W #1,D0 = E358
+TESTS[rol_word]="203C FFFF 8001 E358"
+# BTST_REG_HIGH_BIT: MOVEQ #31,D1; MOVE.L #0x80000000,D0; BTST D1,D0
+# Register BTST uses bit mod 32, so bit 31 should test set → Z=0
+# MOVEQ #31,D1 = 721F; MOVE.L #0x80000000,D0 = 203C 8000 0000; BTST D1,D0 = 0300
+TESTS[btst_reg_high_bit]="721F 203C 8000 0000 0300"
+# MULS_NEG_NEG: MOVEQ #-3,D0 (0xFFFFFFFD); MOVEQ #-5,D1 (0xFFFFFFFB); MULS D1,D0
+# (-3)*(-5) = 15, result in D0.L
+# MOVEQ #-3,D0 = 70FD; MOVEQ #-5,D1 = 72FB; MULS D1,D0 = C1C1
+TESTS[muls_neg_neg]="70FD 72FB C1C1"
+# MULS_ZERO: MOVEQ #0,D0; MOVEQ #-1,D1; MULS D1,D0
+# 0 * anything = 0, Z=1, N=0
+TESTS[muls_zero]="7000 72FF C1C1"
+# DIVS_NEG_NEG: MOVE.L #0xFFFFFFF1,D0 (-15); MOVEQ #-3,D1; DIVS D1,D0
+# -15 / -3 = quotient 5, remainder 0
+# MOVE.L #0xFFFFFFF1,D0 = 203C FFFF FFF1; MOVEQ #-3,D1 = 72FD; DIVS D1,D0 = 81C1
+TESTS[divs_neg_neg]="203C FFFF FFF1 72FD 81C1"
+# DIVS_OVERFLOW: MOVE.L #0x00010000,D0 (65536); MOVEQ #1,D1; DIVS D1,D0
+# 65536/1 = 65536 which doesn't fit in 16-bit quotient → V=1, operands unchanged
+# MOVE.L #0x00010000,D0 = 203C 0001 0000; MOVEQ #1,D1 = 7201; DIVS D1,D0 = 81C1
+TESTS[divs_overflow]="203C 0001 0000 7201 81C1"
+# ABCD_BASIC: MOVEQ #0x09,D0; MOVEQ #0x09,D1; ABCD D1,D0
+# BCD: 09+09=18 → D0.B=0x18
+# MOVEQ #9,D0 = 7009; MOVEQ #9,D1 = 7209; ABCD D1,D0 = C101
+TESTS[abcd_basic]="7009 7209 C101"
+# SBCD_BASIC: MOVEQ #0x18,D0; MOVEQ #0x09,D1; SBCD D1,D0
+# BCD: 18-09=09 → D0.B=0x09
+# MOVEQ #0x18,D0 = 7018; MOVEQ #9,D1 = 7209; SBCD D1,D0 = 8101
+TESTS[sbcd_basic]="7018 7209 8101"
+# NEGX_WITH_X: ORI #0x10,CCR (set X); MOVEQ #5,D0; NEGX.L D0
+# NEGX = 0 - D0 - X = 0 - 5 - 1 = -6 = 0xFFFFFFFA
+# ORI.B #imm,CCR = 003C 0010; MOVEQ #5,D0 = 7005; NEGX.L D0 = 4080
+TESTS[negx_with_x]="003C 0010 7005 4080"
+# NEGX_ZERO: MOVEQ #0,D0; NEGX.L D0 (with X clear)
+# NEGX of 0 with X=0 → result 0, but Z is only cleared if result≠0 (unchanged here)
+# ANDI #0xEF,CCR clears X; MOVEQ #0,D0; NEGX.L D0
+# ANDI.B #imm,CCR = 023C 00EF; MOVEQ #0,D0 = 7000; NEGX.L D0 = 4080
+TESTS[negx_zero]="023C 00EF 7000 4080"
+# ADDX_BASIC: ORI #0x10,CCR (set X); MOVEQ #5,D0; MOVEQ #3,D1; ADDX.L D1,D0
+# 5 + 3 + X(1) = 9
+# ORI.B #0x10,CCR = 003C 0010; MOVEQ #5,D0 = 7005; MOVEQ #3,D1 = 7203; ADDX.L D1,D0 = D181
+TESTS[addx_basic]="003C 0010 7005 7203 D181"
+# SUBX_BASIC: ORI #0x10,CCR (set X); MOVEQ #10,D0; MOVEQ #3,D1; SUBX.L D1,D0
+# 10 - 3 - X(1) = 6
+# ORI.B #0x10,CCR = 003C 0010; MOVEQ #10,D0 = 700A; MOVEQ #3,D1 = 7203; SUBX.L D1,D0 = 9181
+TESTS[subx_basic]="003C 0010 700A 7203 9181"
+# EXT_WORD: MOVEQ #-1,D0 (0xFF in low byte); EXT.W D0
+# EXT.W sign-extends byte to word: 0xFF → 0xFFFF in low word, upper word cleared by MOVEQ
+# MOVEQ #-1,D0 = 70FF; EXT.W D0 = 4880
+TESTS[ext_word]="70FF 4880"
+# EXT_LONG: MOVE.L #0x0000FF80,D0; EXT.W D0; EXT.L D0
+# EXT.W: byte 0x80 → word 0xFF80; EXT.L: word 0xFF80 → long 0xFFFFFF80
+# MOVE.L #0x0000FF80,D0 = 203C 0000 FF80; EXT.W D0 = 4880; EXT.L D0 = 48C0
+TESTS[ext_long]="203C 0000 FF80 4880 48C0"
 # MOVE: MOVEQ #0x42,D0; MOVE.L D0,D1; MOVEQ #-1,D2; MOVE.W D2,D3
 TESTS[move]="7042 2200 74FF 3602"
 # MOVEQ_SIGNEXT: verify MOVEQ sign-extension with CMPI.L and CMPI.W checks
@@ -551,6 +644,27 @@ TESTS[scc_ccr_preserve_ble_taken]="7001 B080 5FC1 6F02 7407 7608"
 declare -A SENTINEL_A6
 SENTINEL_A6[nop]="a601005a"
 SENTINEL_A6[nop_triplet]="a60100c2"
+SENTINEL_A6[roxl_x_propagation]="a60100c3"
+SENTINEL_A6[roxr_x_propagation]="a60100c4"
+SENTINEL_A6[roxl_count_2]="a60100c5"
+SENTINEL_A6[asl_overflow]="a60100c6"
+SENTINEL_A6[lsr_count_32]="a60100c7"
+SENTINEL_A6[asr_count_0]="a60100c8"
+SENTINEL_A6[ror_word]="a60100c9"
+SENTINEL_A6[rol_word]="a60100ca"
+SENTINEL_A6[btst_reg_high_bit]="a60100cb"
+SENTINEL_A6[muls_neg_neg]="a60100cc"
+SENTINEL_A6[muls_zero]="a60100cd"
+SENTINEL_A6[divs_neg_neg]="a60100ce"
+SENTINEL_A6[divs_overflow]="a60100cf"
+SENTINEL_A6[abcd_basic]="a60100d0"
+SENTINEL_A6[sbcd_basic]="a60100d1"
+SENTINEL_A6[negx_with_x]="a60100d2"
+SENTINEL_A6[negx_zero]="a60100d3"
+SENTINEL_A6[addx_basic]="a60100d4"
+SENTINEL_A6[subx_basic]="a60100d5"
+SENTINEL_A6[ext_word]="a60100d6"
+SENTINEL_A6[ext_long]="a60100d7"
 SENTINEL_A6[move]="a6010001"
 SENTINEL_A6[moveq_signext]="a601007a"
 SENTINEL_A6[alu]="a6010002"

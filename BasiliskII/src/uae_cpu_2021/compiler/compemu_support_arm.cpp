@@ -1415,6 +1415,15 @@ static int		optcount[10] = {
     -1, -1, -1, -1
 };
 
+static void jit_force_translate_check(void)
+{
+    const char *env = getenv("B2_JIT_FORCE_TRANSLATE");
+    if (env && *env && strcmp(env, "0") != 0) {
+        optcount[0] = 0;  // Skip interpreter warm-up, compile immediately
+        fprintf(stderr, "JIT: B2_JIT_FORCE_TRANSLATE active — optcount[0] set to 0\n");
+    }
+}
+
 op_properties prop[65536];
 
 #ifdef AMIBERRY
@@ -3776,6 +3785,9 @@ void compiler_init(void)
     }
 
     initialized = true;
+
+    // Allow test harness to force immediate native compilation
+    jit_force_translate_check();
 
 #ifdef PROFILE_UNTRANSLATED_INSNS
     jit_log("<JIT compiler> : gather statistics on untranslated insns count");

@@ -848,6 +848,15 @@ static int		optcount[10]		= {
 	-1, -1, -1, -1
 };
 
+static void jit_force_translate_check(void)
+{
+	const char *env = getenv("B2_JIT_FORCE_TRANSLATE");
+	if (env && *env && strcmp(env, "0") != 0) {
+		optcount[0] = 0;  // Skip interpreter warm-up, compile immediately
+		jit_log("<JIT compiler> : B2_JIT_FORCE_TRANSLATE active — optcount[0] set to 0");
+	}
+}
+
 #ifdef UAE
 /* FIXME: op_properties is currently in compemu.h */
 
@@ -3482,6 +3491,9 @@ void compiler_init(void)
 	// Build compiler tables
 	init_table68k ();
 	build_comp();
+
+	// Allow test harness to force immediate native compilation
+	jit_force_translate_check();
 #endif
 
 	initialized = true;
