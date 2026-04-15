@@ -31,10 +31,10 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 32 vectors across:
+`run.sh` currently covers 53 vectors across:
 - Core arithmetic/data movement (`move`, `alu`, `quick_ops`, `compare`, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
-- Branch condition behavior (`bra_taken`, `bne/beq`, `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`)
-- Loop control (`dbra` taken and terminal non-taken)
+- Branch condition behavior (`bra_taken`, `bne/beq`, `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi`, `bls`)
+- Loop control (`dbra` taken, terminal non-taken, and bounded multi-iteration loop)
 
 All vectors are designed to terminate without unbounded loops.
 
