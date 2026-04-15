@@ -81,13 +81,21 @@ nocdrom true
 ignoresegv true
 EOF
 
-    # Set env to trace register state at STOP instruction
-    # B2_JIT_PCTRACE_STOP=1 makes the emulator dump regs when STOP is executed
+    # Ensure stale emulator processes from prior tests do not survive.
+    pkill -f '/tmp/ar-jit-opcodes-.*BasiliskII' 2>/dev/null || true
+    pkill -f "$UNIX_DIR/BasiliskII --config $td/prefs" 2>/dev/null || true
+
+    # Hard timeout: terminate after 30s, kill after 5s grace.
+    # Some BasiliskII runs ignore TERM or survive in a separate process group,
+    # so follow with a targeted pkill sweep.
     SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME="$td" \
       B2_TEST_HEX="$hex_code" \
       B2_TEST_DUMP=1 \
-      timeout 30 "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
+      timeout -k 5s 30s "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
       > "$td/emu.log" 2>&1 || true
+
+    pkill -f "$UNIX_DIR/BasiliskII --config $td/prefs" 2>/dev/null || true
+    sleep 0.2
 
     # Extract register dump from log
     grep "^REGDUMP:" "$td/emu.log" > "$outfile" 2>/dev/null || true
