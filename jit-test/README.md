@@ -32,8 +32,8 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 188 vectors across:
-- Decode/dispatch sanity (`nop`)
+`run.sh` currently covers 189 vectors across:
+- Decode/dispatch sanity (`nop`, `nop_triplet`)
 - Bit manipulation boundary behavior (`bitops`, `bitops_chg`, high-bit immediate `bitops_highbit`, high-bit toggle `bitops_chg_highbit`)
 - Core arithmetic/data movement (`move` + `moveq_signext` + moveq edge sign-extension checks, `alu` + negative roundtrip check, `addi/subi` incl. byte/word/long plus byte/word/long-boundary-wrap checks, `quick_ops` incl. long-negative roundtrip + word+word-wrap+long-wrap+byte+byte-wrap+address-register variants, `compare` + `cmpi` size coverage for both non-zero and zero immediates plus negative byte/word/long boundary forms, `muldiv`, `movem`, `misc` + `swap_roundtrip`, `not` size forms (`not_sizes`) plus explicit NOT.W/NOT.B upper-bit preservation checks, `clr` size forms (`clr_sizes`) plus byte/word partial-clear upper-bit preservation checks, `neg` size forms (`neg_sizes`) plus explicit zero-input NEG size path, `flags` incl. OR/AND/EOR-CCR path, `exg`, `imm_logic` incl. byte+word+long variants plus explicit byte/word/long high-bit edge logic checks, `tst` size forms on negative, zero, and positive inputs)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing with explicit Z-clear, Z-set, carry-clear, carry-set, and overflow-set chain behaviors)
@@ -47,6 +47,8 @@ All vectors are designed to terminate without unbounded loops.
 Before executing vectors, `run.sh` performs deterministic preflight validation:
 - no duplicate test names in `TEST_ORDER`
 - every ordered test has both `TESTS[...]` bytecode and `SENTINEL_A6[...]`
+- each test encoding is strict 4-hex-word tokens (machine-parseable M68K word stream)
+- test vectors may not include `2C7C` (reserved for harness-appended A6 sentinel write)
 - each sentinel is an 8-hex-digit value
 - sentinel values are unique across vectors
 - no extra `TESTS[...]`/`SENTINEL_A6[...]` keys exist outside `TEST_ORDER`
