@@ -32,7 +32,8 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 88 vectors across:
+`run.sh` currently covers 91 vectors across:
+- Decode/dispatch sanity (`nop`)
 - Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long checks, `quick_ops` incl. word variant, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)

@@ -166,8 +166,10 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes cmpi_beq_taken muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
+# NOP: trivial decode/execute path sanity check
+TESTS[nop]="4E71 4E71"
 # MOVE: MOVEQ #0x42,D0; MOVE.L D0,D1; MOVEQ #-1,D2; MOVE.W D2,D3
 TESTS[move]="7042 2200 74FF 3602"
 # ALU: MOVEQ #5,D0; MOVEQ #3,D1; ADD.L D1,D0; SUB.L D1,D0; AND.L D1,D0
@@ -196,6 +198,8 @@ TESTS[compare]="7005 7203 B081 4A80 0C80 0000 0005"
 TESTS[compare_negative]="70FF 0C80 FFFF FFFF 6602 7207"
 # CMPI_SIZES: run CMPI.B/W/L forms against D0 to exercise immediate size decoding
 TESTS[cmpi_sizes]="7001 0C00 0001 0C40 0001 0C80 0000 0001"
+# CMPI_BEQ_TAKEN: compare equal immediate then take BEQ short path
+TESTS[cmpi_beq_taken]="7000 0C80 0000 0000 6702 7207 7408"
 # MULDIV: MOVEQ #7,D0; MULU.W #3,D0; MOVEQ #21,D1; DIVU.W #3,D1
 TESTS[muldiv]="7007 C0FC 0003 7215 82FC 0003"
 # MOVEM: setup stack; MOVEM.L D0-D3,-(SP); MOVEM.L (SP)+,D4-D7
@@ -348,6 +352,7 @@ TESTS[dbne_loop_z_set]="7001 B080 4E71 56C8 FFFA"
 TESTS[dbeq_loop_z_clear]="7001 0C80 0000 0002 4E71 57C8 FFFA"
 
 declare -A SENTINEL_A6
+SENTINEL_A6[nop]="a601005a"
 SENTINEL_A6[move]="a6010001"
 SENTINEL_A6[alu]="a6010002"
 SENTINEL_A6[alu_overflow]="a6010031"
@@ -362,6 +367,7 @@ SENTINEL_A6[branch_chain]="a6010057"
 SENTINEL_A6[compare]="a6010006"
 SENTINEL_A6[compare_negative]="a6010033"
 SENTINEL_A6[cmpi_sizes]="a6010045"
+SENTINEL_A6[cmpi_beq_taken]="a601005b"
 SENTINEL_A6[muldiv]="a6010007"
 SENTINEL_A6[movem]="a6010008"
 SENTINEL_A6[misc]="a6010009"
