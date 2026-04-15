@@ -167,7 +167,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_long_wrap addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_byte_highbit imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -181,6 +181,8 @@ TESTS[alu]="7005 7203 D081 9081 C081"
 TESTS[alu_overflow]="707F 5280 5180"
 # ADDI_SUBI_LONG: MOVEQ #5,D0; ADDI.L #3,D0; SUBI.L #1,D0
 TESTS[addi_subi_long]="7005 0680 0000 0003 0480 0000 0001"
+# ADDI_SUBI_LONG_WRAP: long arithmetic around 0x7fffffff/0x80000000 boundary with explicit CMPI.L check
+TESTS[addi_subi_long_wrap]="203C 7FFF FFFF 0680 0000 0001 0480 0000 0001 0C80 7FFF FFFF"
 # ADDI_SUBI_WORD: MOVEQ #0,D0; ADDI.W #0x1234,D0; SUBI.W #0x20,D0
 TESTS[addi_subi_word]="7000 0640 1234 0440 0020"
 # ADDI_SUBI_WORD_WRAP: word arithmetic around 0x7fff/0x8000 boundary with explicit CMPI.W check
@@ -241,6 +243,8 @@ TESTS[exg_roundtrip]="7001 7202 C141 C141"
 TESTS[imm_logic]="7000 0000 000F 0A00 00F0 0200 003C"
 # IMM_LOGIC_ALT: alternate immediate-byte logic sequence for edge mask patterns
 TESTS[imm_logic_alt]="7000 0000 00AA 0200 000F 0A00 0005"
+# IMM_LOGIC_BYTE_HIGHBIT: byte-width OR/EOR around 0x80 edge, then normalize with ANDI.B/CMPI.B
+TESTS[imm_logic_byte_highbit]="7000 0000 0080 0A00 0080 0200 00FF 0C00 0000"
 # IMM_LOGIC_WORD: immediate word-width OR/EOR/AND sequence to cover non-byte forms
 TESTS[imm_logic_word]="7000 0040 00FF 0A40 0F0F 0240 00F0"
 # IMM_LOGIC_LONG: immediate long-width OR/EOR/AND sequence to cover .L forms
@@ -489,6 +493,7 @@ SENTINEL_A6[moveq_signext]="a601007a"
 SENTINEL_A6[alu]="a6010002"
 SENTINEL_A6[alu_overflow]="a6010031"
 SENTINEL_A6[addi_subi_long]="a6010043"
+SENTINEL_A6[addi_subi_long_wrap]="a60100a2"
 SENTINEL_A6[addi_subi_word]="a6010044"
 SENTINEL_A6[addi_subi_word_wrap]="a6010073"
 SENTINEL_A6[addi_subi_byte]="a6010056"
@@ -519,6 +524,7 @@ SENTINEL_A6[exg]="a601000b"
 SENTINEL_A6[exg_roundtrip]="a6010034"
 SENTINEL_A6[imm_logic]="a601000c"
 SENTINEL_A6[imm_logic_alt]="a6010035"
+SENTINEL_A6[imm_logic_byte_highbit]="a60100a3"
 SENTINEL_A6[imm_logic_word]="a6010068"
 SENTINEL_A6[imm_logic_long]="a601006a"
 SENTINEL_A6[imm_logic_long_alt]="a6010075"
