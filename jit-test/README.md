@@ -32,9 +32,9 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 105 vectors across:
+`run.sh` currently covers 108 vectors across:
 - Decode/dispatch sanity (`nop`)
-- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long checks, `quick_ops` incl. word+byte variants, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic` incl. byte+word forms)
+- Core arithmetic/data movement (`move`, `alu`, `addi/subi` incl. byte/word/long checks, `quick_ops` incl. word+byte+address-register variants, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic` incl. byte+word+long forms, `tst` size forms)
 - Branch condition behavior (`bra` short+word, `bne/beq` short+word, both short + `.W` displacement forms for `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi/bls`, plus chained-condition branch sequencing)
 - Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)
 - Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, plus bounded `dbne`/`dbeq` and `dbvc`/`dbvs` loops, and deterministic `dbvc`/`dbvs` non-taken condition-true paths)

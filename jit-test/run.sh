@@ -166,7 +166,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes cmpi_beq_taken muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_byte dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes cmpi_beq_taken muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long tst_sizes bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_byte quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -218,6 +218,10 @@ TESTS[imm_logic]="7000 0000 000F 0A00 00F0 0200 003C"
 TESTS[imm_logic_alt]="7000 0000 00AA 0200 000F 0A00 0005"
 # IMM_LOGIC_WORD: immediate word-width OR/EOR/AND sequence to cover non-byte forms
 TESTS[imm_logic_word]="7000 0040 00FF 0A40 0F0F 0240 00F0"
+# IMM_LOGIC_LONG: immediate long-width OR/EOR/AND sequence to cover .L forms
+TESTS[imm_logic_long]="7000 0080 00FF 00FF 0A80 0F0F 0F0F 0280 00F0 00F0"
+# TST_SIZES: exercise TST.B/W/L decode+flag paths on a negative value
+TESTS[tst_sizes]="70FF 4A00 4A40 4A80"
 # BRA_TAKEN: unconditional branch should skip MOVEQ #9,D1
 TESTS[bra_taken]="7001 6002 7209 7402"
 # BRA_W_TAKEN: unconditional word-displacement branch should skip MOVEQ #9,D1
@@ -358,6 +362,8 @@ TESTS[quick_ops]="7005 5280 5180 2200"
 TESTS[quick_ops_word]="70FF 5240 5140 3200"
 # QUICK_OPS_BYTE: byte-sized add/sub quick on D0 low byte with explicit CMPI.B validation
 TESTS[quick_ops_byte]="7000 5200 5100 0C00 0000"
+# QUICK_OPS_ADDR: addq/subq on A0 uses address-register execution path
+TESTS[quick_ops_addr]="207C 0000 0100 5288 5188"
 # DBRA: MOVEQ #1,D0; DBRA D0,+2 (taken once, skips MOVEQ #9,D1); NOP
 TESTS[dbra]="7001 51C8 0002 7209 4E71"
 # DBRA_NOT_TAKEN: MOVEQ #0,D0; DBRA D0,+2 should not branch (counter reaches -1)
@@ -405,6 +411,8 @@ SENTINEL_A6[exg_roundtrip]="a6010034"
 SENTINEL_A6[imm_logic]="a601000c"
 SENTINEL_A6[imm_logic_alt]="a6010035"
 SENTINEL_A6[imm_logic_word]="a6010068"
+SENTINEL_A6[imm_logic_long]="a601006a"
+SENTINEL_A6[tst_sizes]="a601006b"
 SENTINEL_A6[bra_taken]="a601000d"
 SENTINEL_A6[bra_w_taken]="a601003e"
 SENTINEL_A6[bne_not_taken]="a601000e"
@@ -475,6 +483,7 @@ SENTINEL_A6[scc_gt_le]="a6010039"
 SENTINEL_A6[quick_ops]="a601001f"
 SENTINEL_A6[quick_ops_word]="a6010058"
 SENTINEL_A6[quick_ops_byte]="a6010069"
+SENTINEL_A6[quick_ops_addr]="a601006c"
 SENTINEL_A6[dbra]="a6010020"
 SENTINEL_A6[dbra_not_taken]="a6010021"
 SENTINEL_A6[dbt_true_not_taken]="a6010059"
