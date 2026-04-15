@@ -66,12 +66,17 @@ echo "METRIC build_ok=1"
 
 run_test() {
     local name="$1"
-    local hex_code="$2"  # hex M68K bytecode, space-separated words
-    local use_jit="$3"   # "true" or "false"
-    local outfile="$4"
+    local hex_code="$2"      # hex M68K bytecode, space-separated words
+    local use_jit="$3"       # "true" or "false"
+    local sentinel_a6="$4"   # 8-hex-digit value expected in A6
+    local outfile="$5"
 
     local td="$RUN_DIR/test-${name}-jit${use_jit}"
     mkdir -p "$td"
+
+    # Append a non-CCR-clobbering sentinel write (MOVEA.L #imm, A6).
+    # Opcode: 2C7C <imm_hi16> <imm_lo16>
+    local full_hex="$hex_code 2C7C ${sentinel_a6:0:4} ${sentinel_a6:4:4}"
 
     # Write prefs
     cat > "$td/prefs" <<EOF
@@ -98,7 +103,7 @@ EOF
     # Some BasiliskII runs ignore TERM or survive in a separate process group,
     # so follow with a targeted pkill sweep.
     SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME="$td" \
-      B2_TEST_HEX="$hex_code" \
+      B2_TEST_HEX="$full_hex" \
       B2_TEST_DUMP=1 \
       timeout -k 5s 30s "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
       > "$td/emu.log" 2>&1 || true
@@ -106,8 +111,20 @@ EOF
     pkill -f "$UNIX_DIR/BasiliskII --config $td/prefs" 2>/dev/null || true
     sleep 0.2
 
-    # Extract register dump from log
-    grep "^REGDUMP:" "$td/emu.log" > "$outfile" 2>/dev/null || true
+    local dump_count
+    dump_count=$(grep -c "^REGDUMP:" "$td/emu.log" 2>/dev/null || true)
+    if [ "$dump_count" -ne 1 ]; then
+        echo "INFRA $name jit=$use_jit: expected 1 REGDUMP, got $dump_count" >&2
+        return 1
+    fi
+
+    grep "^REGDUMP:" "$td/emu.log" > "$outfile"
+    if ! grep -qi "A6=$sentinel_a6" "$outfile"; then
+        echo "INFRA $name jit=$use_jit: sentinel A6 mismatch (expected $sentinel_a6)" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 # Start Xvfb if needed
@@ -120,6 +137,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
+declare -a TEST_ORDER=(move alu shift bitops branch compare muldiv movem misc flags)
 declare -A TESTS
 # MOVE: MOVEQ #0x42,D0; MOVE.L D0,D1; MOVEQ #-1,D2; MOVE.W D2,D3
 TESTS[move]="7042 2200 74FF 3602"
@@ -142,20 +160,36 @@ TESTS[misc]="705A 4840 4880 4241 4480"
 # FLAGS: MOVE #0x2700,SR; ORI #0x10,CCR; ANDI #0xEF,CCR; MOVE SR,D0
 TESTS[flags]="46FC 2700 003C 0010 023C 00EF 40C0"
 
+declare -A SENTINEL_A6
+SENTINEL_A6[move]="a6010001"
+SENTINEL_A6[alu]="a6010002"
+SENTINEL_A6[shift]="a6010003"
+SENTINEL_A6[bitops]="a6010004"
+SENTINEL_A6[branch]="a6010005"
+SENTINEL_A6[compare]="a6010006"
+SENTINEL_A6[muldiv]="a6010007"
+SENTINEL_A6[movem]="a6010008"
+SENTINEL_A6[misc]="a6010009"
+SENTINEL_A6[flags]="a601000a"
+
 # ---- Run all test cases and score --------------------------------------------
 PASS=0
 FAIL=0
-TOTAL=${#TESTS[@]}
+INFRA_FAIL=0
+TOTAL=${#TEST_ORDER[@]}
 
-for name in "${!TESTS[@]}"; do
+for name in "${TEST_ORDER[@]}"; do
     hex="${TESTS[$name]}"
+    sentinel_a6="${SENTINEL_A6[$name]}"
     ifile="$RUN_DIR/${name}-interp.txt"
     jfile="$RUN_DIR/${name}-jit.txt"
 
-    run_test "$name" "$hex" "false" "$ifile"
-    run_test "$name" "$hex" "true"  "$jfile"
+    interp_ok=1
+    jit_ok=1
+    run_test "$name" "$hex" "false" "$sentinel_a6" "$ifile" || interp_ok=0
+    run_test "$name" "$hex" "true"  "$sentinel_a6" "$jfile" || jit_ok=0
 
-    if [ -s "$ifile" ] && [ -s "$jfile" ]; then
+    if [ "$interp_ok" -eq 1 ] && [ "$jit_ok" -eq 1 ]; then
         if diff -q "$ifile" "$jfile" >/dev/null 2>&1; then
             echo "METRIC opcode_${name}=1"
             PASS=$((PASS+1))
@@ -166,8 +200,9 @@ for name in "${!TESTS[@]}"; do
             FAIL=$((FAIL+1))
         fi
     else
-        echo "METRIC opcode_${name}=-1"  # no output (test infra issue)
+        echo "METRIC opcode_${name}=-1"  # harness infrastructure issue
         FAIL=$((FAIL+1))
+        INFRA_FAIL=$((INFRA_FAIL+1))
     fi
 done
 
@@ -176,6 +211,7 @@ SCORE=$(( PASS * 100 / TOTAL ))
 echo "METRIC pass=$PASS"
 echo "METRIC fail=$FAIL"
 echo "METRIC total=$TOTAL"
+echo "METRIC infra_fail=$INFRA_FAIL"
 echo "METRIC score=$SCORE"
 
 rm -rf "$RUN_DIR"
