@@ -13,3 +13,9 @@ shift_chain
 movem_predec_postinc
 movem_predec_mixed_order
 movem
+dbra_start_minus1_branch
+dbra_start_8000_branch
+dbt_true_not_taken
+dbra_three_iter
+dbcc_loop_c_set
+dbcs_not_taken_c_set
