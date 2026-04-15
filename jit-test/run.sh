@@ -167,7 +167,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -423,6 +423,30 @@ TESTS[dbcs_not_taken_c_set]="7001 7201 0C81 0000 0002 55C8 0002 7407"
 TESTS[dbpl_loop_n_set]="7001 74FF 4E71 5AC8 FFFA"
 # DBMI_NOT_TAKEN_N_SET: set N=1 so DBMI condition is true (no decrement/branch)
 TESTS[dbmi_not_taken_n_set]="7001 74FF 5BC8 0002 7608"
+# DBHI_NOT_TAKEN_HI_SET: set C=0,Z=0 so DBHI condition is true (no decrement/branch)
+TESTS[dbhi_not_taken_hi_set]="7001 7201 0C81 0000 0000 52C8 0002 7407"
+# DBLS_NOT_TAKEN_LS_SET: set Z=1 so DBLS condition is true (no decrement/branch)
+TESTS[dbls_not_taken_ls_set]="7001 B080 53C8 0002 7407"
+# DBGE_NOT_TAKEN_N_EQ_V: set N==V so DBGE condition is true (no decrement/branch)
+TESTS[dbge_not_taken_n_eq_v]="7001 7201 0C81 0000 0000 5CC8 0002 7407"
+# DBLT_NOT_TAKEN_N_NE_V: set N!=V so DBLT condition is true (no decrement/branch)
+TESTS[dblt_not_taken_n_ne_v]="7001 7201 0C81 0000 0002 5DC8 0002 7407"
+# DBGT_NOT_TAKEN_GT_SET: set Z=0,N==V so DBGT condition is true (no decrement/branch)
+TESTS[dbgt_not_taken_gt_set]="7001 7201 0C81 0000 0000 5EC8 0002 7407"
+# DBLE_NOT_TAKEN_LE_SET: set Z=1 so DBLE condition is true (no decrement/branch)
+TESTS[dble_not_taken_le_set]="7001 B080 5FC8 0002 7407"
+# DBHI_FALSE_DEC_TERMINAL_LS_SET: set LS=true so DBHI is false; D0=0 forces one decrement-to-terminal path
+TESTS[dbhi_false_dec_terminal_ls_set]="7000 B080 52C8 0002 7407"
+# DBLS_FALSE_DEC_TERMINAL_HI_SET: set HI=true so DBLS is false; D0=0 forces one decrement-to-terminal path
+TESTS[dbls_false_dec_terminal_hi_set]="7000 7201 0C81 0000 0000 53C8 0002 7407"
+# DBGE_FALSE_DEC_TERMINAL_N_NE_V: set N!=V so DBGE is false; D0=0 forces one decrement-to-terminal path
+TESTS[dbge_false_dec_terminal_n_ne_v]="7000 7201 0C81 0000 0002 5CC8 0002 7407"
+# DBLT_FALSE_DEC_TERMINAL_N_EQ_V: set N==V so DBLT is false; D0=0 forces one decrement-to-terminal path
+TESTS[dblt_false_dec_terminal_n_eq_v]="7000 7201 0C81 0000 0000 5DC8 0002 7407"
+# DBGT_FALSE_DEC_TERMINAL_Z_SET: set Z=1 so DBGT is false; D0=0 forces one decrement-to-terminal path
+TESTS[dbgt_false_dec_terminal_z_set]="7000 B080 5EC8 0002 7407"
+# DBLE_FALSE_DEC_TERMINAL_GT_SET: set Z=0,N==V so DBLE is false; D0=0 forces one decrement-to-terminal path
+TESTS[dble_false_dec_terminal_gt_set]="7000 7201 0C81 0000 0000 5FC8 0002 7407"
 # DBVC_LOOP_V_SET: force V=1; DBVC condition is false so bounded DBcc loop should execute twice for D0=1
 TESTS[dbvc_loop_v_set]="7001 243C 7FFF FFFF 5282 4E71 58C8 FFFA"
 # DBVS_LOOP_V_CLEAR: force V=0; DBVS condition is false so bounded DBcc loop should execute twice for D0=1
@@ -564,6 +588,18 @@ SENTINEL_A6[dbcc_loop_c_set]="a6010082"
 SENTINEL_A6[dbcs_not_taken_c_set]="a6010083"
 SENTINEL_A6[dbpl_loop_n_set]="a6010084"
 SENTINEL_A6[dbmi_not_taken_n_set]="a6010085"
+SENTINEL_A6[dbhi_not_taken_hi_set]="a6010086"
+SENTINEL_A6[dbls_not_taken_ls_set]="a6010087"
+SENTINEL_A6[dbge_not_taken_n_eq_v]="a6010088"
+SENTINEL_A6[dblt_not_taken_n_ne_v]="a6010089"
+SENTINEL_A6[dbgt_not_taken_gt_set]="a601008a"
+SENTINEL_A6[dble_not_taken_le_set]="a601008b"
+SENTINEL_A6[dbhi_false_dec_terminal_ls_set]="a601008c"
+SENTINEL_A6[dbls_false_dec_terminal_hi_set]="a601008d"
+SENTINEL_A6[dbge_false_dec_terminal_n_ne_v]="a601008e"
+SENTINEL_A6[dblt_false_dec_terminal_n_eq_v]="a601008f"
+SENTINEL_A6[dbgt_false_dec_terminal_z_set]="a6010090"
+SENTINEL_A6[dble_false_dec_terminal_gt_set]="a6010091"
 SENTINEL_A6[dbvc_loop_v_set]="a6010052"
 SENTINEL_A6[dbvs_loop_v_clear]="a6010053"
 SENTINEL_A6[dbvc_not_taken_v_clear]="a6010054"
@@ -595,6 +631,18 @@ for name in "${TEST_ORDER[@]}"; do
         emit_failure_metrics 1 "duplicate sentinel value detected: $sentinel" 1
     fi
     _seen_sentinels[$sentinel]=1
+done
+
+for name in "${!TESTS[@]}"; do
+    if [ -z "${_seen_test_names[$name]+x}" ]; then
+        emit_failure_metrics 1 "TESTS entry not present in TEST_ORDER: $name" 1
+    fi
+done
+
+for name in "${!SENTINEL_A6[@]}"; do
+    if [ -z "${_seen_test_names[$name]+x}" ]; then
+        emit_failure_metrics 1 "SENTINEL_A6 entry not present in TEST_ORDER: $name" 1
+    fi
 done
 
 # ---- Run all test cases and score --------------------------------------------
