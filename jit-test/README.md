@@ -31,10 +31,11 @@ For each test vector:
 
 ## Current deterministic vectors
 
-`run.sh` currently covers 53 vectors across:
-- Core arithmetic/data movement (`move`, `alu`, `quick_ops`, `compare`, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
-- Branch condition behavior (`bra_taken`, `bne/beq`, `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi`, `bls`)
-- Loop control (`dbra` taken, terminal non-taken, and bounded multi-iteration loop)
+`run.sh` currently covers 69 vectors across:
+- Core arithmetic/data movement (`move`, `alu`, `addi/subi`, `quick_ops`, `compare` + `cmpi` size forms, `muldiv`, `movem`, `misc`, `flags`, `exg`, `imm_logic`)
+- Branch condition behavior (`bra` short+word, `bne/beq` short+word, `bpl/bmi`, `bvc/bvs`, `bge/blt`, `bgt/ble`, `bcc/bcs`, `bhi`, `bls`)
+- Condition-byte writes via `Scc` families (`st/sf`, `shi/sls`, `scc/scs`, `sne/seq`, `svc/svs`, `spl/smi`, `sge/slt`, `sgt/sle`)
+- Loop control (`dbra` taken, terminal non-taken, bounded multi-iteration loop, plus `dbne`/`dbeq` bounded loops under fixed flag states)
 
 All vectors are designed to terminate without unbounded loops.
 

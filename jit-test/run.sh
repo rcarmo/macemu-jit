@@ -144,7 +144,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(move alu alu_overflow shift bitops bitops_chg branch compare compare_negative muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bne_not_taken bne_taken beq_taken beq_not_taken bpl_taken bpl_not_taken bmi_taken bmi_not_taken bvc_taken bvc_not_taken_overflow bvs_taken_overflow bvs_not_taken bge_taken bge_not_taken blt_taken blt_not_taken bgt_taken bgt_not_taken ble_taken ble_not_taken bcc_taken bcc_not_taken bcs_taken bcs_not_taken bhi_taken bhi_not_taken bls_taken bls_not_taken scc_basic scc_eq_ne scc_carry quick_ops dbra dbra_not_taken dbra_three_iter)
+declare -a TEST_ORDER=(move alu alu_overflow addi_subi_long addi_subi_word shift bitops bitops_chg branch compare compare_negative cmpi_sizes muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bmi_taken bmi_not_taken bvc_taken bvc_not_taken_overflow bvs_taken_overflow bvs_not_taken bge_taken bge_not_taken blt_taken blt_not_taken bgt_taken bgt_not_taken ble_taken ble_not_taken bcc_taken bcc_not_taken bcs_taken bcs_not_taken bhi_taken bhi_not_taken bls_taken bls_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops dbra dbra_not_taken dbra_three_iter dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # MOVE: MOVEQ #0x42,D0; MOVE.L D0,D1; MOVEQ #-1,D2; MOVE.W D2,D3
 TESTS[move]="7042 2200 74FF 3602"
@@ -152,6 +152,10 @@ TESTS[move]="7042 2200 74FF 3602"
 TESTS[alu]="7005 7203 D081 9081 C081"
 # ALU_OVERFLOW: MOVEQ #0x7f,D0; ADDQ.L #1,D0; SUBQ.L #1,D0
 TESTS[alu_overflow]="707F 5280 5180"
+# ADDI_SUBI_LONG: MOVEQ #5,D0; ADDI.L #3,D0; SUBI.L #1,D0
+TESTS[addi_subi_long]="7005 0680 0000 0003 0480 0000 0001"
+# ADDI_SUBI_WORD: MOVEQ #0,D0; ADDI.W #0x1234,D0; SUBI.W #0x20,D0
+TESTS[addi_subi_word]="7000 0640 1234 0440 0020"
 # SHIFT: MOVEQ #8,D0; LSL.L #1,D0; LSR.L #2,D0; ASR.L #1,D0; ROL.L #1,D0
 TESTS[shift]="7008 E388 E888 E080 E398"
 # BITOPS: MOVEQ #0,D0; BSET #3,D0; BTST #3,D0; BCLR #3,D0; BTST #3,D0
@@ -164,6 +168,8 @@ TESTS[branch]="7000 B080 6702 7001 7202"
 TESTS[compare]="7005 7203 B081 4A80 0C80 0000 0005"
 # COMPARE_NEGATIVE: compare against -1 and verify BNE not-taken path
 TESTS[compare_negative]="70FF 0C80 FFFF FFFF 6602 7207"
+# CMPI_SIZES: run CMPI.B/W/L forms against D0 to exercise immediate size decoding
+TESTS[cmpi_sizes]="7001 0C00 0001 0C40 0001 0C80 0000 0001"
 # MULDIV: MOVEQ #7,D0; MULU.W #3,D0; MOVEQ #21,D1; DIVU.W #3,D1
 TESTS[muldiv]="7007 C0FC 0003 7215 82FC 0003"
 # MOVEM: setup stack; MOVEM.L D0-D3,-(SP); MOVEM.L (SP)+,D4-D7
@@ -182,14 +188,24 @@ TESTS[imm_logic]="7000 0000 000F 0A00 00F0 0200 003C"
 TESTS[imm_logic_alt]="7000 0000 00AA 0200 000F 0A00 0005"
 # BRA_TAKEN: unconditional branch should skip MOVEQ #9,D1
 TESTS[bra_taken]="7001 6002 7209 7402"
+# BRA_W_TAKEN: unconditional word-displacement branch should skip MOVEQ #9,D1
+TESTS[bra_w_taken]="7001 6000 0002 7209 7402"
 # BNE_NOT_TAKEN: CMP.L D0,D0 sets Z=1; BNE should not branch
 TESTS[bne_not_taken]="7001 B080 6602 7207"
 # BNE_TAKEN: CMPI.L #2,D0 sets Z=0; BNE should branch and skip MOVEQ #7,D1
 TESTS[bne_taken]="7001 0C80 0000 0002 6602 7207 7408"
+# BNE_W_NOT_TAKEN: CMP.L D0,D0 sets Z=1; BNE.W should not branch
+TESTS[bne_w_not_taken]="7001 B080 6600 0002 7207"
+# BNE_W_TAKEN: CMPI.L #2,D0 sets Z=0; BNE.W should branch and skip MOVEQ #7,D1
+TESTS[bne_w_taken]="7001 0C80 0000 0002 6600 0002 7207 7408"
 # BEQ_TAKEN: CMP.L D0,D0 sets Z=1; BEQ should branch and skip MOVEQ #7,D1
 TESTS[beq_taken]="7001 B080 6702 7207 7408"
 # BEQ_NOT_TAKEN: CMPI.L #2,D0 sets Z=0; BEQ should not branch
 TESTS[beq_not_taken]="7001 0C80 0000 0002 6702 7207"
+# BEQ_W_TAKEN: CMP.L D0,D0 sets Z=1; BEQ.W should branch and skip MOVEQ #7,D1
+TESTS[beq_w_taken]="7001 B080 6700 0002 7207 7408"
+# BEQ_W_NOT_TAKEN: CMPI.L #2,D0 sets Z=0; BEQ.W should not branch
+TESTS[beq_w_not_taken]="7001 0C80 0000 0002 6700 0002 7207"
 # BPL_TAKEN: N=0 so BPL should branch and skip MOVEQ #9,D1
 TESTS[bpl_taken]="7001 6A02 7209 7402"
 # BPL_NOT_TAKEN: N=1 (MOVEQ #-1) so BPL should not branch
@@ -244,6 +260,18 @@ TESTS[scc_basic]="7000 7200 50C0 51C1"
 TESTS[scc_eq_ne]="7001 7200 7400 B080 56C1 57C2"
 # SCC_CARRY: set C=1, then SCC should be false and SCS should be true
 TESTS[scc_carry]="7001 7200 7400 0C80 0000 0002 54C1 55C2"
+# SCC_HI_LS: set C=0,Z=0; SHI should be true and SLS should be false
+TESTS[scc_hi_ls]="7001 7200 7400 0C80 0000 0000 52C1 53C2"
+# SCC_HI_LS_Z: set Z=1; SHI should be false and SLS should be true
+TESTS[scc_hi_ls_z]="7001 7200 7400 B080 52C1 53C2"
+# SCC_VC_VS: force V=1 via overflow; SVC should be false and SVS should be true
+TESTS[scc_vc_vs]="203C 7FFF FFFF 5280 58C1 59C2"
+# SCC_PL_MI: set N=1 via MOVEQ #-1; SPL should be false and SMI should be true
+TESTS[scc_pl_mi]="70FF 5AC1 5BC2"
+# SCC_GE_LT: CMPI.L #2,D0 with D0=1 gives N=1,V=0; SGE false, SLT true
+TESTS[scc_ge_lt]="7001 0C80 0000 0002 5CC1 5DC2"
+# SCC_GT_LE: CMP.L D0,D0 gives Z=1; SGT false, SLE true
+TESTS[scc_gt_le]="7001 B080 5EC1 5FC2"
 # QUICK_OPS: MOVEQ #5,D0; ADDQ.L #1,D0; SUBQ.L #1,D0; MOVE.L D0,D1
 TESTS[quick_ops]="7005 5280 5180 2200"
 # DBRA: MOVEQ #1,D0; DBRA D0,+2 (taken once, skips MOVEQ #9,D1); NOP
@@ -252,17 +280,24 @@ TESTS[dbra]="7001 51C8 0002 7209 4E71"
 TESTS[dbra_not_taken]="7000 51C8 0002 7207"
 # DBRA_THREE_ITER: D0 starts at 2; loop body ADDQ runs three times before fallthrough
 TESTS[dbra_three_iter]="7002 7200 5281 51C8 FFFA"
+# DBNE_LOOP_Z_SET: with Z=1, DBNE decrements and loops exactly twice for D0=1
+TESTS[dbne_loop_z_set]="7001 B080 4E71 56C8 FFFA"
+# DBEQ_LOOP_Z_CLEAR: with Z=0, DBEQ decrements and loops exactly twice for D0=1
+TESTS[dbeq_loop_z_clear]="7001 0C80 0000 0002 4E71 57C8 FFFA"
 
 declare -A SENTINEL_A6
 SENTINEL_A6[move]="a6010001"
 SENTINEL_A6[alu]="a6010002"
 SENTINEL_A6[alu_overflow]="a6010031"
+SENTINEL_A6[addi_subi_long]="a6010043"
+SENTINEL_A6[addi_subi_word]="a6010044"
 SENTINEL_A6[shift]="a6010003"
 SENTINEL_A6[bitops]="a6010004"
 SENTINEL_A6[bitops_chg]="a6010032"
 SENTINEL_A6[branch]="a6010005"
 SENTINEL_A6[compare]="a6010006"
 SENTINEL_A6[compare_negative]="a6010033"
+SENTINEL_A6[cmpi_sizes]="a6010045"
 SENTINEL_A6[muldiv]="a6010007"
 SENTINEL_A6[movem]="a6010008"
 SENTINEL_A6[misc]="a6010009"
@@ -272,10 +307,15 @@ SENTINEL_A6[exg_roundtrip]="a6010034"
 SENTINEL_A6[imm_logic]="a601000c"
 SENTINEL_A6[imm_logic_alt]="a6010035"
 SENTINEL_A6[bra_taken]="a601000d"
+SENTINEL_A6[bra_w_taken]="a601003e"
 SENTINEL_A6[bne_not_taken]="a601000e"
 SENTINEL_A6[bne_taken]="a601000f"
+SENTINEL_A6[bne_w_not_taken]="a601003f"
+SENTINEL_A6[bne_w_taken]="a6010040"
 SENTINEL_A6[beq_taken]="a6010010"
 SENTINEL_A6[beq_not_taken]="a6010011"
+SENTINEL_A6[beq_w_taken]="a6010041"
+SENTINEL_A6[beq_w_not_taken]="a6010042"
 SENTINEL_A6[bpl_taken]="a6010012"
 SENTINEL_A6[bpl_not_taken]="a6010029"
 SENTINEL_A6[bmi_taken]="a601002a"
@@ -303,10 +343,18 @@ SENTINEL_A6[bls_not_taken]="a601002d"
 SENTINEL_A6[scc_basic]="a601001e"
 SENTINEL_A6[scc_eq_ne]="a601002e"
 SENTINEL_A6[scc_carry]="a601002f"
+SENTINEL_A6[scc_hi_ls]="a601003a"
+SENTINEL_A6[scc_hi_ls_z]="a601003b"
+SENTINEL_A6[scc_vc_vs]="a6010036"
+SENTINEL_A6[scc_pl_mi]="a6010037"
+SENTINEL_A6[scc_ge_lt]="a6010038"
+SENTINEL_A6[scc_gt_le]="a6010039"
 SENTINEL_A6[quick_ops]="a601001f"
 SENTINEL_A6[dbra]="a6010020"
 SENTINEL_A6[dbra_not_taken]="a6010021"
 SENTINEL_A6[dbra_three_iter]="a6010030"
+SENTINEL_A6[dbne_loop_z_set]="a601003c"
+SENTINEL_A6[dbeq_loop_z_clear]="a601003d"
 
 # ---- Run all test cases and score --------------------------------------------
 PASS=0
