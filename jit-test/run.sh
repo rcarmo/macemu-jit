@@ -167,7 +167,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -447,6 +447,28 @@ TESTS[dblt_false_dec_terminal_n_eq_v]="7000 7201 0C81 0000 0000 5DC8 0002 7407"
 TESTS[dbgt_false_dec_terminal_z_set]="7000 B080 5EC8 0002 7407"
 # DBLE_FALSE_DEC_TERMINAL_GT_SET: set Z=0,N==V so DBLE is false; D0=0 forces one decrement-to-terminal path
 TESTS[dble_false_dec_terminal_gt_set]="7000 7201 0C81 0000 0000 5FC8 0002 7407"
+# DBCC_CCR_PRESERVE_BEQ_TAKEN: DBEQ (condition true) should not clobber Z; subsequent BEQ must remain taken
+TESTS[dbcc_ccr_preserve_beq_taken]="7001 B080 57C8 0002 6702 7207 7408"
+# DBCC_CCR_PRESERVE_BNE_TAKEN: DBNE (condition true) should not clobber Z=0; subsequent BNE must remain taken
+TESTS[dbcc_ccr_preserve_bne_taken]="7001 7201 0C81 0000 0002 56C8 0002 6602 7407 7608"
+# DBCC_CCR_PRESERVE_BCS_TAKEN: DBCS (condition true) should not clobber C=1; subsequent BCS must remain taken
+TESTS[dbcc_ccr_preserve_bcs_taken]="7001 7201 0C81 0000 0002 55C8 0002 6502 7407 7608"
+# DBCC_CCR_PRESERVE_BVC_TAKEN: DBVC (condition true) should not clobber V=0; subsequent BVC must remain taken
+TESTS[dbcc_ccr_preserve_bvc_taken]="7001 7201 0C81 0000 0000 58C8 0002 6802 7407 7608"
+# DBCC_CCR_PRESERVE_BVS_TAKEN: DBVS (condition true) should not clobber V=1; subsequent BVS must remain taken
+TESTS[dbcc_ccr_preserve_bvs_taken]="7001 243C 7FFF FFFF 5282 59C8 0002 6902 7407 7608"
+# DBCC_CCR_PRESERVE_BHI_TAKEN: DBHI (condition true) should not clobber C/Z; subsequent BHI must remain taken
+TESTS[dbcc_ccr_preserve_bhi_taken]="7001 7201 0C81 0000 0000 52C8 0002 6202 7407 7608"
+# DBCC_CCR_PRESERVE_BLS_TAKEN: DBLS (condition true) should not clobber C/Z; subsequent BLS must remain taken
+TESTS[dbcc_ccr_preserve_bls_taken]="7001 B080 53C8 0002 6302 7407 7608"
+# DBCC_CCR_PRESERVE_BGE_TAKEN: DBGE (condition true) should not clobber N/V; subsequent BGE must remain taken
+TESTS[dbcc_ccr_preserve_bge_taken]="7001 7201 0C81 0000 0000 5CC8 0002 6C02 7407 7608"
+# DBCC_CCR_PRESERVE_BLT_TAKEN: DBLT (condition true) should not clobber N/V; subsequent BLT must remain taken
+TESTS[dbcc_ccr_preserve_blt_taken]="7001 7201 0C81 0000 0002 5DC8 0002 6D02 7407 7608"
+# DBCC_CCR_PRESERVE_BGT_TAKEN: DBGT (condition true) should not clobber Z/N/V; subsequent BGT must remain taken
+TESTS[dbcc_ccr_preserve_bgt_taken]="7001 7201 0C81 0000 0000 5EC8 0002 6E02 7407 7608"
+# DBCC_CCR_PRESERVE_BLE_TAKEN: DBLE (condition true) should not clobber Z/N/V; subsequent BLE must remain taken
+TESTS[dbcc_ccr_preserve_ble_taken]="7001 B080 5FC8 0002 6F02 7407 7608"
 # DBVC_LOOP_V_SET: force V=1; DBVC condition is false so bounded DBcc loop should execute twice for D0=1
 TESTS[dbvc_loop_v_set]="7001 243C 7FFF FFFF 5282 4E71 58C8 FFFA"
 # DBVS_LOOP_V_CLEAR: force V=0; DBVS condition is false so bounded DBcc loop should execute twice for D0=1
@@ -600,6 +622,17 @@ SENTINEL_A6[dbge_false_dec_terminal_n_ne_v]="a601008e"
 SENTINEL_A6[dblt_false_dec_terminal_n_eq_v]="a601008f"
 SENTINEL_A6[dbgt_false_dec_terminal_z_set]="a6010090"
 SENTINEL_A6[dble_false_dec_terminal_gt_set]="a6010091"
+SENTINEL_A6[dbcc_ccr_preserve_beq_taken]="a6010092"
+SENTINEL_A6[dbcc_ccr_preserve_bne_taken]="a6010093"
+SENTINEL_A6[dbcc_ccr_preserve_bcs_taken]="a6010094"
+SENTINEL_A6[dbcc_ccr_preserve_bvc_taken]="a6010095"
+SENTINEL_A6[dbcc_ccr_preserve_bvs_taken]="a6010096"
+SENTINEL_A6[dbcc_ccr_preserve_bhi_taken]="a6010097"
+SENTINEL_A6[dbcc_ccr_preserve_bls_taken]="a6010098"
+SENTINEL_A6[dbcc_ccr_preserve_bge_taken]="a6010099"
+SENTINEL_A6[dbcc_ccr_preserve_blt_taken]="a601009a"
+SENTINEL_A6[dbcc_ccr_preserve_bgt_taken]="a601009b"
+SENTINEL_A6[dbcc_ccr_preserve_ble_taken]="a601009c"
 SENTINEL_A6[dbvc_loop_v_set]="a6010052"
 SENTINEL_A6[dbvs_loop_v_clear]="a6010053"
 SENTINEL_A6[dbvc_not_taken_v_clear]="a6010054"
