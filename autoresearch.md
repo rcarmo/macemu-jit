@@ -1,54 +1,54 @@
-# Autoresearch: AArch64 JIT native codegen stability
+# BasiliskII AArch64 JIT — Opcode Correctness Autoresearch
 
-## Objective
-Fix AArch64 JIT so it boots to Mac OS desktop and runs stably for 120 seconds
-with native code generation enabled (`cpu_compatible=false`, optlev > 0).
+## Goal
 
-Current state:
-- `cpu_compatible=true` (optlev=0, interpreter wrappers): boots 5/5, 120s stable, score=90 (no native blocks)
-- `cpu_compatible=false` (native codegen): crashes early
+Achieve maximum M68K opcode correctness in the AArch64 JIT by:
+1. Building a test harness that runs M68K programs in both interpreter and JIT mode
+2. Comparing register/flag state output between the two
+3. Identifying and fixing opcodes where JIT output diverges from interpreter
 
-Goal: score=100 = boot + 120s uptime + 0 segfaults + native JIT blocks compiled.
+## Metric
 
-## Metrics
-- **Primary**: `score` (higher is better)
-  - `40*(boot_ok) + 40*(alive_120s) + 10*(no_segfaults) + 10*(jit_blocks>0)`
-  - 100 = fully working native JIT
-- **Secondary**:
-  - `build_ok` — compilation succeeded
-  - `boot_ok` — Mac OS desktop reached
-  - `uptime` — seconds alive
-  - `alive_120s` — survived full 120s
-  - `segfaults` — SIGSEGV count
-  - `jit_blocks` — native blocks compiled (JIT_COMPILE log lines)
+`score` = number of opcode test cases where JIT output exactly matches interpreter output.
 
-## How to Run
-`./autoresearch.sh`
+Target: all test cases pass (score == total_tests).
 
-## Files in Scope
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_support_arm.cpp` — compile_block, prepare_block, get_handler, get_blockinfo_addr_new, invalidate_block, create_popalls, build_comp
-- `BasiliskII/src/uae_cpu_2021/compiler/codegen_arm64.cpp` — endblock dispatch codegen (compemu_raw_endblock_pc_isconst, compemu_raw_endblock_pc_inreg, compemu_raw_jmp_pc_tag)
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_midfunc_arm64.cpp` — native opcode implementations, write_jmp_target
-- `BasiliskII/src/uae_cpu_2021/compemu_prefs.cpp` — cpu_compatible setting
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu.h` — blockinfo struct, cacheline definitions
-- `autoresearch.sh` — benchmark harness
+## Key Constraint
 
-## Off Limits
-- `/workspace/fixtures/basilisk/images/Quadra800.ROM`
-- `/workspace/fixtures/basilisk/images/HD200MB`
-- Build system / configure scripts
+**Do NOT add ROM patches, stub regions, or MAC RAM pre-sets to work around JIT bugs.**
+Fix the JIT opcode handler directly. Every fix must be verifiable by the test harness.
 
-## Constraints
-- Build with `--enable-aarch64-jit-experimental`
-- Use incremental `make -j12`
-- Run with `jit=true`
-- Must boot to Mac OS desktop and survive 120s
-- No unsafe memory practices
+## Repository state
 
-## What's Been Tried
-- **Low-address mapping fixes** (KEPT): vm_alloc.cpp AArch64 path uses low MAP_BASE, next_address advances by full span. RAM+JIT both below 4GB.
-- **JIT optflag fixes** (KEPT): optflag_addw/addb/subw/subb result stored correctly.
-- **Combined popallspace+cache allocation** (KEPT): guarantees B/BL range for JIT dispatch.
-- **HasMacStarted guard removal** (KEPT): allows boot to proceed.
-- **DBcc workaround** (KEPT): forces optlev=0 for blocks containing DBcc opcodes.
-- **cpu_compatible=true baseline**: score=90, boots and runs 120s but no native JIT blocks.
+- Source: `/workspace/projects/macemu/BasiliskII/`
+- Clean baseline: commit `4946daac`
+- Build dir: `/workspace/projects/macemu/BasiliskII/src/Unix`
+- ROM: `/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM`
+- Disk: `/workspace/fixtures/basilisk/images/HD200MB`
+
+## Test harness design
+
+See `autoresearch.sh` for implementation. Each iteration:
+1. Writes M68K test bytecode into the test harness
+2. Runs under interpreter (jit false) → captures register dump
+3. Runs under JIT (jit true) → captures register dump
+4. Diffs the dumps — any difference is a JIT bug
+5. Reports METRIC lines for scoring
+
+## Opcode test cases
+
+One test per opcode class. Each sets known register state, executes the opcode(s),
+then the harness dumps D0-D7, A0-A6, SR.
+
+| ID | Opcodes | Key flags to check |
+|----|---------|-------------------|
+| move | MOVE.L/W/B, MOVEA, MOVEQ, MOVEM | N, Z |
+| alu | ADD, SUB, AND, OR, EOR, NOT, NEG | N, Z, C, V, X |
+| shift | LSL, LSR, ASL, ASR, ROL, ROR, ROXL, ROXR | N, Z, C, X |
+| bitops | BTST, BSET, BCLR, BCHG | Z only |
+| branch | Bcc (all conditions), DBcc | condition codes |
+| compare | CMP, CMPA, CMPI, TST | N, Z, C, V |
+| muldiv | MULU, MULS, DIVU, DIVS | N, Z, V |
+| movem | MOVEM predecrement, postincrement | register values |
+| misc | EXG, SWAP, EXT, CLR, ABCD, SBCD | N, Z, C, X |
+| flags | ANDI/EORI/ORI to SR, MOVE to/from SR | SR value |
