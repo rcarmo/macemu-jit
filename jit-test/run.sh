@@ -166,7 +166,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(move alu alu_overflow addi_subi_long addi_subi_word addi_subi_byte shift bitops bitops_chg branch branch_chain compare compare_negative cmpi_sizes muldiv movem misc flags exg exg_roundtrip imm_logic imm_logic_alt bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bmi_taken bmi_not_taken bmi_w_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bge_taken bge_not_taken bge_w_taken blt_taken blt_not_taken blt_w_taken bgt_taken bgt_not_taken bgt_w_taken ble_taken ble_not_taken ble_w_taken bcc_taken bcc_not_taken bcc_w_taken bcs_taken bcs_not_taken bcs_w_taken bhi_taken bhi_not_taken bhi_w_taken bls_taken bls_not_taken bls_w_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # MOVE: MOVEQ #0x42,D0; MOVE.L D0,D1; MOVEQ #-1,D2; MOVE.W D2,D3
 TESTS[move]="7042 2200 74FF 3602"
@@ -330,6 +330,8 @@ TESTS[quick_ops_word]="70FF 5240 5140 3200"
 TESTS[dbra]="7001 51C8 0002 7209 4E71"
 # DBRA_NOT_TAKEN: MOVEQ #0,D0; DBRA D0,+2 should not branch (counter reaches -1)
 TESTS[dbra_not_taken]="7000 51C8 0002 7207"
+# DBT_TRUE_NOT_TAKEN: condition true should never decrement or branch in DBcc form
+TESTS[dbt_true_not_taken]="7001 7400 50C8 0002 7207"
 # DBRA_THREE_ITER: D0 starts at 2; loop body ADDQ runs three times before fallthrough
 TESTS[dbra_three_iter]="7002 7200 5281 51C8 FFFA"
 # DBVC_LOOP_V_SET: force V=1; DBVC condition is false so bounded DBcc loop should execute twice for D0=1
@@ -427,6 +429,7 @@ SENTINEL_A6[quick_ops]="a601001f"
 SENTINEL_A6[quick_ops_word]="a6010058"
 SENTINEL_A6[dbra]="a6010020"
 SENTINEL_A6[dbra_not_taken]="a6010021"
+SENTINEL_A6[dbt_true_not_taken]="a6010059"
 SENTINEL_A6[dbra_three_iter]="a6010030"
 SENTINEL_A6[dbvc_loop_v_set]="a6010052"
 SENTINEL_A6[dbvs_loop_v_clear]="a6010053"
