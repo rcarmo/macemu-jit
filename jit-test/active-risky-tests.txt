@@ -1,0 +1,13 @@
+# Active risky vectors for mismatch-first autoresearch.
+# Add at most one new vector per iteration, in priority order.
+roxl_x_propagation
+roxr_x_propagation
+roxl_count_2
+lsr_count_32
+asr_count_0
+roxr_reg_count_33
+ror_word
+rol_word
+shift_chain
+movem_predec_postinc
+movem_predec_mixed_order
