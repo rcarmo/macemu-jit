@@ -3,7 +3,7 @@
 # Autoresearch harness: compare interpreter vs JIT register state for each opcode class
 set -euo pipefail
 
-UNIX_DIR="$(cd "$(dirname "$0")/BasiliskII/src/Unix" && pwd)"
+UNIX_DIR="$(cd "$(dirname "$0")/../BasiliskII/src/Unix" && pwd)"
 ROM="/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM"
 DISK="/workspace/fixtures/basilisk/images/HD200MB"
 RUN_DIR="/tmp/ar-jit-opcodes-$$"
@@ -21,6 +21,9 @@ fi
 if [ ! -f config.h ] || [ ! -f Makefile ]; then
     if [ ! -x ./configure ]; then
         echo "METRIC build_ok=0"
+        echo "METRIC pass=0"
+        echo "METRIC fail=0"
+        echo "METRIC total=0"
         echo "METRIC score=0"
         echo "missing ./configure after autogen" >&2
         tail -20 "$RUN_DIR/autogen.log" >&2 || true
@@ -31,6 +34,9 @@ if [ ! -f config.h ] || [ ! -f Makefile ]; then
       ./configure --with-uae-core=2021 --enable-aarch64-jit-experimental --disable-vosf \
       >"$RUN_DIR/configure.log" 2>&1; then
         echo "METRIC build_ok=0"
+        echo "METRIC pass=0"
+        echo "METRIC fail=0"
+        echo "METRIC total=0"
         echo "METRIC score=0"
         tail -20 "$RUN_DIR/configure.log" >&2 || true
         rm -rf "$RUN_DIR"
@@ -40,6 +46,9 @@ fi
 
 if ! make -j12 >"$RUN_DIR/build.log" 2>&1; then
     echo "METRIC build_ok=0"
+    echo "METRIC pass=0"
+    echo "METRIC fail=0"
+    echo "METRIC total=0"
     echo "METRIC score=0"
     tail -20 "$RUN_DIR/build.log" >&2
     rm -rf "$RUN_DIR"
