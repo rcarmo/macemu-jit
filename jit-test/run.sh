@@ -167,7 +167,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
+declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes neg_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le quick_ops quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbt_true_not_taken dbra_three_iter dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -227,6 +227,8 @@ TESTS[misc]="705A 4840 4880 4241 4480"
 TESTS[clr_sizes]="203C FFFF FFFF 4200 0C00 0000 4240 0C40 0000 4280 0C80 0000 0000"
 # NEG_SIZES: verify NEG.B/W/L execution paths against -1 results in each size domain
 TESTS[neg_sizes]="7001 4400 0C00 00FF 7201 4441 0C41 FFFF 7401 4482 0C82 FFFF FFFF"
+# SWAP_ROUNDTRIP: SWAP applied twice should restore original long value
+TESTS[swap_roundtrip]="7012 4840 4840 0C80 0000 0012"
 # FLAGS: MOVE #0x2700,SR; ORI #0x10,CCR; ANDI #0xEF,CCR; MOVE SR,D0
 TESTS[flags]="46FC 2700 003C 0010 023C 00EF 40C0"
 # FLAGS_EORI_CCR: verify EORI to CCR path under supervisor SR setup
@@ -448,6 +450,7 @@ SENTINEL_A6[movem]="a6010008"
 SENTINEL_A6[misc]="a6010009"
 SENTINEL_A6[clr_sizes]="a601007b"
 SENTINEL_A6[neg_sizes]="a601007c"
+SENTINEL_A6[swap_roundtrip]="a601007d"
 SENTINEL_A6[flags]="a601000a"
 SENTINEL_A6[flags_eori_ccr]="a601006e"
 SENTINEL_A6[exg]="a601000b"
