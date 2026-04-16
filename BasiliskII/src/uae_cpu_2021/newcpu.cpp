@@ -1518,6 +1518,9 @@ void m68k_emulop(uae_u32 opcode)
 		r.a[i] = m68k_areg(regs, i);
 	}
 	MakeSR();
+	if (opcode == 0x7100)
+		fprintf(stderr, "EMULOP_DIAG: nzcv=0x%08x sr=0x%04x\n",
+			(unsigned)regflags.nzcv, (unsigned)regs.sr);
 	r.sr = regs.sr;
 	if (trace_d6_enabled())
 		fprintf(stderr, "TRACE_D6 m68k_emulop enter opcode=%04x pc=%08x d6=%08x d7=%08x a4=%08x a5=%08x\n", (unsigned)opcode, m68k_getpc(), r.d[6], r.d[7], r.a[4], r.a[5]);

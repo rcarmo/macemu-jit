@@ -5657,6 +5657,18 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             init_comp();
             was_comp = 1;
 
+#if defined(CPU_AARCH64)
+            /* ARM64: reload hardware NZCV from regflags.nzcv at block entry. */
+            {
+                LOAD_U64(REG_WORK1, (uintptr)&regflags.nzcv);
+                LDR_wXi(REG_WORK2, REG_WORK1, 0);
+                MSR_NZCV_x(REG_WORK2);
+                /* Do NOT set flags_in_flags=VALID here; leave it as TRASH
+                   from init_comp.  This prevents flush(1) from trying to
+                   save the hardware NZCV back to regflags.nzcv. */
+            }
+#endif
+
             if (trace_emuneigh_env() && trace_emuneigh_target(block_m68k_pc) && trace_emuneigh_count < trace_emuneigh_limit()) {
                 uae_u16 first_op = DO_GET_OPCODE(pc_hist[0].location);
                 compemu_raw_mov_l_ri(REG_PAR1, block_m68k_pc);

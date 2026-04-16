@@ -254,6 +254,7 @@ static bool run_opcode_test_mode_glue()
 	m68k_areg(regs, 7) = stack_addr;
 	regs.usp = regs.isp = regs.msp = stack_addr;
 	regs.sr = 0x2700;
+	MakeFromSR(); /* ensure regflags matches regs.sr */
 
 	const char *init = getenv("B2_TEST_INIT");
 	if (init && *init) {

@@ -610,6 +610,8 @@ void do_nothing(void)
 	jit_diag_do_nothing_calls++;
 	jit_diag_dispatch_count++;
 	countdown = 10000000;
+	if (quit_program > 0)
+		return;
 	{
 		static unsigned long dn_count = 0;
 		dn_count++;
@@ -875,6 +877,11 @@ void execute_normal(void)
 #if defined(CPU_AARCH64)
 	jit_diag_execute_normal_calls++;
 	jit_diag_dispatch_count++;
+	/* If quit_program is set (e.g. M68K_EXEC_RETURN), skip everything
+	   and return immediately. Running further instructions would
+	   execute random memory past the test code boundary. */
+	if (quit_program > 0)
+		return;
 	/* Handle pending interrupts on every execute_normal entry. */
 	if (__atomic_load_n(&regs.spcflags, __ATOMIC_ACQUIRE) & SPCFLAG_ALL) {
 		MakeSR();
