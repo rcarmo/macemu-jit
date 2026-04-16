@@ -9,6 +9,8 @@ asr_count_0
 roxr_reg_count_33
 roxr_reg_count_32
 roxl_reg_count_32
+roxl_reg_count_33
+roxr_reg_count_0
 ror_word
 rol_word
 shift_chain
