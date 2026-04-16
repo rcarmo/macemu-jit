@@ -7,13 +7,14 @@
 **JIT:** ⚠️ ROM boot progresses past InitAll, System 7.5 loads from disk, but stuck in A-line trap dispatch loop.
 
 **Opcode test harness:** `jit-test/run.sh` — 226+ deterministic vectors, 28 risky vectors active.
-- With `B2_JIT_FORCE_TRANSLATE=1` (real native ARM64 compilation): **pass=26 fail=2 score=92**
-- Both failures are SR-only mismatches (DBRA CCR leakage); all register values correct.
+- With `B2_JIT_FORCE_TRANSLATE=1` (real native ARM64 compilation): **pass=28 fail=0 score=100**
+- All risky vectors pass — registers AND SR flags match interpreter.
 
 ## Commit Log (recent, newest first)
 
 | Commit | Description |
 |--------|-------------|
+| `21dfcdd4` | **Fix DBRA CCR leakage** — set flags_on_stack=VALID in discard_flags_in_nzcv |
 | `d305fd2b` | Block-entry NZCV reload + quit_program guard in execute_normal/do_nothing |
 | `72ec6291` | Rework DBRA case 1 to avoid clobbering regflags.nzcv (test-before-decrement + `discard_flags_in_nzcv`) |
 | `467f3f86` | Update JIT-STATUS.md |
@@ -61,13 +62,11 @@ See git history for details.
 
 ## Known Remaining Issues
 
-### DBRA CCR leakage (minor, 2 test failures)
+### DBRA CCR leakage (FIXED)
 JIT's compiled DBRA block writes stale Z flag (`0x40000000`) to `regflags.nzcv` through an unidentified path. The write occurs during compiled block execution (confirmed via 0xDEADBEEF marker). The compat `test_w_rr` function modifies hardware NZCV at runtime, and something propagates it to `regflags.nzcv` despite the compile-time flag state machine indicating no save should occur (`flags_on_stack=VALID`, `flags_in_flags=TRASH`, `FLAGTMP=INMEM`).
 
-**Impact:** 2 test vectors (dbra_three_iter, dbra_loop_100) fail on SR comparison only. Register values are correct.
 
-**Next steps:**
-- Use hardware watchpoint or mprotect trap to identify the exact ARM64 instruction writing to `&regflags.nzcv`
+**Fixed:** `discard_flags_in_nzcv()` now sets `flags_on_stack=VALID`, forcing the early-return path in `flags_to_stack()` and preserving the correct pre-DBRA flags in `regflags.nzcv`.
 - Alternatively, disassemble the compiled DBRA block's native code and trace through it manually
 
 ### A-line trap dispatch loop (boot)
