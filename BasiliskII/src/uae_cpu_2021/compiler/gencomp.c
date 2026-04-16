@@ -2241,10 +2241,18 @@ gen_opcode (unsigned int opcode)
 	       so whether we move them around doesn't matter. However,
 	       if cc=false, we have offs==jump_pc, and src==nsrc-1 */
 
-	    comprintf("\tstart_needflags();\n");
-	    comprintf("\ttest_w_rr(nsrc,nsrc);\n");
-	    comprintf("\tend_needflags();\n");
+	    /* Test nsrc.W for zero (terminal condition) WITHOUT
+	       clobbering regflags.nzcv.  Use test_w_rr(a,b) with
+	       a!=b to avoid the jff_TST_w/clobber_flags path. */
+	    {
+	        comprintf("\tint ntmp = scratchie++;\n");
+	        comprintf("\tmov_l_rr(ntmp, nsrc);\n");
+	        comprintf("\ttest_w_rr(nsrc, ntmp);\n");
+	    }
 	    comprintf("\tcmov_l_rr(PC_P,offs,%d);\n", NATIVE_CC_NE);
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	    comprintf("\tdiscard_flags_in_nzcv();\n");
+#endif
 	    break;
 	 default: assert(0);
 	}

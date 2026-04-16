@@ -24240,10 +24240,11 @@ void REGPARAM2 op_52c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,7);
 	cmov_l_rr(src,nsrc,7);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -24457,10 +24458,11 @@ void REGPARAM2 op_53c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,6);
 	cmov_l_rr(src,nsrc,6);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -24674,10 +24676,11 @@ void REGPARAM2 op_54c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,3);
 	cmov_l_rr(src,nsrc,3);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -24891,10 +24894,11 @@ void REGPARAM2 op_55c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,2);
 	cmov_l_rr(src,nsrc,2);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -25108,10 +25112,11 @@ void REGPARAM2 op_56c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,5);
 	cmov_l_rr(src,nsrc,5);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -25325,10 +25330,11 @@ void REGPARAM2 op_57c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,4);
 	cmov_l_rr(src,nsrc,4);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -25542,10 +25548,11 @@ void REGPARAM2 op_5ac8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,9);
 	cmov_l_rr(src,nsrc,9);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -25759,10 +25766,11 @@ void REGPARAM2 op_5bc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,8);
 	cmov_l_rr(src,nsrc,8);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -25976,10 +25984,11 @@ void REGPARAM2 op_5cc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,13);
 	cmov_l_rr(src,nsrc,13);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -26193,10 +26202,11 @@ void REGPARAM2 op_5dc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,12);
 	cmov_l_rr(src,nsrc,12);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -26410,10 +26420,11 @@ void REGPARAM2 op_5ec8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,15);
 	cmov_l_rr(src,nsrc,15);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -26627,10 +26638,11 @@ void REGPARAM2 op_5fc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,14);
 	cmov_l_rr(src,nsrc,14);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -64430,10 +64442,11 @@ void REGPARAM2 op_52c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,7);
 	cmov_l_rr(src,nsrc,7);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -64647,10 +64660,11 @@ void REGPARAM2 op_53c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,6);
 	cmov_l_rr(src,nsrc,6);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -64864,10 +64878,11 @@ void REGPARAM2 op_54c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,3);
 	cmov_l_rr(src,nsrc,3);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -65081,10 +65096,11 @@ void REGPARAM2 op_55c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,2);
 	cmov_l_rr(src,nsrc,2);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -65298,10 +65314,11 @@ void REGPARAM2 op_56c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,5);
 	cmov_l_rr(src,nsrc,5);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -65515,10 +65532,11 @@ void REGPARAM2 op_57c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,4);
 	cmov_l_rr(src,nsrc,4);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -65732,10 +65750,11 @@ void REGPARAM2 op_5ac8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,9);
 	cmov_l_rr(src,nsrc,9);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -65949,10 +65968,11 @@ void REGPARAM2 op_5bc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,8);
 	cmov_l_rr(src,nsrc,8);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -66166,10 +66186,11 @@ void REGPARAM2 op_5cc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,13);
 	cmov_l_rr(src,nsrc,13);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -66383,10 +66404,11 @@ void REGPARAM2 op_5dc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,12);
 	cmov_l_rr(src,nsrc,12);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -66600,10 +66622,11 @@ void REGPARAM2 op_5ec8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,15);
 	cmov_l_rr(src,nsrc,15);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
@@ -66817,10 +66840,11 @@ void REGPARAM2 op_5fc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,14);
 	cmov_l_rr(src,nsrc,14);
-	start_needflags();
-	test_w_rr(nsrc,nsrc);
-	end_needflags();
+	int ntmp = scratchie++;
+	mov_l_rr(ntmp, nsrc);
+	test_w_rr(nsrc, ntmp);
 	cmov_l_rr(PC_P,offs,5);
+	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}
