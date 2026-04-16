@@ -87,3 +87,12 @@ negx_with_x
 negx_zero
 sbcd_basic
 subx_basic
+dbne_loop_cmpi
+bsr_in_dbra_loop
+table_lookup
+dbra_loop_1000
+swap_pack
+lea_scaled_index
+multi_branch
+andi_l_dn
+eor_self
