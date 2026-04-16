@@ -2643,6 +2643,17 @@ static void make_flags_live_internal(void)
 static void flags_to_stack(void)
 {
     if (live.flags_on_stack == VALID) {
+        /* Flags already saved to memory, but if carry is still inverted in
+           the hardware NZCV register, we must flip it now so that any
+           subsequent branch instruction (compemu_raw_jcc_l_oponly) that
+           tests the hardware NZCV directly sees the correct polarity.
+           This matters for DBRA/DBcc: sub_w_ri sets flags_carry_inverted
+           and register_branch uses NATIVE_CC_CC which tests hardware C. */
+        if (flags_carry_inverted && live.flags_in_flags == VALID) {
+            MRS_NZCV_x(REG_WORK1);
+            EOR_xxCflag(REG_WORK1, REG_WORK1);
+            MSR_NZCV_x(REG_WORK1);
+        }
         flags_carry_inverted = false;
         return;
     }
