@@ -5634,6 +5634,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             jit_diag_optlev_gt0_blocks++;
             /* Block compilation logging — disabled for performance */
 #if 0
+            if (block_m68k_pc >= 0x1000 && block_m68k_pc <= 0x1020) {
                 fprintf(stderr, "JIT_COMPILE optlev=%d pc=0x%08x blocklen=%d opcodes=",
                     optlev, block_m68k_pc, blocklen);
                 for (int di = 0; di < blocklen && di < 20; di++) {

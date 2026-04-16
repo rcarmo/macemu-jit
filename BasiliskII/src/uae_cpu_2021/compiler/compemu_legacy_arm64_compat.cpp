@@ -1057,7 +1057,15 @@ void execute_normal(void)
 			if (!must_end && end_block(opcode)) {
 				uintptr new_pcp = (uintptr)regs.pc_p;
 				uintptr blk_start = (uintptr)pc_hist[0].location;
-				if (new_pcp >= blk_start && new_pcp < blk_start + 512
+				uintptr cur_insn = (uintptr)pc_hist[blocklen - 1].location;
+				/* Follow forward short branches to keep straight-line code
+				   together, but NEVER follow backward branches.  A backward
+				   branch (target <= current instruction) creates a loop;
+				   unrolling it into a single block causes DBRA/DBcc to
+				   execute a fixed unroll count instead of the runtime
+				   counter value.  End the block at the branch and let
+				   block chaining handle the backward edge. */
+				if (new_pcp > cur_insn && new_pcp < blk_start + 512
 				    && blocklen < 32)
 					continue;
 				must_end = true;
