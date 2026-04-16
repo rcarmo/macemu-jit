@@ -125,3 +125,20 @@ Always emits: `build_ok`, `pass`, `fail`, `total`, `score`, `infra_fail`, `fail_
 - Disk: HD200MB (Mac OS 7.x)
 - Display: Xvfb :99, SDL software renderer, 640×480
 - Config: `jit true`, `jitcachesize 8192`, `modelid 14`, `cpu 4`, `fpu false`
+
+## Boot Investigation (2026-04-16 evening)
+
+### Stuck point
+`pc=0x0080279C` — A-line trap dispatch loop. Handler at `0x80280E` reads trap word from `$0AF0` (value 0x000C), dispatches through `JMP (d8,PC,A0.L)` to `0x802310`, returns with D0=0x0C (non-zero error code → retry loop).
+
+### Interpreter comparison
+Interpreter boots fully to user mode (`SR=0x2000`) and executes deep into ROM initialization. Never gets stuck at `0x279C`.
+
+### Root cause analysis
+- Individual opcodes in the dispatch handler (MOVE.W #imm,SR, MOVE.W (abs).W, MOVEA.L, BNE) all work correctly in JIT test vectors
+- The MOVE to SR barrier + fresh block compilation + MOVE.W flags → BNE pattern works correctly in isolation
+- The bug is likely in:
+  1. The `JMP (d8,PC,A0.L)` complex jump at `0x802826` (LEA $FFFFFAF0,A0 + JMP using PC-relative + scaled index)
+  2. The subroutine at `0x802310` or its return path through `JMP (A6)` at `0x804182`
+  3. Multi-block state propagation across the JSR→handler→JMP(A6) call chain
+  4. Interaction between the trap dispatch and interrupt/timer handling
