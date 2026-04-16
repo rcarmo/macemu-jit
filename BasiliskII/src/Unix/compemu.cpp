@@ -24021,13 +24021,18 @@ void REGPARAM2 op_51c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
 {	int nsrc=scratchie++;
-	start_needflags();
-	sub_w_ri(src,1);
-	end_needflags();
+	int tmp1 = scratchie++;
+	int tmp2 = scratchie++;
+	mov_l_rr(tmp1, src);
+	mov_l_rr(tmp2, src);
+	test_w_rr(tmp1, tmp2);
+	int decr = scratchie++;
+	lea_l_brr(decr, src, (uae_s32)-1);
+	mov_w_rr(src, decr);
 {	uintptr v2,v;
 	uintptr v1=get_const(PC_P);
 	v2=get_const(offs);
-	register_branch(v1,v2,3);
+	register_branch(v1,v2,5);
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}}
@@ -64205,13 +64210,18 @@ void REGPARAM2 op_51c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	add_l_ri(PC_P,m68k_pc_offset);
 	m68k_pc_offset=0;
 {	int nsrc=scratchie++;
-	start_needflags();
-	sub_w_ri(src,1);
-	end_needflags();
+	int tmp1 = scratchie++;
+	int tmp2 = scratchie++;
+	mov_l_rr(tmp1, src);
+	mov_l_rr(tmp2, src);
+	test_w_rr(tmp1, tmp2);
+	int decr = scratchie++;
+	lea_l_brr(decr, src, (uae_s32)-1);
+	mov_w_rr(src, decr);
 {	uintptr v2,v;
 	uintptr v1=get_const(PC_P);
 	v2=get_const(offs);
-	register_branch(v1,v2,3);
+	register_branch(v1,v2,5);
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 }}}}}

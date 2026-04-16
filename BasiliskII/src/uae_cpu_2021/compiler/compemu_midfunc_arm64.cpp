@@ -156,6 +156,33 @@ MIDFUNC(0,dont_care_flags,(void))
 }
 MENDFUNC(0,dont_care_flags,(void))
 
+/* Mark hardware NZCV as stale without saving it to regflags.nzcv.
+   Used by DBcc (case 1/DBRA): the sub_w_ri sets NZCV for the branch
+   decision, but M68K DBcc does NOT affect CCR. The pre-existing flags
+   were already saved to regflags.nzcv by clobber_flags() inside sub_w_ri.
+   Calling this prevents flush(1) at block end from overwriting
+   regflags.nzcv with the stale sub_w_ri result. */
+MIDFUNC(0,discard_flags_in_nzcv,(void))
+{
+	live.flags_in_flags = TRASH;
+	/* Evict FLAGTMP from its hardware register so flush(1) won't
+	   write the stale sub_w_ri NZCV back to regflags.nzcv.
+	   The caller (DBRA gencomp) has already restored the correct
+	   value to regflags.nzcv via mov_l_mr. */
+	if (live.state[FLAGTMP].status == DIRTY || live.state[FLAGTMP].status == CLEAN) {
+		/* Disassociate without writing to memory */
+		int r = live.state[FLAGTMP].realreg;
+		if (r >= 0) {
+			live.nat[r].nholds--;
+			if (live.nat[r].nholds == 0)
+				live.nat[r].touched = 0;
+		}
+		live.state[FLAGTMP].realreg = -1;
+		set_status(FLAGTMP, INMEM);
+	}
+}
+MENDFUNC(0,discard_flags_in_nzcv,(void))
+
 MIDFUNC(0,make_flags_live,(void))
 {
 	make_flags_live_internal();

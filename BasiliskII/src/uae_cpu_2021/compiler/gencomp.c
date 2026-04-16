@@ -2177,9 +2177,25 @@ gen_opcode (unsigned int opcode)
 	 case 0: /* This is an elaborate nop? */
 	    break;
 	 case 1:
-	    comprintf("\tstart_needflags();\n");
-	    comprintf("\tsub_w_ri(src,1);\n");
-	    comprintf("\tend_needflags();\n");
+	    /* DBF/DBRA: always decrements, never tests condition codes.
+	       M68K spec: DBcc does NOT affect CCR.
+	       Test src.W for zero BEFORE decrementing (terminal when 0),
+	       then decrement without flag side-effects.
+	       Use test_w_rr(a,b) with a!=b to avoid the jff_TST_w path
+	       which calls clobber_flags() and corrupts regflags.nzcv. */
+	    {
+	        comprintf("\tint tmp1 = scratchie++;\n");
+	        comprintf("\tint tmp2 = scratchie++;\n");
+	        comprintf("\tmov_l_rr(tmp1, src);\n");
+	        comprintf("\tmov_l_rr(tmp2, src);\n");
+	        /* test_w_rr with different regs: emits TST directly, no clobber_flags */
+	        comprintf("\ttest_w_rr(tmp1, tmp2);\n");
+	    }
+	    {
+	        comprintf("\tint decr = scratchie++;\n");
+	        comprintf("\tlea_l_brr(decr, src, (uae_s32)-1);\n");
+	        comprintf("\tmov_w_rr(src, decr);\n");
+	    }
 	    start_brace();
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	    comprintf("\tuintptr v2,v;\n"
@@ -2189,7 +2205,7 @@ gen_opcode (unsigned int opcode)
 		      "\tuae_u32 v1=get_const(PC_P);\n");
 #endif
 	    comprintf("\tv2=get_const(offs);\n"
-		      "\tregister_branch(v1,v2,%d);\n", NATIVE_CC_CC);
+		      "\tregister_branch(v1,v2,%d);\n", NATIVE_CC_NE);
 	    break;
 
 	 case 8: failure; break;  /* Work out details! FIXME */

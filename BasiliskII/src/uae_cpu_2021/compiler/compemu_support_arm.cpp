@@ -2649,7 +2649,7 @@ static void flags_to_stack(void)
            tests the hardware NZCV directly sees the correct polarity.
            This matters for DBRA/DBcc: sub_w_ri sets flags_carry_inverted
            and register_branch uses NATIVE_CC_CC which tests hardware C. */
-        if (flags_carry_inverted && live.flags_in_flags == VALID) {
+        if (flags_carry_inverted) {
             MRS_NZCV_x(REG_WORK1);
             EOR_xxCflag(REG_WORK1, REG_WORK1);
             MSR_NZCV_x(REG_WORK1);
