@@ -11,6 +11,10 @@ roxr_reg_count_32
 roxl_reg_count_32
 roxl_reg_count_33
 roxr_reg_count_0
+roxl_reg_count_63
+roxr_reg_count_63
+roxr_roxl_chain_x
+roxl_lsr_chain_x
 ror_word
 rol_word
 shift_chain
