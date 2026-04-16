@@ -27,3 +27,4 @@ dbt_true_not_taken
 dbra_three_iter
 dbcc_loop_c_set
 dbcs_not_taken_c_set
+dbra_loop_100
