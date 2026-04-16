@@ -2206,6 +2206,13 @@ gen_opcode (unsigned int opcode)
 #endif
 	    comprintf("\tv2=get_const(offs);\n"
 		      "\tregister_branch(v1,v2,%d);\n", NATIVE_CC_NE);
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	    /* Prevent flush(1) from saving the TST's hardware NZCV to
+	       regflags.nzcv.  live_flags() from earlier instructions in
+	       this block set flags_on_stack=TRASH; restore it to VALID
+	       so flags_to_stack() takes the early-return path. */
+	    comprintf("\tdiscard_flags_in_nzcv();\n");
+#endif
 	    break;
 
 	 case 8: failure; break;  /* Work out details! FIXME */

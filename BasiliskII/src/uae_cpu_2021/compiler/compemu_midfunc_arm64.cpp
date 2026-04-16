@@ -164,13 +164,16 @@ MENDFUNC(0,dont_care_flags,(void))
    regflags.nzcv with the stale sub_w_ri result. */
 MIDFUNC(0,discard_flags_in_nzcv,(void))
 {
+	/* Mark hardware NZCV as stale and memory flags as authoritative.
+	   After this, flush(1)->flags_to_stack() takes the early-return
+	   path (flags_on_stack==VALID) and skips the raw_flags_to_reg
+	   that would save the stale hardware NZCV to regflags.nzcv. */
 	live.flags_in_flags = TRASH;
-	/* Evict FLAGTMP from its hardware register so flush(1) won't
-	   write the stale sub_w_ri NZCV back to regflags.nzcv.
-	   The caller (DBRA gencomp) has already restored the correct
-	   value to regflags.nzcv via mov_l_mr. */
+	live.flags_on_stack = VALID;
+	flags_carry_inverted = false;
+	/* Also evict FLAGTMP from its hardware register so flush(1)
+	   won't write it back via tomem. */
 	if (live.state[FLAGTMP].status == DIRTY || live.state[FLAGTMP].status == CLEAN) {
-		/* Disassociate without writing to memory */
 		int r = live.state[FLAGTMP].realreg;
 		if (r >= 0) {
 			live.nat[r].nholds--;
