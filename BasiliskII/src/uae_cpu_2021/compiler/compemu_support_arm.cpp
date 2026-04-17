@@ -5663,9 +5663,6 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 LOAD_U64(REG_WORK1, (uintptr)&regflags.nzcv);
                 LDR_wXi(REG_WORK2, REG_WORK1, 0);
                 MSR_NZCV_x(REG_WORK2);
-                /* Do NOT set flags_in_flags=VALID here; leave it as TRASH
-                   from init_comp.  This prevents flush(1) from trying to
-                   save the hardware NZCV back to regflags.nzcv. */
             }
 #endif
 

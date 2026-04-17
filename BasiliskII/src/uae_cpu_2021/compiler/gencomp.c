@@ -2237,13 +2237,8 @@ gen_opcode (unsigned int opcode)
 		      cond_codes[curi->cc]);
 	    comprintf("\tcmov_l_rr(src,nsrc,%d);\n",
 		      cond_codes[curi->cc]);
-	    /* OK, now for cc=true, we have src==nsrc and offs==PC_P,
-	       so whether we move them around doesn't matter. However,
-	       if cc=false, we have offs==jump_pc, and src==nsrc-1 */
-
-	    /* Test nsrc.W for zero (terminal condition) WITHOUT
-	       clobbering regflags.nzcv.  Use test_w_rr(a,b) with
-	       a!=b to avoid the jff_TST_w/clobber_flags path. */
+	    /* Test nsrc.W for zero (terminal condition). Use test_w_rr(a,b)
+	       with a!=b to avoid jff_TST_w/clobber_flags path. */
 	    {
 	        comprintf("\tint ntmp = scratchie++;\n");
 	        comprintf("\tmov_l_rr(ntmp, nsrc);\n");
