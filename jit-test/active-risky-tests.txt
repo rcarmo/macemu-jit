@@ -112,3 +112,12 @@ byte_logic_chain
 bchg_imm_high
 neg_w_partial
 clr_b_tst
+all_regs_alive
+scaled_index_word
+byte_indexed_load
+indexed_store_load
+addq_subq_sizes
+x_flag_chain
+sub_w_subx_chain
+exg_dn_an
+push_pop_a0
