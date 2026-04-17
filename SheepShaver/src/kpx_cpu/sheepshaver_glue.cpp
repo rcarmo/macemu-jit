@@ -28,6 +28,9 @@
 #include "macos_util.h"
 #include "block-alloc.hpp"
 #include "sigsegv.h"
+#ifdef __aarch64__
+#include "cpu/jit/aarch64/ppc-jit-aarch64.h"
+#endif
 #include "cpu/ppc/ppc-cpu.hpp"
 #include "cpu/ppc/ppc-operations.hpp"
 #include "cpu/ppc/ppc-instructions.hpp"
@@ -971,7 +974,31 @@ bool ss_run_opcode_test(void)
 	}
 
 	/* Execute */
+	/* Execute — either via JIT or interpreter */
+#ifdef __aarch64__
+	{
+		const char *use_jit = getenv("SS_TEST_JIT");
+		if (use_jit && *use_jit && strcmp(use_jit, "0") != 0) {
+			if (ppc_jit_aarch64_init(1024)) {
+				ppc_jit_block jblk;
+				if (ppc_jit_aarch64_compile(test_addr, test_ram, test_ram_size, &jblk)) {
+					fprintf(stderr, "SS_TEST_JIT: compiled %d PPC insns -> %zu bytes native (complete=%d)\n",
+						jblk.n_insns, jblk.code_size, jblk.complete);
+					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void *)jblk.code;
+					fn(&cpu->regs());
+					fprintf(stderr, "SS_TEST_JIT: native execution complete\n");
+					ppc_jit_aarch64_exit();
+					goto regdump;
+				}
+				ppc_jit_aarch64_exit();
+			}
+			fprintf(stderr, "SS_TEST_JIT: fallback to interpreter\n");
+		}
+	}
+#endif
 	cpu->execute(test_addr);
+
+regdump:
 
 	/* Dump registers */
 	if (ss_test_dump_enabled()) {
