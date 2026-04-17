@@ -152,6 +152,26 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit_store_gpr(RTMP0, ra);
 		return true;
 
+	case 26: /* xori rA,rS,UIMM */
+		ra = PPC_RA(op); rd = PPC_RS(op); uimm = PPC_UIMM(op);
+		emit_load_gpr(RTMP0, rd);
+		if (uimm) {
+			emit_load_imm32(RTMP1, (int32_t)(uint32_t)uimm);
+			emit32(0x4A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* EOR */
+		}
+		emit_store_gpr(RTMP0, ra);
+		return true;
+
+	case 27: /* xoris rA,rS,UIMM */
+		ra = PPC_RA(op); rd = PPC_RS(op); uimm = PPC_UIMM(op);
+		emit_load_gpr(RTMP0, rd);
+		if (uimm) {
+			emit_load_imm32(RTMP1, (int32_t)((uint32_t)uimm << 16));
+			emit32(0x4A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+		}
+		emit_store_gpr(RTMP0, ra);
+		return true;
+
 	case 28: /* andi. */
 		ra = PPC_RA(op); rd = PPC_RS(op); uimm = PPC_UIMM(op);
 		emit_load_gpr(RTMP0, rd);
@@ -275,6 +295,42 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			}
 			return false;
 		}
+		case 824: /* srawi rA,rS,SH (arithmetic shift right immediate) */
+		{
+			uint32_t sh = (op >> 11) & 0x1F;
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			if (sh) {
+				/* ASR Wd, Wn, #sh */
+				emit32(0x13000000 | (sh << 10) | (0x1F << 16) | (RTMP0 << 5) | RTMP0);
+			}
+			emit_store_gpr(RTMP0, ra);
+			/* TODO: set XER[CA] if any shifted-out bits were 1 and source was negative */
+			return true;
+		}
+		case 24: /* slw rA,rS,rB (shift left word) */
+		{
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x1AC02000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSL Wd,Wn,Wm */
+			emit_store_gpr(RTMP0, ra);
+			return true;
+		}
+		case 536: /* srw rA,rS,rB (shift right word) */
+		{
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x1AC02400 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSR Wd,Wn,Wm */
+			emit_store_gpr(RTMP0, ra);
+			return true;
+		}
+		case 792: /* sraw rA,rS,rB (arithmetic shift right) */
+		{
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x1AC02800 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ASR Wd,Wn,Wm */
+			emit_store_gpr(RTMP0, ra);
+			return true;
+		}
 		default:
 			return false;
 		}
@@ -348,6 +404,111 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit_load_gpr(RTMP0, ra);
 		if (simm) { emit_load_imm32(RTMP2, (int32_t)simm); emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); }
 		emit32(0x79000000 | (RTMP0 << 5) | RTMP1); /* STRH Wt, [Xn] */
+		return true;
+
+	case 12: /* addic rD,rA,SIMM (sets XER[CA]) */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		emit_load_gpr(RTMP0, ra);
+		emit_load_imm32(RTMP1, (int32_t)simm);
+		/* ADDS Wd, Wn, Wm (sets NZCV — we use C for carry-out) */
+		emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+		emit_store_gpr(RTMP0, rd);
+		/* Set XER[CA] from ARM64 carry flag */
+		/* MRS Xt, NZCV */
+		emit32(0xD53B4200 | RTMP1);
+		/* Extract C bit (bit 29) → XER bit 29 (CA) */
+		a64_ldr_w_imm(RTMP2, RSTATE, PPCR_XER);
+		emit_load_imm32(RTMP0, ~(1 << 29));
+		emit32(0x0A000000 | (RTMP0 << 16) | (RTMP2 << 5) | RTMP2); /* clear CA */
+		emit32(0x12001C00 | (RTMP1 << 5) | RTMP1); /* AND Wd,Wn, #0x20000000 (bit 29) */
+		emit32(0x2A000000 | (RTMP1 << 16) | (RTMP2 << 5) | RTMP2); /* OR in carry */
+		a64_str_w_imm(RTMP2, RSTATE, PPCR_XER);
+		return true;
+
+	case 21: /* rlwinm rA,rS,SH,MB,ME */
+	{
+		uint32_t rs = PPC_RS(op);
+		ra = PPC_RA(op);
+		uint32_t sh = (op >> 11) & 0x1F;
+		uint32_t mb = (op >> 6) & 0x1F;
+		uint32_t me = (op >> 1) & 0x1F;
+		emit_load_gpr(RTMP0, rs);
+		/* Rotate left by SH: ROR Wd,Wn,#(32-SH) */
+		if (sh) {
+			uint32_t ror_amt = (32 - sh) & 0x1F;
+			/* EXTR Wd, Wn, Wn, #ror_amt = rotate right */
+			emit32(0x13800000 | (RTMP0 << 16) | (ror_amt << 10) | (RTMP0 << 5) | RTMP0);
+		}
+		/* Apply mask MB..ME */
+		uint32_t mask = 0;
+		if (mb <= me) {
+			for (uint32_t i = mb; i <= me; i++) mask |= (0x80000000U >> i);
+		} else {
+			for (uint32_t i = 0; i <= me; i++) mask |= (0x80000000U >> i);
+			for (uint32_t i = mb; i <= 31; i++) mask |= (0x80000000U >> i);
+		}
+		if (mask != 0xFFFFFFFF) {
+			emit_load_imm32(RTMP1, (int32_t)mask);
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+		}
+		emit_store_gpr(RTMP0, ra);
+		return true;
+	}
+
+	case 20: /* rlwimi rA,rS,SH,MB,ME (insert) */
+	{
+		uint32_t rs = PPC_RS(op);
+		ra = PPC_RA(op);
+		uint32_t sh = (op >> 11) & 0x1F;
+		uint32_t mb = (op >> 6) & 0x1F;
+		uint32_t me = (op >> 1) & 0x1F;
+		/* Rotate rS left by SH */
+		emit_load_gpr(RTMP0, rs);
+		if (sh) {
+			uint32_t ror_amt = (32 - sh) & 0x1F;
+			emit32(0x13800000 | (RTMP0 << 16) | (ror_amt << 10) | (RTMP0 << 5) | RTMP0);
+		}
+		/* Compute mask */
+		uint32_t mask = 0;
+		if (mb <= me) {
+			for (uint32_t i = mb; i <= me; i++) mask |= (0x80000000U >> i);
+		} else {
+			for (uint32_t i = 0; i <= me; i++) mask |= (0x80000000U >> i);
+			for (uint32_t i = mb; i <= 31; i++) mask |= (0x80000000U >> i);
+		}
+		/* rA = (rotated_rS & mask) | (rA & ~mask) */
+		emit_load_imm32(RTMP1, (int32_t)mask);
+		emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* rotated & mask */
+		emit_load_gpr(RTMP2, ra);
+		emit_load_imm32(RTMP1, (int32_t)~mask);
+		emit32(0x0A000000 | (RTMP1 << 16) | (RTMP2 << 5) | RTMP2); /* rA & ~mask */
+		emit32(0x2A000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* OR */
+		emit_store_gpr(RTMP0, ra);
+		return true;
+	}
+
+	case 33: /* lwzu rD,d(rA) — load word and update rA */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0 || ra == rd) return false;
+		emit_load_gpr(RTMP0, ra);
+		emit_load_imm32(RTMP1, (int32_t)simm);
+		emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* effective addr */
+		emit_store_gpr(RTMP0, ra); /* update rA */
+		emit32(0xB9400000 | (RTMP0 << 5) | RTMP1); /* LDR Wt, [Xn] */
+		emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV (byte-swap) */
+		emit_store_gpr(RTMP1, rd);
+		return true;
+
+	case 37: /* stwu rS,d(rA) — store word and update rA */
+		rd = PPC_RS(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_gpr(RTMP1, rd);
+		emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV */
+		emit_load_gpr(RTMP0, ra);
+		emit_load_imm32(RTMP2, (int32_t)simm);
+		emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* effective addr */
+		emit_store_gpr(RTMP0, ra); /* update rA */
+		emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR */
 		return true;
 
 	case 11: /* cmpi (cmpwi) crD,rA,SIMM */

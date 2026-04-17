@@ -131,11 +131,11 @@ TEST_ORDER+=(li_wide)
 
 # --- Shift ---
 # li r3,1; li r4,4; slw r5,r3,r4  → r5 = 16
-TESTS[shift_slw]="38600001 38800004 7C642030"
+TESTS[shift_slw]="38600001 38800004 7C652030"
 TEST_ORDER+=(shift_slw)
 
 # li r3,256; li r4,4; srw r5,r3,r4  → r5 = 16
-TESTS[shift_srw]="38600100 38800004 7C642430"
+TESTS[shift_srw]="38600100 38800004 7C652430"
 TEST_ORDER+=(shift_srw)
 
 # --- Compare + branch ---
