@@ -24036,6 +24036,7 @@ void REGPARAM2 op_51c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -24247,6 +24248,7 @@ void REGPARAM2 op_52c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -24465,6 +24467,7 @@ void REGPARAM2 op_53c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -24683,6 +24686,7 @@ void REGPARAM2 op_54c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -24901,6 +24905,7 @@ void REGPARAM2 op_55c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -25119,6 +25124,7 @@ void REGPARAM2 op_56c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -25337,6 +25343,7 @@ void REGPARAM2 op_57c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -25555,6 +25562,7 @@ void REGPARAM2 op_5ac8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -25773,6 +25781,7 @@ void REGPARAM2 op_5bc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -25991,6 +26000,7 @@ void REGPARAM2 op_5cc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -26209,6 +26219,7 @@ void REGPARAM2 op_5dc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -26427,6 +26438,7 @@ void REGPARAM2 op_5ec8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -26645,6 +26657,7 @@ void REGPARAM2 op_5fc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -64238,6 +64251,7 @@ void REGPARAM2 op_51c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -64449,6 +64463,7 @@ void REGPARAM2 op_52c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -64667,6 +64682,7 @@ void REGPARAM2 op_53c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -64885,6 +64901,7 @@ void REGPARAM2 op_54c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -65103,6 +65120,7 @@ void REGPARAM2 op_55c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -65321,6 +65339,7 @@ void REGPARAM2 op_56c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -65539,6 +65558,7 @@ void REGPARAM2 op_57c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -65757,6 +65777,7 @@ void REGPARAM2 op_5ac8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -65975,6 +65996,7 @@ void REGPARAM2 op_5bc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -66193,6 +66215,7 @@ void REGPARAM2 op_5cc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -66411,6 +66434,7 @@ void REGPARAM2 op_5dc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -66629,6 +66653,7 @@ void REGPARAM2 op_5ec8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();
@@ -66847,6 +66872,7 @@ void REGPARAM2 op_5fc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
+	discard_flags_in_nzcv();
 }}}}
     if (m68k_pc_offset > SYNC_PC_OFFSET)
         sync_m68k_pc();

@@ -121,3 +121,5 @@ x_flag_chain
 sub_w_subx_chain
 exg_dn_an
 push_pop_a0
+dbeq_loop_50
+dbmi_loop_neg

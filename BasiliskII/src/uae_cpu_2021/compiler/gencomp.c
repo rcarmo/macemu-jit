@@ -2257,6 +2257,13 @@ gen_opcode (unsigned int opcode)
 	 default: assert(0);
 	}
 	genastore ("src", curi->smode, "srcreg", curi->size, "src");
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	/* Final safety: ensure block-end flush doesn't save stale NZCV.
+	   The genastore above may have re-dirtied flag tracking state. */
+	if (curi->cc >= 1) {
+	    comprintf("\tdiscard_flags_in_nzcv();\n");
+	}
+#endif
 	gen_update_next_handler();
 	break;
 
