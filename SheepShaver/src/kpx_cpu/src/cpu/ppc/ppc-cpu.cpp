@@ -40,6 +40,12 @@
 #define DEBUG 0
 #include "debug.h"
 
+#if defined(__aarch64__) && defined(USE_AARCH64_JIT)
+extern uint8 *RAMBaseHost;
+extern uint32 RAMSize;
+#include "cpu/jit/aarch64/ppc-jit-aarch64.h"
+#endif
+
 #if PPC_PROFILE_GENERIC_CALLS
 uint32 powerpc_cpu::generic_calls_count[PPC_I(MAX)];
 static int generic_calls_ids[PPC_I(MAX)];
@@ -684,6 +690,24 @@ void powerpc_cpu::execute(uint32 entry)
 
 			// Execute all cached blocks
 		  pdi_execute:
+#if defined(__aarch64__) && defined(USE_AARCH64_JIT)
+			/* AArch64 direct-codegen JIT: try compiling block natively */
+			{
+				static bool jit_init_done = false;
+				if (!jit_init_done) { ppc_jit_aarch64_init(4096); jit_init_done = true; }
+				ppc_jit_block jblk;
+				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) {
+					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
+					fn((void*)regs_ptr());
+					if (!spcflags().empty()) {
+						if (!check_spcflags()) goto return_site;
+					}
+					bi = my_block_cache.find(pc());
+					if (bi) goto pdi_execute;
+					continue;
+				}
+			}
+#endif
 			for (;;) {
 				const int r = bi->size % 4;
 				di = bi->di + r;
