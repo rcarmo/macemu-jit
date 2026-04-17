@@ -696,7 +696,7 @@ void powerpc_cpu::execute(uint32 entry)
 				static bool jit_init_done = false;
 				if (!jit_init_done) { ppc_jit_aarch64_init(4096); jit_init_done = true; }
 				ppc_jit_block jblk;
-				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.n_insns > 2) { /* run if at least 3 insns compiled */
+				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) {
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
 					fn((void*)regs_ptr());
 					if (!spcflags().empty()) {
