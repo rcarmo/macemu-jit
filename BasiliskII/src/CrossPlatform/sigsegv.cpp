@@ -406,7 +406,7 @@ static inline sigsegv_address_t get_fault_instruction(const ucontext_t *ucp)
 #if HAVE_SIGCONTEXT_SUBTERFUGE
 // Linux kernels prior to 2.4 ?
 #if defined(__linux__)
-#define SIGSEGV_ALL_SIGNALS				FAULT_HANDLER(SIGSEGV)
+#define SIGSEGV_ALL_SIGNALS				FAULT_HANDLER(SIGSEGV) FAULT_HANDLER(SIGBUS)
 #if (defined(i386) || defined(__i386__))
 #include <asm/sigcontext.h>
 #define SIGSEGV_FAULT_HANDLER_ARGLIST	int sig, struct sigcontext scs
