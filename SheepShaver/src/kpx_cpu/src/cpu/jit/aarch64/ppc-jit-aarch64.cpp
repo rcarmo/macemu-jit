@@ -74,6 +74,41 @@ static void emit_load_imm32(int rd, int32_t imm) {
 	}
 }
 
+/* Update CR0 based on a 32-bit result in ARM64 register 'rd'.
+   CR0: bit31=LT(negative), bit30=GT(positive nonzero), bit29=EQ(zero), bit28=SO(from XER) */
+static void emit_update_cr0(int result_reg) {
+	/* Simple approach: compute CR0 nibble with conditional instructions */
+	/* Compare result with 0 */
+	emit32(0x7100001F | (result_reg << 5)); /* CMP Wn, #0 */
+	/* CR0 = 0 by default */
+	a64_movz(RTMP2, 0, 0);
+	/* If result < 0 (signed): CR0 = 8 (LT) */
+	emit32(0x5A800040 | (RTMP2 << 5) | RTMP2); /* CSINV Wd, Wn, Wn, PL — wrong, use CSET */
+	/* Actually use CSEL: */
+	/* MOV W(RTMP0), #8; MOV W(RTMP1), #4; MOV W(RTMP2), #2 */
+	/* CSEL based on condition */
+	/* Simplest: use three conditional moves */
+	a64_movz(RTMP2, 0, 0);
+	emit_load_imm32(RTMP0, 8); /* LT value */
+	emit_load_imm32(RTMP1, 4); /* GT value */
+	/* CSEL RTMP2, RTMP0, RTMP2, LT (if signed less than) */
+	emit32(0x1A800000 | (RTMP2 << 16) | (0xB << 12) | (RTMP0 << 5) | RTMP2); /* CSEL Wd,Wn,Wm,LT */
+	/* CSEL RTMP2, RTMP1, RTMP2, GT (if signed greater than) */
+	emit32(0x1A800000 | (RTMP2 << 16) | (0xC << 12) | (RTMP1 << 5) | RTMP2); /* CSEL Wd,Wn,Wm,GT */
+	/* If EQ, set to 2 */
+	emit_load_imm32(RTMP0, 2);
+	emit32(0x1A800000 | (RTMP2 << 16) | (0x0 << 12) | (RTMP0 << 5) | RTMP2); /* CSEL Wd,Wn,Wm,EQ */
+	/* Shift nibble into CR0 position (bits 31:28) */
+	emit_load_imm32(RTMP0, 28);
+	emit32(0x1AC02000 | (RTMP0 << 16) | (RTMP2 << 5) | RTMP2); /* LSL Wd,Wn,Wm */
+	/* Load CR, clear CR0 field, OR in new value */
+	a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
+	emit_load_imm32(RTMP1, 0x0FFFFFFF);
+	emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+	emit32(0x2A000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* ORR */
+	a64_str_w_imm(RTMP0, RSTATE, PPCR_CR);
+}
+
 /* Emit: store next_pc to regs->pc, epilogue, ret */
 static void emit_epilogue_with_pc(uint32_t next_pc) {
 	emit_load_imm32(RTMP0, (int32_t)next_pc);
@@ -202,40 +237,46 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			a64_str_w_imm(RTMP0, RSTATE, PPCR_CR);
 			return true;
 		}
-		case 266: /* add */
+		case 266: /* add / add. */
 			emit_load_gpr(RTMP0, ra);
 			emit_load_gpr(RTMP1, rb);
 			emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
 			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
 		case 40: /* subf (rD = rB - rA) */
 			emit_load_gpr(RTMP0, rb);
 			emit_load_gpr(RTMP1, ra);
 			emit32(0x4B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SUB */
 			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
 		case 28: /* and */
 			emit_load_gpr(RTMP0, PPC_RS(op));
 			emit_load_gpr(RTMP1, rb);
 			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
 			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
-		case 444: /* or (also mr) */
+		case 444: /* or / or. (also mr) */
 			emit_load_gpr(RTMP0, PPC_RS(op));
 			emit_load_gpr(RTMP1, rb);
 			emit32(0x2A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
 			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
 		case 316: /* xor */
 			emit_load_gpr(RTMP0, PPC_RS(op));
 			emit_load_gpr(RTMP1, rb);
 			emit32(0x4A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
 			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
-		case 104: /* neg */
+		case 104: /* neg / neg. */
 			emit_load_gpr(RTMP0, ra);
-			emit32(0x4B0003E0 | (RTMP0 << 16) | RTMP0); /* SUB Wd, WZR, Wn = NEG */
+			emit32(0x4B0003E0 | (RTMP0 << 16) | RTMP0);
 			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
 		case 26: /* cntlzw */
 			emit_load_gpr(RTMP0, PPC_RS(op));
