@@ -149,6 +149,31 @@ public:
 	// Constructor
 	sheepshaver_cpu();
 
+	// Direct access to register state for JIT
+	// powerpc_cpu::_regs is at a known offset from 'this'; regs are 16-byte aligned within
+	void *regs_for_jit() {
+		// Same calculation as regs_ptr() but accessible from public scope
+		char *base = (char *)this;
+		// _regs.regs is the first field after the vtable pointer
+		// On aarch64 with vtable, sizeof(void*) = 8, then padding to 16-byte alignment
+		// Use set_register/get_register to find the actual address by side effect:
+		// Actually, simplest: GPR(0) is at offset 0 in powerpc_registers.
+		// set GPR0 to a known sentinel, scan memory to find it.
+		uint32 sentinel = 0xDEADF00D;
+		uint32 saved = get_register(powerpc_registers::GPR(0)).i;
+		set_register(powerpc_registers::GPR(0), any_register(sentinel));
+		// Scan for sentinel within first 1KB from 'this'
+		void *result = NULL;
+		for (int off = 0; off < 1024; off += 4) {
+			if (*(uint32 *)(base + off) == sentinel) {
+				result = base + off;
+				break;
+			}
+		}
+		set_register(powerpc_registers::GPR(0), any_register(saved));
+		return result;
+	}
+
 	// CR & XER accessors
 	uint32 get_cr() const		{ return cr().get(); }
 	void set_cr(uint32 v)		{ cr().set(v); }
@@ -985,7 +1010,7 @@ bool ss_run_opcode_test(void)
 					fprintf(stderr, "SS_TEST_JIT: compiled %d PPC insns -> %zu bytes native (complete=%d)\n",
 						jblk.n_insns, jblk.code_size, jblk.complete);
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void *)jblk.code;
-					fn(&cpu->regs());
+					fn(cpu->regs_for_jit());
 					fprintf(stderr, "SS_TEST_JIT: native execution complete\n");
 					ppc_jit_aarch64_exit();
 					goto regdump;
