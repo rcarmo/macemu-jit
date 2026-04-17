@@ -56,6 +56,12 @@
 
 void powerpc_cpu::execute_illegal(uint32 opcode)
 {
+	/* In opcode test mode, illegal instruction = clean exit */
+	if (getenv("SS_TEST_HEX") && *getenv("SS_TEST_HEX")) {
+		spcflags().set(SPCFLAG_CPU_EXEC_RETURN);
+		return;
+	}
+
 	fprintf(stderr, "Illegal instruction at %08x, opcode = %08x\n", pc(), opcode);
 
 #ifdef SHEEPSHAVER

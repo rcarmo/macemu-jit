@@ -42,6 +42,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <string.h>
+#include <sys/mman.h>
 #ifdef HAVE_MALLOC_H
 #include <malloc.h>
 #endif
@@ -841,6 +844,152 @@ sigsegv_return_t sigsegv_handler(sigsegv_info_t *sip)
  *  Initialize CPU emulation
  */
 
+/*
+ *  SS_TEST_HEX / SS_TEST_DUMP — opcode equivalence test mode
+ *
+ *  When SS_TEST_HEX is set, SheepShaver injects the given PPC instruction
+ *  sequence into RAM, executes it in the normal interpreter, and (if
+ *  SS_TEST_DUMP=1) emits a REGDUMP line to stderr with all register state.
+ *  This enables the jit-test harness to compare interpreter vs JIT output.
+ */
+
+static bool ss_test_dump_enabled()
+{
+	static int cached = -1;
+	if (cached < 0)
+		cached = (getenv("SS_TEST_DUMP") && *getenv("SS_TEST_DUMP") &&
+		          strcmp(getenv("SS_TEST_DUMP"), "0") != 0) ? 1 : 0;
+	return cached != 0;
+}
+
+static bool ss_parse_hex_words(const char *hex, uint32 *out, size_t max, size_t *count)
+{
+	size_t n = 0;
+	const char *p = hex;
+	while (*p) {
+		while (*p && (isspace((unsigned char)*p) || *p == ',' || *p == ';'))
+			p++;
+		if (!*p) break;
+		if (n >= max) return false;
+		char *end = NULL;
+		unsigned long v = strtoul(p, &end, 16);
+		if (end == p || v > 0xFFFFFFFFUL) return false;
+		out[n++] = (uint32)v;
+		p = end;
+	}
+	*count = n;
+	return n > 0;
+}
+
+bool ss_run_opcode_test(void)
+{
+	const char *hex = getenv("SS_TEST_HEX");
+	if (!(hex && *hex))
+		return false;
+
+	uint32 words[1024];
+	size_t n_words = 0;
+	if (!ss_parse_hex_words(hex, words, sizeof(words)/sizeof(words[0]), &n_words)) {
+		fprintf(stderr, "SS_TEST_HEX parse failed\n");
+		return true;
+	}
+
+	/* Allocate minimal RAM in low 32-bit address space (required for
+	   REAL_ADDRESSING where Mac address = host address as uint32) */
+	const size_t test_ram_size = 16 * 1024 * 1024;
+	uint8 *test_ram = (uint8 *)mmap(
+		(void *)0x10000000UL, test_ram_size,
+		PROT_READ | PROT_WRITE | PROT_EXEC,
+		MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+		-1, 0);
+	if (test_ram == MAP_FAILED) {
+		/* Retry without FIXED hint */
+		test_ram = (uint8 *)mmap(NULL, test_ram_size,
+			PROT_READ | PROT_WRITE | PROT_EXEC,
+			MAP_PRIVATE | MAP_ANONYMOUS,
+			-1, 0);
+	}
+	if (test_ram == MAP_FAILED || (uintptr_t)test_ram > 0xFFFFFFFFUL) {
+		fprintf(stderr, "SS_TEST: cannot allocate RAM in low 4GB\n");
+		if (test_ram != MAP_FAILED) munmap(test_ram, test_ram_size);
+		return true;
+	}
+	memset(test_ram, 0, test_ram_size);
+
+	/* For REAL_ADDRESSING: Mac address = host address.
+	   RAMBase must equal the host pointer (cast to uint32 may truncate on 64-bit).
+	   We write directly to the buffer instead of using WriteMacInt32. */
+	RAMBaseHost = test_ram;
+	RAMSize = test_ram_size;
+
+	const uint32 code_offset = 0x4000;
+	const uint32 stack_offset = test_ram_size - 0x4000;
+
+	/* Write PPC instructions directly to buffer (big-endian) */
+	for (size_t i = 0; i < n_words; i++) {
+		uint8 *p = test_ram + code_offset + i * 4;
+		p[0] = (words[i] >> 24) & 0xFF;
+		p[1] = (words[i] >> 16) & 0xFF;
+		p[2] = (words[i] >> 8)  & 0xFF;
+		p[3] =  words[i]        & 0xFF;
+	}
+	/* Append blr (0x4E800020) */
+	{
+		uint8 *p = test_ram + code_offset + n_words * 4;
+		p[0] = 0x4E; p[1] = 0x80; p[2] = 0x00; p[3] = 0x20;
+	}
+
+	/* Mac addresses = host addresses for REAL_ADDRESSING */
+	uint32 test_addr = (uint32)(uintptr_t)(test_ram + code_offset);
+	uint32 stack_addr = (uint32)(uintptr_t)(test_ram + stack_offset);
+	uint32 blr_addr = (uint32)(uintptr_t)(test_ram + code_offset + (n_words + 1) * 4);
+	RAMBase = (uint32)(uintptr_t)test_ram;
+
+	/* Create CPU */
+	sheepshaver_cpu *cpu = new sheepshaver_cpu();
+	ppc_cpu = cpu;
+
+	for (int i = 0; i < 32; i++)
+		cpu->set_register(powerpc_registers::GPR(i), any_register((uint32)0));
+	cpu->set_register(powerpc_registers::GPR(1), any_register(stack_addr));
+	cpu->set_register(powerpc_registers::LR, any_register((uint32)(uintptr_t)(test_ram + 0x8000)));
+	cpu->set_register(powerpc_registers::CTR, any_register((uint32)0));
+	cpu->set_register(powerpc_registers::CR, any_register((uint32)0));
+	cpu->set_register(powerpc_registers::XER, any_register((uint32)0));
+
+	/* Optional: seed registers */
+	const char *init = getenv("SS_TEST_INIT");
+	if (init && *init) {
+		uint32 init_vals[33];
+		size_t init_count = 0;
+		if (ss_parse_hex_words(init, init_vals, 33, &init_count) && init_count >= 32) {
+			for (int i = 0; i < 32; i++)
+				cpu->set_register(powerpc_registers::GPR(i), any_register(init_vals[i]));
+			if (init_count >= 33)
+				cpu->set_register(powerpc_registers::CR, any_register(init_vals[32]));
+		}
+	}
+
+	/* Execute */
+	cpu->execute(test_addr);
+
+	/* Dump registers */
+	if (ss_test_dump_enabled()) {
+		fprintf(stderr, "REGDUMP:");
+		for (int i = 0; i < 32; i++)
+			fprintf(stderr, " GPR%d=%08x", i, (unsigned)cpu->get_register(powerpc_registers::GPR(i)).i);
+		fprintf(stderr, " CR=%08x", (unsigned)cpu->get_register(powerpc_registers::CR).i);
+		fprintf(stderr, " LR=%08x", (unsigned)cpu->get_register(powerpc_registers::LR).i);
+		fprintf(stderr, " CTR=%08x", (unsigned)cpu->get_register(powerpc_registers::CTR).i);
+		fprintf(stderr, " XER=%08x", (unsigned)cpu->get_register(powerpc_registers::XER).i);
+		fprintf(stderr, "\n");
+	}
+
+	delete cpu;
+	ppc_cpu = NULL;
+	free(test_ram);
+	return true;
+}
 void init_emul_ppc(void)
 {
 	// Get pointer to KernelData in host address space

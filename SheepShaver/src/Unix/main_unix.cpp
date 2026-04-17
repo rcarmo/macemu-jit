@@ -788,6 +788,13 @@ static void gui_activate (GtkApplication *app)
 
 int main(int argc, char **argv)
 {
+	/* Early opcode test mode: bypass all SheepShaver init if SS_TEST_HEX is set */
+	if (getenv("SS_TEST_HEX") && *getenv("SS_TEST_HEX")) {
+		extern bool ss_run_opcode_test(void);
+		ss_run_opcode_test();
+		return 0;
+	}
+
 #ifdef ENABLE_GTK3
 	GtkApplication *app = NULL;
 	int ret;
