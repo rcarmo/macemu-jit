@@ -59,6 +59,8 @@ DECLARE_MIDFUNC(sub_w_ri(RW2 d, IM8 i));
 DECLARE_MIDFUNC(live_flags(void));
 DECLARE_MIDFUNC(dont_care_flags(void));
 DECLARE_MIDFUNC(discard_flags_in_nzcv(void));
+DECLARE_MIDFUNC(save_and_discard_flags_in_nzcv(void));
+DECLARE_MIDFUNC(dbcc_cond_move_ne_w(RW4 d, RR4 s, RR4 src_w));
 DECLARE_MIDFUNC(make_flags_live(void));
 DECLARE_MIDFUNC(forget_about(W4 r));
 

@@ -2237,16 +2237,14 @@ gen_opcode (unsigned int opcode)
 		      cond_codes[curi->cc]);
 	    comprintf("\tcmov_l_rr(src,nsrc,%d);\n",
 		      cond_codes[curi->cc]);
-	    /* Test nsrc.W for zero (terminal condition). Use test_w_rr(a,b)
-	       with a!=b to avoid jff_TST_w/clobber_flags path. */
-	    {
-	        comprintf("\tint ntmp = scratchie++;\n");
-	        comprintf("\tmov_l_rr(ntmp, nsrc);\n");
-	        comprintf("\ttest_w_rr(nsrc, ntmp);\n");
-	    }
-	    comprintf("\tcmov_l_rr(PC_P,offs,%d);\n", NATIVE_CC_NE);
+	    /* Terminal test: if cc=FALSE and nsrc.W==0, exit loop (terminal).
+	       Otherwise if cc=FALSE, branch to loop target.
+	       If cc=TRUE, offs was already set to PC_P by cmov above.
+	       Use dbcc_cond_move_ne_w which does CBZ/MOV without touching
+	       hardware NZCV or regflags.nzcv — fixing the SR leakage. */
+	    comprintf("\tdbcc_cond_move_ne_w(PC_P, offs, nsrc);\n");
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	    comprintf("\tdiscard_flags_in_nzcv();\n");
+	    comprintf("\tsave_and_discard_flags_in_nzcv();\n");
 #endif
 	    break;
 	 default: assert(0);

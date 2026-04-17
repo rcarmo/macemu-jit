@@ -162,23 +162,31 @@ MENDFUNC(0,dont_care_flags,(void))
    were already saved to regflags.nzcv by clobber_flags() inside sub_w_ri.
    Calling this prevents flush(1) at block end from overwriting
    regflags.nzcv with the stale sub_w_ri result. */
+/* Discard hardware NZCV without saving — for DBcc case 1 (DBRA)
+   where test_w_rr already corrupted hardware NZCV. */
 MIDFUNC(0,discard_flags_in_nzcv,(void))
 {
-	/* Mark hardware NZCV as stale and memory flags as authoritative.
-	   If FLAGTMP is in a hardware register (from make_flags_live or
-	   live_flags), write it back to regflags.nzcv first — FLAGTMP's
-	   register has the correct M68K flags from the most recent
-	   flag-setting instruction.  Then evict FLAGTMP and mark
-	   flags_on_stack=VALID so flush(1) takes the early-return path. */
-	if (live.state[FLAGTMP].status == DIRTY || live.state[FLAGTMP].status == CLEAN) {
-		/* Write FLAGTMP back to regflags.nzcv */
-		tomem(FLAGTMP);
-	}
 	live.flags_in_flags = TRASH;
 	live.flags_on_stack = VALID;
 	flags_carry_inverted = false;
 }
 MENDFUNC(0,discard_flags_in_nzcv,(void))
+
+/* Save hardware NZCV to regflags.nzcv, then discard — for DBcc cases 2-15
+   where the preceding CMP/CMPI result is still in hardware NZCV
+   (dbcc_cond_move_ne_w uses CBZ which doesn't touch NZCV). */
+MIDFUNC(0,save_and_discard_flags_in_nzcv,(void))
+{
+	if (live.flags_in_flags == VALID) {
+		int tmp = writereg(FLAGTMP);
+		raw_flags_to_reg(tmp);
+		unlock2(tmp);
+	}
+	live.flags_in_flags = TRASH;
+	live.flags_on_stack = VALID;
+	flags_carry_inverted = false;
+}
+MENDFUNC(0,save_and_discard_flags_in_nzcv,(void))
 
 MIDFUNC(0,make_flags_live,(void))
 {
@@ -1348,3 +1356,27 @@ MIDFUNC(2,roxr_b_ri,(RW1 d, IM8 i))
     unlock2(d);
 }
 MENDFUNC(2,roxr_b_ri,(RW1 d, IM8 i))
+
+/* Conditional move for DBcc terminal test: if src.W != 0, set d = s.
+   Does NOT modify hardware NZCV or regflags.nzcv.
+   Uses UXTH + CBNZ + MOV sequence that preserves all flags. */
+MIDFUNC(3,dbcc_cond_move_ne_w,(RW4 d, RR4 s, RR4 src_w))
+{
+	src_w = readreg(src_w);
+	s = readreg(s);
+	d = rmw(d);
+
+	/* Extract low 16 bits into a work register */
+	UXTH_ww(REG_WORK1, src_w);
+	/* CBNZ REG_WORK1, +2 instructions → skip the MOV (d stays unchanged) */
+	/* If src_w.W == 0: don't branch → d unchanged (terminal: exit loop) */
+	/* If src_w.W != 0: branch over → execute MOV (continue: d = s) */
+	CBZ_wi(REG_WORK1, 2);  /* if zero, skip next instruction */
+	MOV_xx(d, s);           /* d = s (only reached if src_w.W != 0) */
+	/* NOP to maintain alignment after CBZ target */
+
+	unlock2(src_w);
+	unlock2(s);
+	unlock2(d);
+}
+MENDFUNC(3,dbcc_cond_move_ne_w,(RW4 d, RR4 s, RR4 src_w))

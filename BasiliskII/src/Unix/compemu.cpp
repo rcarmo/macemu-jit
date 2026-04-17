@@ -24241,11 +24241,8 @@ void REGPARAM2 op_52c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,7);
 	cmov_l_rr(src,nsrc,7);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -24460,11 +24457,8 @@ void REGPARAM2 op_53c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,6);
 	cmov_l_rr(src,nsrc,6);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -24679,11 +24673,8 @@ void REGPARAM2 op_54c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,3);
 	cmov_l_rr(src,nsrc,3);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -24898,11 +24889,8 @@ void REGPARAM2 op_55c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,2);
 	cmov_l_rr(src,nsrc,2);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -25117,11 +25105,8 @@ void REGPARAM2 op_56c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,5);
 	cmov_l_rr(src,nsrc,5);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -25336,11 +25321,8 @@ void REGPARAM2 op_57c8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,4);
 	cmov_l_rr(src,nsrc,4);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -25555,11 +25537,8 @@ void REGPARAM2 op_5ac8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,9);
 	cmov_l_rr(src,nsrc,9);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -25774,11 +25753,8 @@ void REGPARAM2 op_5bc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,8);
 	cmov_l_rr(src,nsrc,8);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -25993,11 +25969,8 @@ void REGPARAM2 op_5cc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,13);
 	cmov_l_rr(src,nsrc,13);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -26212,11 +26185,8 @@ void REGPARAM2 op_5dc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,12);
 	cmov_l_rr(src,nsrc,12);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -26431,11 +26401,8 @@ void REGPARAM2 op_5ec8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,15);
 	cmov_l_rr(src,nsrc,15);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -26650,11 +26617,8 @@ void REGPARAM2 op_5fc8_0_comp_ff(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,14);
 	cmov_l_rr(src,nsrc,14);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -64456,11 +64420,8 @@ void REGPARAM2 op_52c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,7);
 	cmov_l_rr(src,nsrc,7);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -64675,11 +64636,8 @@ void REGPARAM2 op_53c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,6);
 	cmov_l_rr(src,nsrc,6);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -64894,11 +64852,8 @@ void REGPARAM2 op_54c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,3);
 	cmov_l_rr(src,nsrc,3);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -65113,11 +65068,8 @@ void REGPARAM2 op_55c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,2);
 	cmov_l_rr(src,nsrc,2);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -65332,11 +65284,8 @@ void REGPARAM2 op_56c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,5);
 	cmov_l_rr(src,nsrc,5);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -65551,11 +65500,8 @@ void REGPARAM2 op_57c8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,4);
 	cmov_l_rr(src,nsrc,4);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -65770,11 +65716,8 @@ void REGPARAM2 op_5ac8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,9);
 	cmov_l_rr(src,nsrc,9);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -65989,11 +65932,8 @@ void REGPARAM2 op_5bc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,8);
 	cmov_l_rr(src,nsrc,8);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -66208,11 +66148,8 @@ void REGPARAM2 op_5cc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,13);
 	cmov_l_rr(src,nsrc,13);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -66427,11 +66364,8 @@ void REGPARAM2 op_5dc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,12);
 	cmov_l_rr(src,nsrc,12);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -66646,11 +66580,8 @@ void REGPARAM2 op_5ec8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,15);
 	cmov_l_rr(src,nsrc,15);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
@@ -66865,11 +66796,8 @@ void REGPARAM2 op_5fc8_0_comp_nf(uae_u32 opcode) /* DBcc */
 	mov_w_rr(src,scratchie);
 	cmov_l_rr(offs,PC_P,14);
 	cmov_l_rr(src,nsrc,14);
-	int ntmp = scratchie++;
-	mov_l_rr(ntmp, nsrc);
-	test_w_rr(nsrc, ntmp);
-	cmov_l_rr(PC_P,offs,5);
-	discard_flags_in_nzcv();
+	dbcc_cond_move_ne_w(PC_P, offs, nsrc);
+	save_and_discard_flags_in_nzcv();
 	if(srcreg != src)
 		mov_w_rr(srcreg, src);
 	discard_flags_in_nzcv();
