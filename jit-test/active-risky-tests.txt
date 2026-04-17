@@ -150,3 +150,6 @@ bsr_l_long
 jmp_d8_pc_dn_w
 pea_movem_stack
 subq_sp_movea_write
+tst_bne_after_bsr_rts
+tst_bne_after_jsr_an
+save_clear_slot_restore_tst

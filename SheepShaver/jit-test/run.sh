@@ -162,6 +162,97 @@ TEST_ORDER+=(rlwinm_basic)
 TESTS[nop]="60000000"
 TEST_ORDER+=(nop)
 
+
+# --- Negate ---
+# li r3,42; neg r5,r3  → r5 = 0xFFFFFFD6
+TESTS[neg_basic]="3860002a 7CA300D0"
+TEST_ORDER+=(neg_basic)
+
+# --- Arithmetic shift ---
+# li r3,-1; li r4,16; sraw r5,r3,r4  → r5 = 0xFFFFFFFF, XER.CA=1
+TESTS[sraw_signext]="3860ffff 38800010 7C652630"
+TEST_ORDER+=(sraw_signext)
+
+# --- Store/load round-trip ---
+# li r3,0xBEEF; stw r3,0x100(r1); li r3,0; lwz r5,0x100(r1)
+TESTS[stw_lwz]="3860beef 90610100 38600000 80A10100"
+TEST_ORDER+=(stw_lwz)
+
+# --- Byte store/load ---
+# li r3,0x42; stb r3,0x200(r1); li r3,0; lbz r5,0x200(r1)
+# stb rS,d(rA) = 0x98000000 | ... ; lbz rD,d(rA) = 0x88000000 | ...
+TESTS[stb_lbz]="38600042 98610200 38600000 88A10200"
+TEST_ORDER+=(stb_lbz)
+
+# --- Halfword store/load ---
+# li r3,0x1234; sth r3,0x300(r1); li r3,0; lhz r5,0x300(r1)
+# sth = 0xB0000000; lhz = 0xA0000000
+TESTS[sth_lhz]="38601234 B0610300 38600000 A0A10300"
+TEST_ORDER+=(sth_lhz)
+
+# --- Record form (sets CR0) ---
+# li r3,42; addic. r5,r3,0  → CR0 should have GT bit set (positive result)
+# addic. rD,rA,SIMM = 0x34000000 | (rD<<21) | (rA<<16) | SIMM
+TESTS[addic_dot]="3860002a 34A30000"
+TEST_ORDER+=(addic_dot)
+
+# --- CR record with negative ---
+# li r3,-1; add. r5,r3,r3  → r5 = -2, CR0.LT set
+# add. rD,rA,rB = 0x7C000215 | (rD<<21) | (rA<<16) | (rB<<11)
+TESTS[add_dot_neg]="3860ffff 7CA31A15"
+TEST_ORDER+=(add_dot_neg)
+
+# --- Divide ---
+# li r3,100; li r4,7; divw r5,r3,r4  → r5 = 14
+# divw rD,rA,rB = 0x7C0003D6 | (rD<<21) | (rA<<16) | (rB<<11)
+TESTS[divw_basic]="38600064 38800007 7CA323D6"
+TEST_ORDER+=(divw_basic)
+
+# --- Counter branch (bctrl pattern) ---
+# li r3,0; lis r4,hi(target); ori r4,r4,lo(target); mtctr r4; bctrl
+# Can't easily encode absolute target, so just test mtctr+mfctr round-trip
+# li r3,0xDEAD; mtctr r3; li r3,0; mfctr r5
+# mtctr r3 = mtspr 9,r3 = 0x7C6903A6; mfctr r5 = mfspr 9,r5 = 0x7CA902A6
+TESTS[mtctr_mfctr]="3860dead 7C6903A6 38600000 7CA902A6"
+TEST_ORDER+=(mtctr_mfctr)
+
+# --- XER carry flag ---
+# Test addic (add immediate carrying): li r3,-1; addic r5,r3,2 → r5=1, XER.CA=1
+# addic rD,rA,SIMM = 0x30000000 | (rD<<21) | (rA<<16) | (SIMM&0xFFFF)
+TESTS[addic_carry]="3860ffff 30A30002"
+TEST_ORDER+=(addic_carry)
+
+# --- Extended ops ---
+# adde (add extended with carry): li r3,5; li r4,3; addic r5,r3,-1 (set CA); adde r6,r4,r3
+# adde rD,rA,rB = 0x7C000114 | (rD<<21) | (rA<<16) | (rB<<11)
+TESTS[adde_carry]="38600005 38800003 30A3ffff 7CC42114"
+TEST_ORDER+=(adde_carry)
+
+# --- rlwimi (rotate left word immediate then mask insert) ---
+# li r3,0xFF00; li r5,0x00FF; rlwimi r5,r3,0,24,31  → insert low byte of r3 into r5
+# rlwimi rA,rS,SH,MB,ME = 0x50000000 | (rS<<21) | (rA<<16) | (SH<<11) | (MB<<6) | (ME<<1)
+# rlwimi r5,r3,0,24,31 = 0x5065043E
+TESTS[rlwimi_insert]="3860ff00 38a000ff 5065043E"
+TEST_ORDER+=(rlwimi_insert)
+
+# --- cntlzw (count leading zeros) ---
+# li r3,0x100; cntlzw r5,r3  → r5 = 23 (0x100 = bit 8, 31-8=23)
+# cntlzw rA,rS = 0x7C000034 | (rS<<21) | (rA<<16)
+TESTS[cntlzw_basic]="38600100 7C650034"
+TEST_ORDER+=(cntlzw_basic)
+
+# --- extsh (extend sign halfword) ---
+# li r3,0x8000; extsh r5,r3  → r5 = 0xFFFF8000
+# extsh rA,rS = 0x7C000734 | (rS<<21) | (rA<<16)
+TESTS[extsh_basic]="38608000 7C650734"
+TEST_ORDER+=(extsh_basic)
+
+# --- extsb (extend sign byte) ---
+# li r3,0x80; extsb r5,r3  → r5 = 0xFFFFFF80
+# extsb rA,rS = 0x7C000774 | (rS<<21) | (rA<<16)
+TESTS[extsb_basic]="38600080 7C650774"
+TEST_ORDER+=(extsb_basic)
+
 # ---- Execute all tests -------------------------------------------------------
 PASS=0
 FAIL=0
