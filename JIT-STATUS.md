@@ -142,3 +142,15 @@ Interpreter boots fully to user mode (`SR=0x2000`) and executes deep into ROM in
   2. The subroutine at `0x802310` or its return path through `JMP (A6)` at `0x804182`
   3. Multi-block state propagation across the JSR→handler→JMP(A6) call chain
   4. Interaction between the trap dispatch and interrupt/timer handling
+
+## Boot Progress (2026-04-17 session)
+
+### Fixed blockers (in order)
+1. **Trap dispatch magic cookie** (`$0DB0`): ROM init at 0x800C7E never executed because A-line trap A06E failed → BNE skipped the write. Fix: EMULOP at ROM+0x2726 writes magic on every dispatch entry.
+2. **Handler pointer** (`$0120`): Busy-wait loop at 0x8027A0 spins forever when `$0120`=0. Fix: EMULOP writes `$0120 = ROMBaseMac + 0x280E`.
+3. **24-bit PC sign extension**: Bad PC `0xFF8026F4` from 24-bit sign-extending `0x008026F4`. Fix: mask recovery in execute_normal.
+4. **SIGBUS on Linux/aarch64**: Only SIGSEGV was handled. Fix: add SIGBUS to signal handler.
+5. **FPU save/restore crash**: Functions at ROM+0x8D9FE/0x8DB1E use FSAVE/FRESTORE → F-line exceptions → recursive stack overflow. Fix: RTS patch when fpu disabled.
+
+### Current blocker
+Trap table builder loop at 0x809AB0 writes entries via `MOVE.L A2,(A1)+`. After filling the OS trap table ($0400+), A1 advances into unmapped memory. Each write SEGVs and gets skipped. Under interpreter, SEGV skip is fast (PC+4). Under JIT, SEGV triggers expensive recovery path (popall_execute_normal → retrace → recompile). Result: 200M+ SEGVs in 5 minutes, loop progresses but impractically slow.
