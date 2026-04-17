@@ -165,24 +165,18 @@ MENDFUNC(0,dont_care_flags,(void))
 MIDFUNC(0,discard_flags_in_nzcv,(void))
 {
 	/* Mark hardware NZCV as stale and memory flags as authoritative.
-	   After this, flush(1)->flags_to_stack() takes the early-return
-	   path (flags_on_stack==VALID) and skips the raw_flags_to_reg
-	   that would save the stale hardware NZCV to regflags.nzcv. */
+	   If FLAGTMP is in a hardware register (from make_flags_live or
+	   live_flags), write it back to regflags.nzcv first — FLAGTMP's
+	   register has the correct M68K flags from the most recent
+	   flag-setting instruction.  Then evict FLAGTMP and mark
+	   flags_on_stack=VALID so flush(1) takes the early-return path. */
+	if (live.state[FLAGTMP].status == DIRTY || live.state[FLAGTMP].status == CLEAN) {
+		/* Write FLAGTMP back to regflags.nzcv */
+		tomem(FLAGTMP);
+	}
 	live.flags_in_flags = TRASH;
 	live.flags_on_stack = VALID;
 	flags_carry_inverted = false;
-	/* Also evict FLAGTMP from its hardware register so flush(1)
-	   won't write it back via tomem. */
-	if (live.state[FLAGTMP].status == DIRTY || live.state[FLAGTMP].status == CLEAN) {
-		int r = live.state[FLAGTMP].realreg;
-		if (r >= 0) {
-			live.nat[r].nholds--;
-			if (live.nat[r].nholds == 0)
-				live.nat[r].touched = 0;
-		}
-		live.state[FLAGTMP].realreg = -1;
-		set_status(FLAGTMP, INMEM);
-	}
 }
 MENDFUNC(0,discard_flags_in_nzcv,(void))
 
