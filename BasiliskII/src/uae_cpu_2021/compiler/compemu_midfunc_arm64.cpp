@@ -178,6 +178,21 @@ MENDFUNC(0,discard_flags_in_nzcv,(void))
 MIDFUNC(0,save_and_discard_flags_in_nzcv,(void))
 {
 	if (live.flags_in_flags == VALID) {
+		/* Save X flag from carry using raw ARM64.
+		   Bypasses register allocator to avoid eviction issues. */
+		MRS_NZCV_x(REG_WORK4);
+		if (flags_carry_inverted) {
+			EOR_xxCflag(REG_WORK4, REG_WORK4);
+		}
+		/* Extract carry bit (bit 29) and store to regflags.x */
+		{
+			uae_u32 mask = 1u << 29;
+			LOAD_U32(REG_WORK3, mask);
+			AND_www(REG_WORK4, REG_WORK4, REG_WORK3);
+		}
+		LOAD_U64(REG_WORK3, (uintptr)&regflags.x);
+		STR_wXi(REG_WORK4, REG_WORK3, 0);
+		/* Save NZCV to regflags.nzcv */
 		int tmp = writereg(FLAGTMP);
 		raw_flags_to_reg(tmp);
 		unlock2(tmp);
@@ -185,6 +200,17 @@ MIDFUNC(0,save_and_discard_flags_in_nzcv,(void))
 	live.flags_in_flags = TRASH;
 	live.flags_on_stack = VALID;
 	flags_carry_inverted = false;
+	/* Mark FLAGX as INMEM since we wrote directly to regflags.x */
+	if (live.state[FLAGX].status == DIRTY || live.state[FLAGX].status == CLEAN) {
+		int r = live.state[FLAGX].realreg;
+		if (r >= 0) {
+			live.nat[r].nholds--;
+			if (live.nat[r].nholds == 0)
+				live.nat[r].touched = 0;
+		}
+		live.state[FLAGX].realreg = -1;
+	}
+	set_status(FLAGX, INMEM);
 }
 MENDFUNC(0,save_and_discard_flags_in_nzcv,(void))
 
