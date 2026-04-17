@@ -1296,6 +1296,27 @@ static bool patch_rom_32(void)
 		fprintf(stderr, "ROM: injected FIX_DISPATCH_MAGIC at 0x2726\n");
 	}
 
+	// Skip FSAVE-recursive-exception path at ROM+0x8D9FE.
+	// The function at 0x88D9FE compares a selector at (6,SP) against $202C.
+	// If it doesn't match, it proceeds to FSAVE which triggers F-line
+	// exceptions that re-enter the function → stack overflow.
+	// Under interpreter, the selector matches and FSAVE is skipped.
+	// Under JIT, earlier init gaps cause the wrong selector.
+	// Patch: always branch to the exit path at 0x88DB1E.
+	// Skip FPU context save function at ROM+0x8D9FE when FPU is disabled.
+	// This function does FSAVE/FRESTORE/FMOVE which trigger F-line
+	// exceptions when there's no FPU, causing recursive exception handling.
+	// Replace with RTS to skip the entire function.
+	if (!PrefsFindBool("fpu") && ROMBaseHost[0x8D9FE] == 0x0C && ROMBaseHost[0x8D9FF] == 0x6F) {
+		*(uint16 *)(ROMBaseHost + 0x8D9FE) = htons(0x4E75); // RTS
+		fprintf(stderr, "ROM: patched FPU save at 0x8D9FE (RTS, no FPU)\n");
+	}
+	// Also patch the sister function at 0x88DB1E (FPU restore).
+	if (!PrefsFindBool("fpu") && ROMBaseHost[0x8DB1E] == 0x4E && ROMBaseHost[0x8DB1F] == 0x56) {
+		*(uint16 *)(ROMBaseHost + 0x8DB1E) = htons(0x4E75); // RTS
+		fprintf(stderr, "ROM: patched FPU restore at 0x8DB1E (RTS, no FPU)\n");
+	}
+
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);
