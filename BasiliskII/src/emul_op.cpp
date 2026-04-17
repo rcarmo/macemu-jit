@@ -788,6 +788,13 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 		}
 
 		default:
+			if (opcode == M68K_EMUL_OP_FIX_DISPATCH_MAGIC) {
+				WriteMacInt32(0x0DB0, 0x5A932BC7);
+				// Also do the SR save that this EMULOP replaces
+				// (original instruction: MOVE.W SR,($0C74).W)
+				WriteMacInt16(0x0C74, r->sr);
+				break;
+			}
 			printf("FATAL: EMUL_OP called with bogus opcode %08x\n", opcode);
 			printf("d0 %08x d1 %08x d2 %08x d3 %08x\n"
 				   "d4 %08x d5 %08x d6 %08x d7 %08x\n"

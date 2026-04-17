@@ -1271,6 +1271,31 @@ static bool patch_rom_32(void)
 		fprintf(stderr, "ROM: patched NuBus scanner at 0xb9874 (MOVEQ #0,D0; CLR.L $0C30; JMP A6)\n");
 	}
 
+	// Skip the BNE.W at ROM+0xC1A that jumps over the trap dispatch magic write.
+	// The A-line trap A06E at 0xC18 may return D0!=0 under JIT (trap table
+	// not fully initialized), causing BNE to skip the magic cookie write at
+	// 0xC7E (MOVE.L #$5A932BC7,($0DB0).W). Without the magic, the dispatch
+	// handler always takes the NuBus scanner path and gets stuck.
+	// NOP out the BNE.W so the magic always gets written.
+	if (ROMBaseHost[0xC1A] == 0x66 && ROMBaseHost[0xC1B] == 0x00) {
+		*(uint16 *)(ROMBaseHost + 0xC1A) = htons(0x4E71); // NOP
+		*(uint16 *)(ROMBaseHost + 0xC1C) = htons(0x4E71); // NOP
+		fprintf(stderr, "ROM: patched BNE at 0xC1A (NOP) — ensures magic cookie write\n");
+	}
+
+	// Inject EMULOP at ROM+0x26E8 to write trap dispatch magic cookie.
+	// 0x26E8 is in the dispatch setup, right before the BSR vector cascade.
+	// It contains zeros (ORI.B #0,D0 = no-ops). Replace with our EMULOP.
+	// Inject FIX_DISPATCH_MAGIC EMULOP at ROM+0x2726 (dispatch setup entry).
+	// Original instruction: 40F8 0C74 = MOVE.W SR,($0C74).W (4 bytes).
+	// Replace with: EMULOP (2 bytes) + NOP (2 bytes).
+	// The EMULOP handler writes the magic cookie to $0DB0 AND saves SR to $0C74.
+	if (ROMBaseHost[0x2726] == 0x40 && ROMBaseHost[0x2727] == 0xF8) {
+		*(uint16 *)(ROMBaseHost + 0x2726) = htons(M68K_EMUL_OP_FIX_DISPATCH_MAGIC);
+		*(uint16 *)(ROMBaseHost + 0x2728) = htons(0x4E71); // NOP
+		fprintf(stderr, "ROM: injected FIX_DISPATCH_MAGIC at 0x2726\n");
+	}
+
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);
