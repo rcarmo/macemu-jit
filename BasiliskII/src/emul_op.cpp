@@ -790,6 +790,13 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 		default:
 			if (opcode == M68K_EMUL_OP_FIX_DISPATCH_MAGIC) {
 				WriteMacInt32(0x0DB0, 0x5A932BC7);
+				// Ensure $0120 has a valid handler pointer.
+				// The dispatch loop loads A1 from ($0120).W and busy-waits
+				// until it's non-zero. Under interpreter, ROM init sets this.
+				// Under JIT, the init code path may be skipped.
+				// Set it to the handler at ROM+0x280E.
+				if (ReadMacInt32(0x0120) == 0)
+					WriteMacInt32(0x0120, ROMBaseMac + 0x280E);
 				// Also do the SR save that this EMULOP replaces
 				// (original instruction: MOVE.W SR,($0C74).W)
 				WriteMacInt16(0x0C74, r->sr);
