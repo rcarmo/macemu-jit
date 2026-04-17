@@ -133,6 +133,46 @@ static uint32_t *find_code_for_pc(uint32_t target_pc) {
 	return NULL;
 }
 
+
+/* ---- Opcode miss tracking ---- */
+static uint32_t jit_miss_count[64] = {0};  /* primary opcode histogram */
+static uint32_t jit_xo_miss[1024] = {0};   /* XO opcode histogram for opc=31 */
+static uint32_t jit_total_miss = 0;
+static uint32_t jit_total_hit = 0;
+static uint32_t jit_blocks_attempted = 0;
+static uint32_t jit_blocks_complete = 0;
+
+static void jit_report_misses(void) {
+	if (jit_total_miss == 0 && jit_total_hit == 0) return;
+	fprintf(stderr, "PPC-JIT-A64: blocks=%u complete=%u (%.1f%%)\n",
+		jit_blocks_attempted, jit_blocks_complete,
+		jit_blocks_attempted ? jit_blocks_complete * 100.0 / jit_blocks_attempted : 0.0);
+	fprintf(stderr, "PPC-JIT-A64: hit=%u miss=%u (%.1f%% coverage)\n",
+		jit_total_hit, jit_total_miss,
+		jit_total_hit * 100.0 / (jit_total_hit + jit_total_miss));
+	fprintf(stderr, "PPC-JIT-A64: top missed primary opcodes:\n");
+	/* Sort and print top 10 */
+	for (int pass = 0; pass < 10; pass++) {
+		uint32_t max_v = 0; int max_i = -1;
+		for (int i = 0; i < 64; i++) {
+			if (jit_miss_count[i] > max_v) { max_v = jit_miss_count[i]; max_i = i; }
+		}
+		if (max_i < 0 || max_v == 0) break;
+		fprintf(stderr, "  opc=%d: %u misses\n", max_i, max_v);
+		jit_miss_count[max_i] = 0; /* clear for next pass */
+	}
+	fprintf(stderr, "PPC-JIT-A64: top missed XO opcodes (opc=31):\n");
+	for (int pass = 0; pass < 10; pass++) {
+		uint32_t max_v = 0; int max_i = -1;
+		for (int i = 0; i < 1024; i++) {
+			if (jit_xo_miss[i] > max_v) { max_v = jit_xo_miss[i]; max_i = i; }
+		}
+		if (max_i < 0 || max_v == 0) break;
+		fprintf(stderr, "  XO=%d: %u misses\n", max_i, max_v);
+		jit_xo_miss[max_i] = 0;
+	}
+}
+
 /* ---- Compile one PPC instruction ---- */
 static bool compile_one(uint32_t op, uint32_t pc) {
 	uint32_t opc = PPC_OPC(op);
@@ -398,7 +438,53 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			emit_store_gpr(RTMP0, ra);
 			return true;
 		}
+
+		case 32: /* cmpl (cmplw crD,rA,rB) */
+		{
+			uint32_t crd = (op >> 23) & 0x7;
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x6B000000 | (RTMP1 << 16) | (RTMP0 << 5) | 0x1F);
+			a64_movz(RTMP2, 0, 0);
+			emit_load_imm32(RTMP0, 8);
+			emit32(0x1A800000 | (RTMP2 << 16) | (0x3 << 12) | (RTMP0 << 5) | RTMP2); /* CC=LT */
+			emit_load_imm32(RTMP0, 4);
+			emit32(0x1A800000 | (RTMP2 << 16) | (0x8 << 12) | (RTMP0 << 5) | RTMP2); /* HI=GT */
+			emit_load_imm32(RTMP0, 2);
+			emit32(0x1A800000 | (RTMP2 << 16) | (0x0 << 12) | (RTMP0 << 5) | RTMP2); /* EQ */
+			uint32_t shift = (7 - crd) * 4;
+			if (shift) { emit_load_imm32(RTMP0, shift); emit32(0x1AC02000 | (RTMP0 << 16) | (RTMP2 << 5) | RTMP2); }
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
+			emit_load_imm32(RTMP1, ~(0xF << shift));
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit32(0x2A000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0);
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_CR);
+			return true;
+		}
+
+		case 23: /* lwzx rD,rA,rB */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) {
+				emit_load_gpr(RTMP1, rb);
+				emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			}
+			emit32(0xB9400000 | (RTMP0 << 5) | RTMP1); /* LDR Wt, [Xn] */
+			emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV */
+			emit_store_gpr(RTMP1, rd);
+			return true;
+
+		case 151: /* stwx rS,rA,rB */
+			emit_load_gpr(RTMP1, PPC_RS(op));
+			emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) {
+				emit_load_gpr(RTMP2, rb);
+				emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0);
+			}
+			emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR */
+			return true;
 		default:
+			jit_xo_miss[(op >> 1) & 0x3FF]++;
 			return false;
 		}
 	}
@@ -578,6 +664,40 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR */
 		return true;
 
+
+	case 10: /* cmpli (cmplwi) crD,rA,UIMM */
+	{
+		uint32_t crd = (op >> 23) & 0x7;
+		ra = PPC_RA(op); uimm = PPC_UIMM(op);
+		emit_load_gpr(RTMP0, ra);
+		emit_load_imm32(RTMP1, (int32_t)(uint32_t)uimm);
+		/* Unsigned compare: CMP Wn, Wm */
+		emit32(0x6B000000 | (RTMP1 << 16) | (RTMP0 << 5) | 0x1F);
+		/* Build CR field from unsigned comparison:
+		   LT = unsigned less (ARM64 CC = carry clear)
+		   GT = unsigned greater (ARM64 CC = carry set AND not zero)
+		   EQ = equal */
+		emit32(0xD53B4200 | RTMP2); /* MRS NZCV */
+		a64_movz(RTMP0, 0, 0);
+		emit_load_imm32(RTMP1, 8); /* LT */
+		/* CSEL RTMP0, RTMP1, RTMP0, CC (unsigned less = carry clear) */
+		emit32(0x1A800000 | (RTMP0 << 16) | (0x3 << 12) | (RTMP1 << 5) | RTMP0);
+		emit_load_imm32(RTMP1, 4); /* GT */
+		/* CSEL RTMP0, RTMP1, RTMP0, HI (unsigned greater) */
+		emit32(0x1A800000 | (RTMP0 << 16) | (0x8 << 12) | (RTMP1 << 5) | RTMP0);
+		emit_load_imm32(RTMP1, 2); /* EQ */
+		/* CSEL RTMP0, RTMP1, RTMP0, EQ */
+		emit32(0x1A800000 | (RTMP0 << 16) | (0x0 << 12) | (RTMP1 << 5) | RTMP0);
+		uint32_t shift = (7 - crd) * 4;
+		if (shift) { emit_load_imm32(RTMP1, shift); emit32(0x1AC02000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+		a64_ldr_w_imm(RTMP1, RSTATE, PPCR_CR);
+		emit_load_imm32(RTMP2, ~(0xF << shift));
+		emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1);
+		emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1);
+		a64_str_w_imm(RTMP1, RSTATE, PPCR_CR);
+		return true;
+	}
+
 	case 11: /* cmpi (cmpwi) crD,rA,SIMM */
 	{
 		uint32_t crd = (op >> 23) & 0x7;
@@ -680,6 +800,51 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		return false;
 	}
 
+	case 19: /* CR ops, bclr, bcctr, isync */
+	{
+		uint32_t xo = (op >> 1) & 0x3FF;
+		switch (xo) {
+		case 16: /* bclr (blr when BO=20,BI=0) */
+		{
+			uint32_t bo = (op >> 21) & 0x1F;
+			bool lk = op & 1;
+			if (bo == 20 && !lk) {
+				/* blr — unconditional branch to LR */
+				a64_ldr_w_imm(RTMP0, RSTATE, PPCR_LR);
+				a64_str_w_imm(RTMP0, RSTATE, PPCR_PC);
+				a64_ldp_post(RSTATE, 21, A64_SP, 16);
+				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
+				a64_ret();
+				return true;
+			}
+			return false;
+		}
+		case 528: /* bcctr (bctr when BO=20,BI=0) */
+		{
+			uint32_t bo = (op >> 21) & 0x1F;
+			bool lk = op & 1;
+			if (bo == 20) {
+				if (lk) {
+					/* bctrl: LR = pc + 4 */
+					emit_load_imm32(RTMP0, (int32_t)(pc + 4));
+					a64_str_w_imm(RTMP0, RSTATE, PPCR_LR);
+				}
+				a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CTR);
+				a64_str_w_imm(RTMP0, RSTATE, PPCR_PC);
+				a64_ldp_post(RSTATE, 21, A64_SP, 16);
+				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
+				a64_ret();
+				return true;
+			}
+			return false;
+		}
+		case 150: /* isync — instruction sync, treat as NOP in JIT */
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	case 18: /* b/bl (unconditional branch) */
 	{
 		int32_t li = ((op & 0x03FFFFFC) ^ 0x02000000) - 0x02000000; /* sign-extend 26-bit */
@@ -689,7 +854,67 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		return false;
 	}
 
+	case 42: /* lha rD,d(rA) — load halfword algebraic (sign-extended) */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP1, (int32_t)simm); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+		emit32(0x79400000 | (RTMP0 << 5) | RTMP1); /* LDRH Wt, [Xn] */
+		emit32(0x5AC00400 | (RTMP1 << 5) | RTMP1); /* REV16 (byte-swap) */
+		/* Sign-extend from 16 to 32 bits */
+		emit32(0x13003C00 | (RTMP1 << 5) | RTMP1); /* SXTH Wd, Wn */
+		emit_store_gpr(RTMP1, rd);
+		return true;
+
+	case 7: /* mulli rD,rA,SIMM */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		emit_load_gpr(RTMP0, ra);
+		emit_load_imm32(RTMP1, (int32_t)simm);
+		emit32(0x1B007C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* MUL Wd,Wn,Wm */
+		emit_store_gpr(RTMP0, rd);
+		return true;
+
+	case 13: /* addic. rD,rA,SIMM (sets XER[CA] + CR0) */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		emit_load_gpr(RTMP0, ra);
+		emit_load_imm32(RTMP1, (int32_t)simm);
+		emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS */
+		emit_store_gpr(RTMP0, rd);
+		emit_update_cr0(RTMP0);
+		return true;
+
+	case 46: /* lmw rD,d(rA) — load multiple words */
+	{
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP1, (int32_t)simm); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+		for (uint32_t r = rd; r < 32; r++) {
+			emit32(0xB9400000 | (RTMP0 << 5) | RTMP1); /* LDR Wt, [Xn] */
+			emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV */
+			emit_store_gpr(RTMP1, r);
+			if (r < 31) emit32(0x11001000 | (RTMP0 << 5) | RTMP0); /* ADD Wn, Wn, #4 */
+		}
+		return true;
+	}
+
+	case 47: /* stmw rS,d(rA) — store multiple words */
+	{
+		rd = PPC_RS(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP1, (int32_t)simm); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+		for (uint32_t r = rd; r < 32; r++) {
+			emit_load_gpr(RTMP1, r);
+			emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV */
+			emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR Wt, [Xn] */
+			if (r < 31) emit32(0x11001000 | (RTMP0 << 5) | RTMP0); /* ADD +4 */
+		}
+		return true;
+	}
+
 	default:
+		jit_miss_count[opc]++;
 		return false;
 	}
 }
@@ -712,6 +937,7 @@ bool ppc_jit_aarch64_init(size_t cache_size_kb)
 
 void ppc_jit_aarch64_exit(void)
 {
+	jit_report_misses();
 	if (jit_cache_base) {
 		jit_cache_free(jit_cache_base, jit_cache_size);
 		jit_cache_base = NULL;
@@ -740,6 +966,7 @@ bool ppc_jit_aarch64_compile(
 	a64_stp_pre(RSTATE, 21, A64_SP, -16);
 	a64_mov_reg(RSTATE, A64_X0);
 
+	jit_blocks_attempted++;
 	uint32_t cur_pc = pc;
 	int n_compiled = 0;
 	bool complete = true;
@@ -780,14 +1007,21 @@ bool ppc_jit_aarch64_compile(
 		}
 
 		if (!compile_one(op, cur_pc)) {
+			jit_total_miss++;
+			jit_miss_count[op >> 26]++;
 			emit_epilogue_with_pc(cur_pc);
 			complete = false;
 			break;
 		}
 
+		jit_total_hit++;
 		n_compiled++;
 		cur_pc += 4;
 	}
+
+	/* Periodic report */
+	if ((jit_total_hit + jit_total_miss) % 5000 == 0 && (jit_total_hit + jit_total_miss) > 0)
+		jit_report_misses();
 
 	/* If we didn't emit a ret yet, do it now */
 	if (n_compiled > 0 && jit_code_ptr > code_start) {
@@ -808,6 +1042,7 @@ bool ppc_jit_aarch64_compile(
 	out->ppc_end_pc = cur_pc;
 	out->n_insns = n_compiled;
 	out->complete = complete;
+	if (complete && n_compiled > 0) jit_blocks_complete++;
 
 	return n_compiled > 0;
 }
