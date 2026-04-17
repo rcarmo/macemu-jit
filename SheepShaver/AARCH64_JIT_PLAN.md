@@ -5,6 +5,18 @@
 Bring SheepShaver's PPC emulation to full native performance on AArch64,
 starting with an optimized interpreter and progressing to a direct-codegen JIT.
 
+## Benchmark baseline (interpreter, AArch64)
+
+| Test | Iterations | Time | MIPS |
+|------|-----------|------|------|
+| addi+bdnz tight loop | 1M | 27ms | ~37 |
+| addi+bdnz tight loop | 100M | 598ms | ~167 |
+
+The existing kpx_cpu interpreter with Duff's device dispatch + block caching
+achieves ~167 MIPS on the Orange Pi (CIX P1 aarch64). This is already
+interactive-grade for Mac OS 8/9. Phase 1 computed-goto optimization
+may yield 20-30% improvement but is lower priority than Phase 2 JIT.
+
 ## Phases
 
 ### Phase 1: Optimized Interpreter (weeks 1–4)
