@@ -84,8 +84,22 @@ static void emit_epilogue_with_pc(uint32_t next_pc) {
 	a64_ret();
 }
 
+/* ---- Instruction offset map for intra-block branches ---- */
+static uint32_t *insn_code_offset[64];  /* ARM64 code ptr at start of each PPC insn */
+static uint32_t  insn_ppc_pc[64];       /* PPC PC of each compiled instruction */
+static int       insn_count = 0;
+
+/* Find the ARM64 code offset for a PPC PC within the current block */
+static uint32_t *find_code_for_pc(uint32_t target_pc) {
+	for (int i = 0; i < insn_count; i++) {
+		if (insn_ppc_pc[i] == target_pc)
+			return insn_code_offset[i];
+	}
+	return NULL;
+}
+
 /* ---- Compile one PPC instruction ---- */
-static bool compile_one(uint32_t op) {
+static bool compile_one(uint32_t op, uint32_t pc) {
 	uint32_t opc = PPC_OPC(op);
 	uint32_t rd, ra, rb;
 	int16_t simm;
@@ -369,24 +383,72 @@ static bool compile_one(uint32_t op) {
 	{
 		uint32_t bo = (op >> 21) & 0x1F;
 		uint32_t bi = (op >> 16) & 0x1F;
-		int16_t bd = ((op & 0xFFFC) ^ 0x8000) - 0x8000; /* sign-extend displacement */
-		bool lk = op & 1; /* link bit */
-		/* Only handle within-block branches for now */
+		int16_t bd = ((op & 0xFFFC) ^ 0x8000) - 0x8000;
+		bool lk = op & 1;
+		uint32_t target_pc = pc + bd;
+
 		/* bdnz (BO=16): decrement CTR, branch if CTR!=0 */
-		if (bo == 16 && !lk) {
-			/* Decrement CTR */
+		if ((bo & 0x1E) == 16 && !lk) {
 			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CTR);
 			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB Wd, Wn, #1 */
 			a64_str_w_imm(RTMP0, RSTATE, PPCR_CTR);
-			/* If CTR!=0, we need to branch back. But we can't branch backward
-			   in a single-pass compiler easily. Instead: set PC and return,
-			   let the outer loop re-enter. */
-			/* CBNZ Wt, +8 (skip the fallthrough epilogue) */
-			emit32(0x35000000 | (2 << 5) | RTMP0); /* CBNZ Wn, +8 */
-			/* Fallthrough: CTR==0, continue to next instruction */
-			return true; /* Block continues — next insn is the fallthrough */
+			/* Try intra-block backward branch */
+			uint32_t *target_code = find_code_for_pc(target_pc);
+			if (target_code) {
+				int32_t offset = (int32_t)((uint8_t *)target_code - (uint8_t *)jit_code_ptr);
+				/* CBNZ Wn, offset */
+				emit32(0x35000000 | (((offset >> 2) & 0x7FFFF) << 5) | RTMP0);
+				return true; /* Fallthrough = CTR==0, continue to next insn */
+			}
+			/* Forward or out-of-block: set PC and return */
+			emit32(0x34000000 | (2 << 5) | RTMP0); /* CBZ Wn, +8 (skip branch-taken) */
+			emit_epilogue_with_pc(target_pc);  /* taken: set PC=target, return */
+			return true; /* not-taken: continue to next insn */
 		}
-		/* For other bc forms, bail to interpreter for now */
+
+		/* Conditional branches: beq/bne/blt/bgt/ble/bge etc. */
+		/* BO bit 4 (0x10) = don't test CTR; bit 2 (0x04) = branch if CR[BI]=BO[3] */
+		if ((bo & 0x14) == 0x0C && !lk) { /* BO=011xx: branch if condition TRUE */
+			/* Read CR field */
+			uint32_t cr_field = bi >> 2; /* which CR field */
+			uint32_t cr_bit = bi & 3;   /* which bit within the field */
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
+			/* Extract the specific bit: shift right to get it into bit 0 */
+			uint32_t bit_pos = 31 - bi; /* PPC CR bit numbering: bit 0 = MSB */
+			if (bit_pos) {
+				emit_load_imm32(RTMP1, bit_pos);
+				emit32(0x1AC02400 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSR Wd,Wn,Wm */
+			}
+			emit32(0x12000000 | (RTMP0 << 5) | RTMP0); /* AND Wd, Wn, #1 */
+			/* If bit is set (condition true): branch to target */
+			uint32_t *target_code = find_code_for_pc(target_pc);
+			if (target_code) {
+				int32_t offset = (int32_t)((uint8_t *)target_code - (uint8_t *)jit_code_ptr);
+				emit32(0x35000000 | (((offset >> 2) & 0x7FFFF) << 5) | RTMP0); /* CBNZ */
+			} else {
+				emit32(0x34000000 | (2 << 5) | RTMP0); /* CBZ skip */
+				emit_epilogue_with_pc(target_pc);
+			}
+			return true;
+		}
+		if ((bo & 0x14) == 0x04 && !lk) { /* BO=001xx: branch if condition FALSE */
+			uint32_t bit_pos = 31 - bi;
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
+			if (bit_pos) {
+				emit_load_imm32(RTMP1, bit_pos);
+				emit32(0x1AC02400 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			}
+			emit32(0x12000000 | (RTMP0 << 5) | RTMP0); /* AND #1 */
+			uint32_t *target_code = find_code_for_pc(target_pc);
+			if (target_code) {
+				int32_t offset = (int32_t)((uint8_t *)target_code - (uint8_t *)jit_code_ptr);
+				emit32(0x34000000 | (((offset >> 2) & 0x7FFFF) << 5) | RTMP0); /* CBZ = branch if FALSE */
+			} else {
+				emit32(0x35000000 | (2 << 5) | RTMP0); /* CBNZ skip */
+				emit_epilogue_with_pc(target_pc);
+			}
+			return true;
+		}
 		return false;
 	}
 
@@ -453,6 +515,7 @@ bool ppc_jit_aarch64_compile(
 	uint32_t cur_pc = pc;
 	int n_compiled = 0;
 	bool complete = true;
+	insn_count = 0;
 
 	for (int i = 0; i < 64; i++) {
 		if (cur_pc < (uint32_t)(uintptr_t)ram ||
@@ -481,7 +544,14 @@ bool ppc_jit_aarch64_compile(
 			break;
 		}
 
-		if (!compile_one(op)) {
+		/* Record instruction offset for intra-block branches */
+		if (insn_count < 64) {
+			insn_code_offset[insn_count] = jit_code_ptr;
+			insn_ppc_pc[insn_count] = cur_pc;
+			insn_count++;
+		}
+
+		if (!compile_one(op, cur_pc)) {
 			emit_epilogue_with_pc(cur_pc);
 			complete = false;
 			break;
