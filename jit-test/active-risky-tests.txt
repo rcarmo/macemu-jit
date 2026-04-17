@@ -140,3 +140,13 @@ link_neg16
 mulu_max
 divs_neg_rem
 negx_64bit
+cmpi_l_abs_short_eq
+cmpi_l_abs_short_ne
+cmpi_bne_w_not_taken
+cmpi_bne_w_taken
+cmpi_b_abs_short_blt
+movem_save_modify_restore
+bsr_l_long
+jmp_d8_pc_dn_w
+pea_movem_stack
+subq_sp_movea_write
