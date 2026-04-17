@@ -150,7 +150,7 @@ TEST_ORDER+=(bdnz_loop)
 
 # --- Multiply ---
 # li r3,7; li r4,6; mullw r5,r3,r4  → r5 = 42
-TESTS[mul_basic]="38600007 38800006 7CA31D96"
+TESTS[mul_basic]="38600007 38800006 7CA321D6"
 TEST_ORDER+=(mul_basic)
 
 # --- Rotate/mask ---

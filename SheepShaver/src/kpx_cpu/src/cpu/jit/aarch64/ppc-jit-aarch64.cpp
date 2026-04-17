@@ -201,6 +201,7 @@ static bool compile_one(uint32_t op) {
 			emit32(0x13001C00 | (RTMP0 << 5) | RTMP0); /* SXTB Wd, Wn */
 			emit_store_gpr(RTMP0, ra);
 			return true;
+		case 715: /* mullw (with OE bit) */
 		case 235: /* mullw */
 			emit_load_gpr(RTMP0, ra);
 			emit_load_gpr(RTMP1, rb);
