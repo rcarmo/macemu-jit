@@ -805,6 +805,10 @@ void exec_nostats(void)
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int bad_count = 0;
 			uae_u32 safe_pc = regs.pc & ~1u;
+			/* If safe_pc looks like 24-bit sign-extended ROM address
+			   (0xFFxxxxxx with underlying 0x008xxxxx), mask to 24 bits. */
+			if ((safe_pc & 0xFF000000) == 0xFF000000 && (safe_pc & 0x00800000))
+				safe_pc &= 0x00FFFFFF;
 			if (bad_count++ < 50)
 				fprintf(stderr, "JIT: exec_nostats bad pc_p=%p regs.pc=%08x d0=%08x d1=%08x a0=%08x a1=%08x a2=%08x a7=%08x sr=%04x spc=%08x oldp=%p last_setpc=%p last_kind=%u last_seq=%lu\n",
 					(void*)regs.pc_p, regs.pc,
@@ -897,6 +901,10 @@ void execute_normal(void)
 		if (pcp < base || pcp >= limit || (pcp & 1)) {
 			static int fix_count = 0;
 			uae_u32 safe_pc = regs.pc & ~1u;
+			/* If safe_pc looks like 24-bit sign-extended ROM address
+			   (0xFFxxxxxx with underlying 0x008xxxxx), mask to 24 bits. */
+			if ((safe_pc & 0xFF000000) == 0xFF000000 && (safe_pc & 0x00800000))
+				safe_pc &= 0x00FFFFFF;
 			if (fix_count++ < 50)
 				fprintf(stderr, "JIT: exec_normal bad pc_p=%p regs.pc=%08x safe=%08x "
 					"d0=%08x d1=%08x a0=%08x a7=%08x sr=%04x spc=%08x oldp=%p "
