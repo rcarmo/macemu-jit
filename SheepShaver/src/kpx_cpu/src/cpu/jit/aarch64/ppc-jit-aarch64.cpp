@@ -34,11 +34,30 @@ static uint32_t *jit_cache_end  = NULL;
 #define PPCR_CTR    920
 #define PPCR_PC     924
 
+
+
 /* Host register assignments */
 #define RSTATE  20   /* x20 = regs pointer (callee-saved) */
 #define RTMP0    0
 #define RTMP1    1
 #define RTMP2    2
+
+/* FPR offsets: FPR[n] at offset 128 + n*8 (each is a 64-bit double) */
+#define PPCR_FPR(n) ((uint32_t)(128 + (n) * 8))
+
+/* ARM64 FP register helpers */
+/* LDR Dt, [Xn, #imm] (64-bit FP load, unsigned offset scaled by 8) */
+static void emit_load_fpr(int fd, int fpr_num) {
+	/* LDR Dt, [RSTATE, #offset] */
+	uint32_t off = PPCR_FPR(fpr_num);
+	emit32(0xFD400000 | ((off / 8) << 10) | (RSTATE << 5) | fd);
+}
+
+/* STR Dt, [Xn, #imm] */
+static void emit_store_fpr(int fs, int fpr_num) {
+	uint32_t off = PPCR_FPR(fpr_num);
+	emit32(0xFD000000 | ((off / 8) << 10) | (RSTATE << 5) | fs);
+}
 
 /* ---- PPC instruction field extraction ---- */
 static inline uint32_t PPC_OPC(uint32_t op)  { return op >> 26; }
@@ -911,6 +930,240 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			if (r < 31) emit32(0x11001000 | (RTMP0 << 5) | RTMP0); /* ADD +4 */
 		}
 		return true;
+	}
+
+	case 48: /* lfs frD,d(rA) — load float single */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP1, (int32_t)simm); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+		/* Load 32-bit float, byte-swap, convert to double */
+		emit32(0xB9400000 | (RTMP0 << 5) | RTMP1); /* LDR Wt, [Xn] */
+		emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV Wd */
+		/* Move int to float reg: FMOV Sd, Wn */
+		emit32(0x1E270000 | (RTMP1 << 5) | 0); /* FMOV S0, Wn */
+		/* Convert single to double: FCVT Dd, Sd */
+		emit32(0x1E22C000 | (0 << 5) | 0); /* FCVT D0, S0 */
+		emit_store_fpr(0, rd);
+		return true;
+
+	case 50: /* lfd frD,d(rA) — load float double */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP1, (int32_t)simm); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+		/* Load 64-bit, byte-swap */
+		emit32(0xF9400000 | (RTMP0 << 5) | RTMP1); /* LDR Xt, [Xn] (64-bit) */
+		emit32(0xDAC00C00 | (RTMP1 << 5) | RTMP1); /* REV Xd, Xn (64-bit byte-swap) */
+		/* Move to FP reg: FMOV Dd, Xn */
+		emit32(0x9E670000 | (RTMP1 << 5) | 0); /* FMOV D0, Xn */
+		emit_store_fpr(0, rd);
+		return true;
+
+	case 52: /* stfs frS,d(rA) — store float single */
+		rd = PPC_RS(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_fpr(0, rd);
+		/* Convert double to single: FCVT Sd, Dd */
+		emit32(0x1E624000 | (0 << 5) | 0);
+		/* Move float to int: FMOV Wn, Sd */
+		emit32(0x1E260000 | (0 << 5) | RTMP1);
+		/* Byte-swap and store */
+		emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1); /* REV */
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP2, (int32_t)simm); emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); }
+		emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR Wt, [Xn] */
+		return true;
+
+	case 54: /* stfd frS,d(rA) — store float double */
+		rd = PPC_RS(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		if (ra == 0) return false;
+		emit_load_fpr(0, rd);
+		/* Move FP to int: FMOV Xn, Dd */
+		emit32(0x9E660000 | (0 << 5) | RTMP1);
+		/* Byte-swap 64-bit */
+		emit32(0xDAC00C00 | (RTMP1 << 5) | RTMP1); /* REV Xd, Xn */
+		emit_load_gpr(RTMP0, ra);
+		if (simm) { emit_load_imm32(RTMP2, (int32_t)simm); emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); }
+		/* STR Xt, [Xn] (64-bit store) */
+		emit32(0xF9000000 | (RTMP0 << 5) | RTMP1);
+		return true;
+
+	case 63: /* double-precision FP ops */
+	{
+		uint32_t xo10 = (op >> 1) & 0x3FF;
+		uint32_t xo5 = (op >> 1) & 0x1F;
+		uint32_t frd = PPC_RD(op);
+		uint32_t fra = PPC_RA(op);
+		uint32_t frb = (op >> 11) & 0x1F;
+		uint32_t frc = (op >> 6) & 0x1F;
+
+		/* X-form FP ops (10-bit XO) */
+		switch (xo10) {
+		case 72: /* fmr frD,frB — FP move register */
+			emit_load_fpr(0, frb);
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 40: /* fneg frD,frB — FP negate */
+			emit_load_fpr(0, frb);
+			emit32(0x1E614000 | (0 << 5) | 0); /* FNEG Dd, Dn */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 264: /* fabs frD,frB — FP absolute value */
+			emit_load_fpr(0, frb);
+			emit32(0x1E60C000 | (0 << 5) | 0); /* FABS Dd, Dn */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 136: /* fnabs frD,frB — FP negative absolute */
+			emit_load_fpr(0, frb);
+			emit32(0x1E60C000 | (0 << 5) | 0); /* FABS */
+			emit32(0x1E614000 | (0 << 5) | 0); /* FNEG */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 0: /* fcmpu crD,frA,frB */
+		{
+			uint32_t crd = (op >> 23) & 0x7;
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E602000 | (1 << 16) | (0 << 5)); /* FCMP Dn, Dm */
+			/* ARM64 FCMP sets NZCV: N=less, Z=equal, C=greater_or_unord, V=unordered */
+			a64_movz(RTMP0, 0, 0);
+			emit_load_imm32(RTMP1, 8); /* LT */
+			emit32(0x1A800000 | (RTMP0 << 16) | (0xB << 12) | (RTMP1 << 5) | RTMP0); /* CSEL LT */
+			emit_load_imm32(RTMP1, 4); /* GT */
+			emit32(0x1A800000 | (RTMP0 << 16) | (0xC << 12) | (RTMP1 << 5) | RTMP0); /* CSEL GT */
+			emit_load_imm32(RTMP1, 2); /* EQ */
+			emit32(0x1A800000 | (RTMP0 << 16) | (0x0 << 12) | (RTMP1 << 5) | RTMP0); /* CSEL EQ */
+			/* TODO: handle unordered (set FU bit) */
+			uint32_t shift = (7 - crd) * 4;
+			if (shift) { emit_load_imm32(RTMP1, shift); emit32(0x1AC02000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			a64_ldr_w_imm(RTMP1, RSTATE, PPCR_CR);
+			emit_load_imm32(RTMP2, ~(0xF << shift));
+			emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1);
+			emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1);
+			a64_str_w_imm(RTMP1, RSTATE, PPCR_CR);
+			return true;
+		}
+
+		default: break; /* fall through to 5-bit XO check */
+		}
+
+		/* A-form FP ops (5-bit XO) */
+		switch (xo5) {
+		case 21: /* fadd frD,frA,frB */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E602800 | (1 << 16) | (0 << 5) | 0); /* FADD Dd, Dn, Dm */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 20: /* fsub frD,frA,frB */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E603800 | (1 << 16) | (0 << 5) | 0); /* FSUB Dd, Dn, Dm */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 25: /* fmul frD,frA,frC */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frc);
+			emit32(0x1E600800 | (1 << 16) | (0 << 5) | 0); /* FMUL Dd, Dn, Dm */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 18: /* fdiv frD,frA,frB */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E601800 | (1 << 16) | (0 << 5) | 0); /* FDIV Dd, Dn, Dm */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 29: /* fmadd frD,frA,frC,frB = frA*frC+frB */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frc);
+			emit_load_fpr(2, frb);
+			emit32(0x1F400000 | (1 << 16) | (2 << 10) | (0 << 5) | 0); /* FMADD Dd,Dn,Dm,Da */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 28: /* fmsub frD,frA,frC,frB = frA*frC-frB */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frc);
+			emit_load_fpr(2, frb);
+			emit32(0x1F408000 | (1 << 16) | (2 << 10) | (0 << 5) | 0); /* FMSUB */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 31: /* fnmadd frD,frA,frC,frB = -(frA*frC+frB) */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frc);
+			emit_load_fpr(2, frb);
+			emit32(0x1F600000 | (1 << 16) | (2 << 10) | (0 << 5) | 0); /* FNMADD */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 30: /* fnmsub frD,frA,frC,frB = -(frA*frC-frB) */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frc);
+			emit_load_fpr(2, frb);
+			emit32(0x1F608000 | (1 << 16) | (2 << 10) | (0 << 5) | 0); /* FNMSUB */
+			emit_store_fpr(0, frd);
+			return true;
+
+		default:
+			return false;
+		}
+	}
+
+	case 59: /* single-precision FP ops */
+	{
+		uint32_t xo5 = (op >> 1) & 0x1F;
+		uint32_t frd = PPC_RD(op);
+		uint32_t fra = PPC_RA(op);
+		uint32_t frb = (op >> 11) & 0x1F;
+		uint32_t frc = (op >> 6) & 0x1F;
+		/* Single-precision: compute in double, round to single, store as double */
+		switch (xo5) {
+		case 21: /* fadds */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E602800 | (1 << 16) | (0 << 5) | 0); /* FADD (double) */
+			/* Round to single: FCVT Sd, Dd then FCVT Dd, Sd */
+			emit32(0x1E624000 | (0 << 5) | 0); /* FCVT Sd, Dd */
+			emit32(0x1E22C000 | (0 << 5) | 0); /* FCVT Dd, Sd */
+			emit_store_fpr(0, frd);
+			return true;
+		case 20: /* fsubs */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E603800 | (1 << 16) | (0 << 5) | 0);
+			emit32(0x1E624000 | (0 << 5) | 0);
+			emit32(0x1E22C000 | (0 << 5) | 0);
+			emit_store_fpr(0, frd);
+			return true;
+		case 25: /* fmuls */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frc);
+			emit32(0x1E600800 | (1 << 16) | (0 << 5) | 0);
+			emit32(0x1E624000 | (0 << 5) | 0);
+			emit32(0x1E22C000 | (0 << 5) | 0);
+			emit_store_fpr(0, frd);
+			return true;
+		case 18: /* fdivs */
+			emit_load_fpr(0, fra);
+			emit_load_fpr(1, frb);
+			emit32(0x1E601800 | (1 << 16) | (0 << 5) | 0);
+			emit32(0x1E624000 | (0 << 5) | 0);
+			emit32(0x1E22C000 | (0 << 5) | 0);
+			emit_store_fpr(0, frd);
+			return true;
+		default:
+			return false;
+		}
 	}
 
 	default:
