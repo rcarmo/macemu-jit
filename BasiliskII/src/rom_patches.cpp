@@ -1260,8 +1260,14 @@ static bool patch_rom_32(void)
 	// Guard: 4fef ff00 = lea -256(sp),sp at the entry.
 	if (ROMBaseHost[0xb9874] == 0x4f && ROMBaseHost[0xb9875] == 0xef &&
 	    ROMBaseHost[0xb9876] == 0xff && ROMBaseHost[0xb9877] == 0x00) {
-		*(uint16 *)(ROMBaseHost + 0xb9874) = htons(0x4ed6); // JMP (A6)
-		fprintf(stderr, "ROM: patched NuBus scanner entry at 0xb9874 (JMP A6)\n");
+		/* Replace with: CLR.L ($0C30).W ; JMP (A6)
+		   Clears D0 in the MOVEM save area at $0C30 (where D0 is the first
+		   saved register), so the MOVEM.L restore at 0x804190 picks up D0=0
+		   as the success return code. */
+		*(uint16 *)(ROMBaseHost + 0xb9874) = htons(0x42B8); // CLR.L (xxx).W
+		*(uint16 *)(ROMBaseHost + 0xb9876) = htons(0x0C30); // addr = $0C30
+		*(uint16 *)(ROMBaseHost + 0xb9878) = htons(0x4ED6); // JMP (A6)
+		fprintf(stderr, "ROM: patched NuBus scanner entry at 0xb9874 (CLR.L $0C30; JMP A6)\n");
 	}
 
 	// Don't init IWM
