@@ -306,6 +306,32 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			emit32(0x1AC00C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SDIV Wd,Wn,Wm */
 			emit_store_gpr(RTMP0, rd);
 			return true;
+		case 19: /* mfcr rD */
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
+			emit_store_gpr(RTMP0, rd);
+			return true;
+		case 144: /* mtcrf CRM,rS */
+		{
+			uint32_t crm = (op >> 12) & 0xFF;
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			if (crm == 0xFF) {
+				/* Move entire CR */
+				a64_str_w_imm(RTMP0, RSTATE, PPCR_CR);
+			} else {
+				/* Selective CR field update */
+				uint32_t mask = 0;
+				for (int i = 0; i < 8; i++)
+					if (crm & (0x80 >> i)) mask |= (0xF0000000U >> (i * 4));
+				a64_ldr_w_imm(RTMP1, RSTATE, PPCR_CR);
+				emit_load_imm32(RTMP2, (int32_t)~mask);
+				emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1); /* AND clear */
+				emit_load_imm32(RTMP2, (int32_t)mask);
+				emit32(0x0A000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* AND source */
+				emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1); /* ORR */
+				a64_str_w_imm(RTMP1, RSTATE, PPCR_CR);
+			}
+			return true;
+		}
 		case 339: /* mfspr */
 		{
 			uint32_t spr = ((op >> 16) & 0x1F) | ((op >> 6) & 0x3E0);
