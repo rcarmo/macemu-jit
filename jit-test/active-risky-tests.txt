@@ -157,3 +157,15 @@ movec_cacr_roundtrip
 cache_init_sequence
 move_l_neg_disp_a5
 sr_barrier_cache_init
+divs_word_hardfail
+divu_word_hardfail
+mull_32_hardfail
+divl_32_hardfail
+aslw_mem_hardfail
+lsrw_mem_hardfail
+rolw_mem_hardfail
+ori_sr_hardfail
+andi_sr_hardfail
+eori_sr_hardfail
+move_from_sr_hardfail
+move_to_sr_hardfail
