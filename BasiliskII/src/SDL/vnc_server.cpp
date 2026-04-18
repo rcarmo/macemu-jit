@@ -202,7 +202,7 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 	   window is larger than the logical size, this double-mapping causes
 	   a coordinate scaling error. Compensate by converting VNC coords
 	   from logical to window space. */
-	SDL_Window *win = NULL; /* disabled for debug */ // SDL_GetWindowFromID(1);
+	SDL_Window *win = SDL_GetWindowFromID(1);
 	if (win && vnc_width > 0 && vnc_height > 0) {
 		int ww, wh;
 		SDL_GetWindowSize(win, &ww, &wh);

@@ -2816,32 +2816,14 @@ static void handle_events(void)
 			for (int i = 0; i < n; i++) {
 				SDL_Event &event = sdl_events[i];
 				switch (event.type) {
-				case SDL_MOUSEBUTTONDOWN: {
-					unsigned int button = event.button.button;
-					fprintf(stderr, "VNC-DBG: MOUSEDOWN btn=%d x=%d y=%d\n", button, event.button.x, event.button.y);
-					ADBMouseMoved(event.button.x, event.button.y);
-					if (button == SDL_BUTTON_LEFT) ADBMouseDown(0);
-					else if (button == SDL_BUTTON_RIGHT) ADBMouseDown(1);
-					else if (button == SDL_BUTTON_MIDDLE) ADBMouseDown(2);
-					break;
-				}
-				case SDL_MOUSEBUTTONUP: {
-					unsigned int button = event.button.button;
-					fprintf(stderr, "VNC-DBG: MOUSEUP btn=%d x=%d y=%d\n", button, event.button.x, event.button.y);
-					ADBMouseMoved(event.button.x, event.button.y);
-					if (button == SDL_BUTTON_LEFT) ADBMouseUp(0);
-					else if (button == SDL_BUTTON_RIGHT) ADBMouseUp(1);
-					else if (button == SDL_BUTTON_MIDDLE) ADBMouseUp(2);
-					break;
-				}
+				case SDL_MOUSEBUTTONDOWN:
+				case SDL_MOUSEBUTTONUP:
 				case SDL_MOUSEMOTION:
-					fprintf(stderr, "VNC-DBG: MOTION x=%d y=%d\n", event.motion.x, event.motion.y);
-					ADBMouseMoved(event.motion.x, event.motion.y);
+					/* Mouse events handled directly in vnc_pointer_callback via ADB */
 					break;
 				case SDL_KEYDOWN: {
 					if (event.key.repeat) break;
 					int code = event2keycode(event.key, true);
-					fprintf(stderr, "VNC-DBG: KEYDOWN sym=0x%x scan=0x%x code=0x%x\n", event.key.keysym.sym, event.key.keysym.scancode, code);
 					if (code >= 0 && !emul_suspended) {
 						code = modify_opt_cmd(code);
 						ADBKeyDown(code);
@@ -2850,16 +2832,12 @@ static void handle_events(void)
 				}
 				case SDL_KEYUP: {
 					int code = event2keycode(event.key, false);
-					fprintf(stderr, "VNC-DBG: KEYUP sym=0x%x code=0x%x\n", event.key.keysym.sym, code);
 					if (code >= 0) {
 						code = modify_opt_cmd(code);
 						ADBKeyUp(code);
 					}
 					break;
 				}
-				default:
-					fprintf(stderr, "VNC-DBG: event type=%d\n", event.type);
-					break;
 				}
 			}
 		}
