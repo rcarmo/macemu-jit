@@ -939,6 +939,141 @@ TEST_ORDER+=(fp_lfs_stfs)
 TESTS[fp_lfd_stfd]="3C604000 90610100 38600000 90610104 C8010100 D8010108 80A10108"
 TEST_ORDER+=(fp_lfd_stfd)
 
+
+# ============================================================
+# COMPREHENSIVE FUZZING — edge cases for every opcode class
+# ============================================================
+
+# --- Immediate ops edge cases ---
+# addi with MAX positive SIMM
+TESTS[fuzz_addi_max]="38600001 38637FFF"
+TEST_ORDER+=(fuzz_addi_max)
+# addis overflow
+TESTS[fuzz_addis_max]="3C607FFF 38638000"
+TEST_ORDER+=(fuzz_addis_max)
+# mulli overflow: 0x7FFF * 0x7FFF
+TESTS[fuzz_mulli_max]="38607FFF 1CA37FFF"
+TEST_ORDER+=(fuzz_mulli_max)
+# ori with 0xFFFF
+TESTS[fuzz_ori_ffff]="38600000 6063FFFF"
+TEST_ORDER+=(fuzz_ori_ffff)
+# xori with all-ones
+TESTS[fuzz_xori_allones]="3860FFFF 6863FFFF"
+TEST_ORDER+=(fuzz_xori_allones)
+# andi. with 0 (always zero, CR0.EQ)
+TESTS[fuzz_andi_zero]="3860FFFF 70630000"
+TEST_ORDER+=(fuzz_andi_zero)
+
+# --- Compare edge cases ---
+# cmplwi unsigned: 0xFFFFFFFF vs 0
+TESTS[fuzz_cmplwi_max]="3860FFFF 28030000"
+TEST_ORDER+=(fuzz_cmplwi_max)
+# cmplw: 0 vs 0xFFFFFFFF
+TESTS[fuzz_cmplw_max]="38600000 3880FFFF 7C032040"
+TEST_ORDER+=(fuzz_cmplw_max)
+
+# --- Branch edge cases ---
+# bdnz with CTR=0 initially → should NOT decrement below 0, fall through
+TESTS[fuzz_bdnz_ctr0]="38600000 7C0903A6 38630001 4200FFFC"
+TEST_ORDER+=(fuzz_bdnz_ctr0)
+
+# --- Logical op edge cases ---
+# andc with all-ones: A & ~B where B=0 → A
+TESTS[fuzz_andc_allones]="3860FFFF 38800000 7C652078"
+TEST_ORDER+=(fuzz_andc_allones)
+# orc with all-zeros: A | ~B where B=-1 → A
+TESTS[fuzz_orc_allzeros]="38600042 3880FFFF 7C652338"
+TEST_ORDER+=(fuzz_orc_allzeros)
+# eqv all-zeros: ~(0^0) = -1
+TESTS[fuzz_eqv_zeros]="38600000 38800000 7C652238"
+TEST_ORDER+=(fuzz_eqv_zeros)
+# nand all-ones: ~(FF&FF) = 0
+TESTS[fuzz_nand_allones]="3860FFFF 3880FFFF 7C6523B8"
+TEST_ORDER+=(fuzz_nand_allones)
+
+# --- Rotate edge cases ---
+# rlwimi with SH=0 (no rotation, just mask insert)
+TESTS[fuzz_rlwimi_sh0]="3860FF00 38A000FF 5065043E"
+TEST_ORDER+=(fuzz_rlwimi_sh0)
+# rlwnm with count=0
+TESTS[fuzz_rlwnm_0]="3860DEAD 38800000 5C65203E"
+TEST_ORDER+=(fuzz_rlwnm_0)
+# rlwinm extract byte: rlwinm r4,r3,0,24,31 (low byte)
+TESTS[fuzz_rlwinm_lobyte]="3C60DEAD 6063BEEF 5464043E"
+TEST_ORDER+=(fuzz_rlwinm_lobyte)
+
+# --- Carry chain stress ---
+# Multiple addic in sequence, check CA propagation
+TESTS[fuzz_ca_chain3]="3860FFFF 30630001 30630001 30630001 7CA30194"
+TEST_ORDER+=(fuzz_ca_chain3)
+
+# --- FP edge cases ---
+# fsub: 1.0 - 1.0 = 0.0
+TESTS[fuzz_fsub_zero]="3C603F80 90610100 38600000 90610104 C0010100 C0210100 FC001028 D0010108 80A10108"
+TEST_ORDER+=(fuzz_fsub_zero)
+# fmul: 0.0 * anything = 0.0
+TESTS[fuzz_fmul_zero]="38600000 90610100 90610104 C8010100 3C604000 90610108 90610104 C8210108 FC000072 D8010110 80A10110"
+TEST_ORDER+=(fuzz_fmul_zero)
+# fdiv: 1.0 / 1.0 = 1.0
+TESTS[fuzz_fdiv_one]="3C603F80 90610100 38600000 90610104 C0010100 C0210100 FC001024 D0010108 80A10108"
+TEST_ORDER+=(fuzz_fdiv_one)
+
+# --- Load/store edge cases ---
+# lwz from displacement 0
+TESTS[fuzz_lwz_d0]="3860CAFE 90610000 80A10000"
+TEST_ORDER+=(fuzz_lwz_d0)
+# stb of 0
+TESTS[fuzz_stb_zero]="38600000 98610200 88A10200"
+TEST_ORDER+=(fuzz_stb_zero)
+# sth of 0xFFFF
+TESTS[fuzz_sth_ffff]="3860FFFF B0610300 A0A10300"
+TEST_ORDER+=(fuzz_sth_ffff)
+
+# --- Record form edge cases ---
+# add. with zero result → CR0.EQ
+TESTS[fuzz_add_dot_eq]="38600005 3880FFFB 7CA32215"
+TEST_ORDER+=(fuzz_add_dot_eq)
+# subf. positive result → CR0.GT
+TESTS[fuzz_subf_dot_gt]="38600003 38800005 7CA42051"
+TEST_ORDER+=(fuzz_subf_dot_gt)
+
+# --- CR edge cases ---
+# cror then crand chain
+TESTS[fuzz_cr_chain]="3860FFFF 2C030000 38800001 2C840000 4C000382 4C000202"
+TEST_ORDER+=(fuzz_cr_chain)
+
+# --- AltiVec fuzzing ---
+# vadduwm with -1 + 1 = 0 (per word)
+TESTS[fuzz_vec_add_wrap]="1000FFCC 10230718 10400880 38600600 7C4119CE 80A10600"
+TEST_ORDER+=(fuzz_vec_add_wrap)
+# vxor v0,v0,v0 clear then check = 0
+TESTS[fuzz_vec_clear]="10050718 10000E84 38600600 7C0119CE 80A10600"
+TEST_ORDER+=(fuzz_vec_clear)
+# vcmpequw equal → all 1s
+TESTS[fuzz_vec_cmpeq]="10050718 10250718 10400886 38600600 7C4119CE 80A10600"
+TEST_ORDER+=(fuzz_vec_cmpeq)
+
+# --- Update form edge cases ---
+# lwzu then check rA updated
+TESTS[fuzz_lwzu_update]="3860BEEF 90610400 388103FC 84A40004 7C8402A6"
+TEST_ORDER+=(fuzz_lwzu_update)
+
+# --- mfspr/mtspr XER round-trip ---
+TESTS[fuzz_xer_roundtrip]="3860FFFF 30630001 7C6102A6 7C650026"
+TEST_ORDER+=(fuzz_xer_roundtrip)
+
+# --- mulhw with negative * positive ---
+TESTS[fuzz_mulhw_neg]="3860FFFF 38800002 7CA32096"
+TEST_ORDER+=(fuzz_mulhw_neg)
+
+# --- divw: exact division ---
+TESTS[fuzz_divw_exact]="38600064 3880000A 7CA323D6"
+TEST_ORDER+=(fuzz_divw_exact)
+
+# --- cntlzw: value with alternating bits ---
+TESTS[fuzz_cntlzw_alt]="3C605555 60635555 7C650034"
+TEST_ORDER+=(fuzz_cntlzw_alt)
+
 # ---- Execute all tests -------------------------------------------------------
 PASS=0
 FAIL=0
