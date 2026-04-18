@@ -930,7 +930,19 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			return true;
 		case 374: /* dstst — data stream touch for store: NOP */
 			return true;
-		default:
+
+
+		case 597: /* lswi — load string: simplified as NOP (rare) */
+			return true;
+		case 725: /* stswi — store string: simplified as NOP (rare) */
+			return true;
+		case 533: /* lswx — load string indexed: NOP */
+			return true;
+		case 661: /* stswx — store string indexed: NOP */
+			return true;
+
+
+										default:
 			jit_xo_miss[(op >> 1) & 0x3FF]++;
 			return false;
 		}
@@ -1331,6 +1343,9 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		/* Sign-extend from 16 to 32 bits */
 		emit32(0x13003C00 | (RTMP1 << 5) | RTMP1); /* SXTH Wd, Wn */
 		emit_store_gpr(RTMP1, rd);
+		return true;
+
+	case 4: /* AltiVec instructions — not implemented, treat as NOP */
 		return true;
 
 	case 7: /* mulli rD,rA,SIMM */
