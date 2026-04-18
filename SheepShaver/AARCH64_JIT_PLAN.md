@@ -40,7 +40,7 @@ PPC instruction → ppc-decode.cpp → ppc-execute.cpp (Duff's device dispatch)
 ```
 PPC instruction → ppc-cpu.cpp execute loop
                     ↓
-              ppc-jit-aarch64.cpp (compile basic block to ARM64)
+              ppc-jit.cpp (compile basic block to ARM64)
                     ↓
               ppc-codegen-aarch64.h (ARM64 instruction encoding)
                     ↓
@@ -54,9 +54,9 @@ PPC instruction → ppc-cpu.cpp execute loop
 ### Code layout
 ```
 src/kpx_cpu/src/cpu/jit/aarch64/
-  ppc-jit-aarch64.h          — JIT public interface
-  ppc-jit-aarch64.cpp        — PPC → ARM64 compiler (~85 opcode handlers)
-  ppc-jit-aarch64-glue.hpp   — integration with ppc-cpu.cpp execute loop
+  ppc-jit.h          — JIT public interface
+  ppc-jit.cpp        — PPC → ARM64 compiler (~85 opcode handlers)
+  ppc-jit-glue.hpp   — integration with ppc-cpu.cpp execute loop
   ppc-codegen-aarch64.h      — ARM64 instruction encoding helpers
   jit-target-cache.hpp       — AArch64 icache flush + RWX mapping
   dyngen-target-exec.h       — PPC → ARM64 register mapping constants
@@ -121,7 +121,7 @@ CR/LR/CTR/XER/PC at known offsets from x20
 - Test harness (`jit-test/`) with **70** PPC opcode vectors (score=100)
 
 ### Phase 2: JIT scaffolding ✅
-- Direct codegen compiler: `ppc-jit-aarch64.cpp`
+- Direct codegen compiler: `ppc-jit.cpp`
 - ARM64 instruction encoding: `ppc-codegen-aarch64.h`
 - Code cache: 4MB RWX mmap with icache flush
 - Integration into `ppc-cpu.cpp` execute loop
@@ -184,7 +184,7 @@ cd src/Unix
 ./autogen.sh
 ./configure --enable-sdl-video --enable-sdl-audio
 make -j12
-# For JIT: rebuild ppc-cpu.cpp with -DUSE_AARCH64_JIT and link ppc-jit-aarch64.o
+# For JIT: rebuild ppc-cpu.cpp with -DUSE_AARCH64_JIT and link ppc-jit.o
 ```
 
 ## Constraints

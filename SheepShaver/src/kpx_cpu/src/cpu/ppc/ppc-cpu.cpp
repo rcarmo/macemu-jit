@@ -43,7 +43,7 @@
 #if defined(__aarch64__) && defined(USE_AARCH64_JIT)
 extern uint8 *RAMBaseHost;
 extern uint32 RAMSize;
-#include "cpu/jit/aarch64/ppc-jit-aarch64.h"
+#include "cpu/jit/aarch64/ppc-jit.h"
 #endif
 
 #if PPC_PROFILE_GENERIC_CALLS

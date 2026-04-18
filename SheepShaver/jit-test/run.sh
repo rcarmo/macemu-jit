@@ -42,7 +42,7 @@ fi
 make -j12 >"$RUN_DIR/build.log" 2>&1 || true
 # Compile JIT-specific objects with USE_AARCH64_JIT
 JITDIR="../kpx_cpu/src/cpu/jit/aarch64"
-g++ -c -o obj/ppc-jit-aarch64.o "$JITDIR/ppc-jit-aarch64.cpp" -I"$JITDIR" -DHAVE_CONFIG_H -g -O2 -std=c++11 >>"$RUN_DIR/build.log" 2>&1
+g++ -c -o obj/ppc-jit.o "$JITDIR/ppc-jit.cpp" -I"$JITDIR" -DHAVE_CONFIG_H -g -O2 -std=c++11 >>"$RUN_DIR/build.log" 2>&1
 g++ -c -o obj/ppc-cpu.o ../kpx_cpu/src/cpu/ppc/ppc-cpu.cpp -I../include -I. -I.. -I../CrossPlatform -I../kpx_cpu/include -I../kpx_cpu/src -DHAVE_CONFIG_H -DUSE_AARCH64_JIT -g -O2 >>"$RUN_DIR/build.log" 2>&1
 g++ -c -o obj/sheepshaver_glue.o ../kpx_cpu/sheepshaver_glue.cpp -I../include -I. -I.. -I../CrossPlatform -I../kpx_cpu/include -I../kpx_cpu/src -DHAVE_CONFIG_H -DUSE_AARCH64_JIT -g -O2 >>"$RUN_DIR/build.log" 2>&1
 # Final link

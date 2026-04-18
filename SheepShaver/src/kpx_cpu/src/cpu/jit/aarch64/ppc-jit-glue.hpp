@@ -1,5 +1,5 @@
 /*
- *  ppc-jit-aarch64-glue.hpp — Integration glue for AArch64 JIT in kpx_cpu execute loop
+ *  ppc-jit-glue.hpp — Integration glue for AArch64 JIT in kpx_cpu execute loop
  *
  *  Include this from ppc-cpu.cpp when USE_AARCH64_JIT is defined.
  *  Provides try_jit_execute() which attempts to JIT-compile and execute
@@ -11,7 +11,7 @@
 
 #ifdef __aarch64__
 
-#include "cpu/jit/aarch64/ppc-jit-aarch64.h"
+#include "cpu/jit/aarch64/ppc-jit.h"
 
 static bool jit_aarch64_initialized = false;
 

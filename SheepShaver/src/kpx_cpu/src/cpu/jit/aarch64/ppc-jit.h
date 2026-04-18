@@ -1,9 +1,9 @@
 /*
- *  ppc-jit-aarch64.h — PPC → AArch64 direct codegen JIT interface
+ *  ppc-jit.h — PPC → AArch64 direct codegen JIT interface
  */
 
-#ifndef PPC_JIT_AARCH64_H
-#define PPC_JIT_AARCH64_H
+#ifndef PPC_JIT_H
+#define PPC_JIT_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -35,4 +35,4 @@ bool ppc_jit_aarch64_compile(
 typedef void (*ppc_jit_entry_fn)(void *regs);
 
 #endif /* __aarch64__ */
-#endif /* PPC_JIT_AARCH64_H */
+#endif /* PPC_JIT_H */

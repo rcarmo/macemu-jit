@@ -29,7 +29,7 @@
 #include "block-alloc.hpp"
 #include "sigsegv.h"
 #ifdef __aarch64__
-#include "cpu/jit/aarch64/ppc-jit-aarch64.h"
+#include "cpu/jit/aarch64/ppc-jit.h"
 #endif
 #include "cpu/ppc/ppc-cpu.hpp"
 #include "cpu/ppc/ppc-operations.hpp"
