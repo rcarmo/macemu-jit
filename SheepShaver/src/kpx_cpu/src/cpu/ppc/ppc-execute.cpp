@@ -62,6 +62,9 @@ void powerpc_cpu::execute_illegal(uint32 opcode)
 		return;
 	}
 
+#ifdef SHEEPSHAVER
+	if (PrefsFindBool("ignoreillegal")) { increment_pc(4); return; }
+#endif
 	fprintf(stderr, "Illegal instruction at %08x, opcode = %08x\n", pc(), opcode);
 
 #ifdef SHEEPSHAVER

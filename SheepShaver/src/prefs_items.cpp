@@ -52,9 +52,12 @@ prefs_desc common_prefs_items[] = {
 	{"nonet", TYPE_BOOLEAN, false,      "don't use Ethernet"},
 	{"nosound", TYPE_BOOLEAN, false,    "don't enable sound output"},
 	{"nogui", TYPE_BOOLEAN, false,      "disable GUI"},
+	{"vncserver", TYPE_BOOLEAN, false, "enable VNC server"},
+	{"vncport", TYPE_INT32, false, "VNC server port"},
+	{"displaycolordepth", TYPE_INT32, false, "display color depth"},
+	{"ignoreillegal", TYPE_BOOLEAN, false, "ignore illegal instructions"},
 	{"noclipconversion", TYPE_BOOLEAN, false, "don't convert clipboard contents"},
 	{"ignoresegv", TYPE_BOOLEAN, false, "ignore illegal memory accesses"},
-	{"ignoreillegal", TYPE_BOOLEAN, false, "ignore illegal instructions"},
 	{"jit", TYPE_BOOLEAN, false,        "enable JIT compiler"},
 	{"jit68k", TYPE_BOOLEAN, false,     "enable 68k DR emulator"},
 	{"keyboardtype", TYPE_INT32, false, "hardware keyboard type"},
@@ -95,9 +98,12 @@ void AddPrefsDefaults(void)
 	PrefsAddBool("nonet", false);
 	PrefsAddBool("nosound", false);
 	PrefsAddBool("nogui", false);
+	PrefsAddBool("vncserver", false);
+	PrefsAddInt32("vncport", 5900);
+	PrefsAddInt32("displaycolordepth", 0);
+	PrefsAddBool("ignoreillegal", true);
 	PrefsAddBool("noclipconversion", false);
 	PrefsAddBool("ignoresegv", true);
-	PrefsAddBool("ignoreillegal", true);
 
 #if USE_JIT
 	// JIT compiler specific options
