@@ -1994,12 +1994,7 @@ gen_opcode (unsigned int opcode)
      case i_MVR2USP:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	isjump;
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc, srcreg & 0xF);\n");
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_mvr2usp);\n");
+	comprintf("\tjnf_MVR2USP(srcreg);\n");
 #else
 	isjump;
 	failure;
@@ -2009,12 +2004,7 @@ gen_opcode (unsigned int opcode)
      case i_MVUSP2R:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	isjump;
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc, srcreg & 0xF);\n");
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_mvusp2r);\n");
+	comprintf("\tjnf_MVUSP2R(srcreg);\n");
 #else
 	isjump;
 	failure;
@@ -2456,13 +2446,11 @@ gen_opcode (unsigned int opcode)
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc, dstreg & 0xF);\n");
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_divu_w);\n");
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_DIVU(dst, src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("dst", curi->dmode, "dstreg", sz_long, "dst");
 #else
 	failure;
 #endif
@@ -2473,13 +2461,11 @@ gen_opcode (unsigned int opcode)
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc, dstreg & 0xF);\n");
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_divs_w);\n");
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_DIVS(dst, src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("dst", curi->dmode, "dstreg", sz_long, "dst");
 #else
 	failure;
 #endif
@@ -2945,15 +2931,15 @@ gen_opcode (unsigned int opcode)
 	genamode (curi->smode, "srcreg", curi->size, "cnt", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "data", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], cnt);\n");
-	{
-	    int sz = curi->size == sz_byte ? 0 : (curi->size == sz_word ? 1 : 2);
-	    comprintf("\t{int enc=scratchie++;\n");
-	    comprintf("\t mov_l_ri(enc, (dstreg&7)|(%d<<3));\n", sz);
-	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
+	comprintf("\tstart_needflags();\n");
+	switch(curi->size) {
+	case sz_byte: comprintf("\tjff_ROXL_b(data, cnt);\n"); break;
+	case sz_word: comprintf("\tjff_ROXL_w(data, cnt);\n"); break;
+	case sz_long: comprintf("\tjff_ROXL_l(data, cnt);\n"); break;
 	}
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_roxl);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("data", curi->dmode, "dstreg", curi->size, "data");
 #else
 	failure;
 #endif
@@ -2964,15 +2950,15 @@ gen_opcode (unsigned int opcode)
 	genamode (curi->smode, "srcreg", curi->size, "cnt", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "data", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], cnt);\n");
-	{
-	    int sz = curi->size == sz_byte ? 0 : (curi->size == sz_word ? 1 : 2);
-	    comprintf("\t{int enc=scratchie++;\n");
-	    comprintf("\t mov_l_ri(enc, (dstreg&7)|(%d<<3));\n", sz);
-	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
+	comprintf("\tstart_needflags();\n");
+	switch(curi->size) {
+	case sz_byte: comprintf("\tjff_ROXR_b(data, cnt);\n"); break;
+	case sz_word: comprintf("\tjff_ROXR_w(data, cnt);\n"); break;
+	case sz_long: comprintf("\tjff_ROXR_l(data, cnt);\n"); break;
 	}
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_roxr);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("data", curi->dmode, "dstreg", curi->size, "data");
 #else
 	if (curi->smode != immi) {
 	    failure;
@@ -2995,14 +2981,12 @@ gen_opcode (unsigned int opcode)
 
      case i_ASRW:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_asrw(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_asrw);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_ASRW(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif
@@ -3010,14 +2994,12 @@ gen_opcode (unsigned int opcode)
 
      case i_ASLW:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_aslw(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_aslw);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_ASLW(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif
@@ -3025,14 +3007,12 @@ gen_opcode (unsigned int opcode)
 
      case i_LSRW:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_lsrw(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_lsrw);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_LSRW(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif
@@ -3040,14 +3020,12 @@ gen_opcode (unsigned int opcode)
 
      case i_LSLW:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_lslw(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_lslw);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_LSLW(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif
@@ -3055,14 +3033,12 @@ gen_opcode (unsigned int opcode)
 
      case i_ROLW:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_rolw(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_rolw);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_ROLW(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif
@@ -3070,14 +3046,12 @@ gen_opcode (unsigned int opcode)
 
      case i_RORW:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_rorw(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_rorw);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_RORW(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif
@@ -3281,27 +3255,12 @@ gen_opcode (unsigned int opcode)
 
 	 case i_TAS:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	if (curi->smode == Dreg) {
-	    comprintf("\t{\n");
-	    comprintf("\t  int enc = scratchie++;\n");
-	    comprintf("\t  mov_l_ri(enc, srcreg & 7);\n");
-	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
-	    comprintf("\t}\n");
-	} else {
-	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	    comprintf("\t{\n");
-	    comprintf("\t  int enc = scratchie++;\n");
-	    comprintf("\t  mov_l_ri(enc, 8);\n");
-	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
-	    comprintf("\t}\n");
-	}
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_tas(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_tas);\n");
-	}
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_TAS(src);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	genastore ("src", curi->smode, "srcreg", curi->size, "src");
 #else
 	failure;
 #endif

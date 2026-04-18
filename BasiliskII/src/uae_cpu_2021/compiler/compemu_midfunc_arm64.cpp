@@ -1416,3 +1416,25 @@ MIDFUNC(1,call_helper,(IMPTR addr))
 	compemu_raw_call(addr);
 }
 MENDFUNC(1,call_helper,(IMPTR addr))
+
+/* ================================================================
+ * Native codegen MIDFUNCs for opcodes previously using call_helper
+ * ================================================================ */
+
+/* MVR2USP: Move Rn to USP — just store to regs.usp */
+MIDFUNC(1,jnf_MVR2USP,(RR4 s))
+{
+	s = readreg(s);
+	STR_wXi(s, R_REGSTRUCT, offsetof(struct regstruct, usp));
+	unlock2(s);
+}
+MENDFUNC(1,jnf_MVR2USP,(RR4 s))
+
+/* MVUSP2R: Move USP to Rn — just load from regs.usp */
+MIDFUNC(1,jnf_MVUSP2R,(W4 d))
+{
+	d = writereg(d);
+	LDR_wXi(d, R_REGSTRUCT, offsetof(struct regstruct, usp));
+	unlock2(d);
+}
+MENDFUNC(1,jnf_MVUSP2R,(W4 d))

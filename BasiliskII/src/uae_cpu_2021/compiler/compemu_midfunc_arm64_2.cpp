@@ -8026,3 +8026,36 @@ MIDFUNC(3,jnf_MEM_WRITEMEMBANK,(RR4 adr, RR4 source, IM8 offset))
 	compemu_raw_call_r(REG_WORK3);
 }
 MENDFUNC(3,jnf_MEM_WRITEMEMBANK,(RR4 adr, RR4 source, IM8 offset))
+
+/*
+ * TAS
+ * Test byte and set bit 7.
+ *
+ * X Not affected.
+ * N Set if the most significant bit of the operand is set. Cleared otherwise.
+ * Z Set if the operand is zero. Cleared otherwise.
+ * V Always cleared.
+ * C Always cleared.
+ */
+MIDFUNC(1,jnf_TAS,(RW1 d))
+{
+	d = rmw(d);
+	MOV_wi(REG_WORK1, 0x80);
+	ORR_www(d, d, REG_WORK1);
+	unlock2(d);
+}
+MENDFUNC(1,jnf_TAS,(RW1 d))
+
+MIDFUNC(1,jff_TAS,(RW1 d))
+{
+	d = rmw(d);
+	/* Test the byte value first (before setting bit 7) */
+	SIGNED8_REG_2_REG(REG_WORK1, d);
+	TST_ww(REG_WORK1, REG_WORK1);
+	/* Now set bit 7 */
+	MOV_wi(REG_WORK2, 0x80);
+	ORR_www(d, d, REG_WORK2);
+	flags_carry_inverted = false;
+	unlock2(d);
+}
+MENDFUNC(1,jff_TAS,(RW1 d))
