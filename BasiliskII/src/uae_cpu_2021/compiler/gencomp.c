@@ -1517,11 +1517,8 @@ gen_opcode (unsigned int opcode)
 	    comprintf("\tend_needflags();\n");
 	} else {
 	    /* ORI to SR: modify full SR via helper */
-	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\tlea_l_brr(scratchie, src, 0x10000);\n");
-	    comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, scratchie);\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_orsr);\n");
+	    /* ORSRI to SR: inline MakeFromSR */
+	    comprintf("\tjnf_ORSR_w(src);\n");
 	}
 #else
 	failure;
@@ -1540,11 +1537,8 @@ gen_opcode (unsigned int opcode)
 	    comprintf("\tlive_flags();\n");
 	    comprintf("\tend_needflags();\n");
 	} else {
-	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\tlea_l_brr(scratchie, src, 0x10000);\n");
-	    comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, scratchie);\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_eorsr);\n");
+	    /* EORSRI to SR: inline MakeFromSR */
+	    comprintf("\tjnf_EORSR_w(src);\n");
 	}
 #else
 	failure;
@@ -1563,11 +1557,8 @@ gen_opcode (unsigned int opcode)
 	    comprintf("\tlive_flags();\n");
 	    comprintf("\tend_needflags();\n");
 	} else {
-	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\tlea_l_brr(scratchie, src, 0x10000);\n");
-	    comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, scratchie);\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_andsr);\n");
+	    /* ANDSRI to SR: inline MakeFromSR */
+	    comprintf("\tjnf_ANDSR_w(src);\n");
 	}
 #else
 	failure;
@@ -1906,11 +1897,8 @@ gen_opcode (unsigned int opcode)
 	    comprintf("\tlive_flags();\n");
 	    comprintf("\tend_needflags();\n");
 	} else {
-	    /* MOVE to SR: full SR change via helper */
-	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\tmov_l_mr((uintptr)&regs.sr, src);\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_MakeFromSR);\n");
+	    /* MOVE to SR: inline MakeFromSR */
+	    comprintf("\tjnf_MV2SR_w(src);\n");
 	}
 #else
 	failure;
