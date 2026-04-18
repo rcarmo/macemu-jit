@@ -82,13 +82,13 @@ Packages are automatically uploaded to GitHub Releases when a version tag is pus
 ```
 macOS     x86_64 JIT / arm64 non-JIT
 Linux x86 x86_64 JIT
-Linux arm64      JIT (experimental — see below)
+Linux arm64      JIT (boots Mac OS — see below)
 MinGW x86        JIT
 ```
 #### SheepShaver
 ```
 macOS     x86_64 JIT / arm64 non-JIT
-Linux x86 x86_64 JIT / arm64 non-JIT
+Linux x86 x86_64 JIT / arm64 JIT (boots Mac OS)
 MinGW x86        JIT
 ```
 
@@ -211,16 +211,17 @@ The AArch64 JIT backend is under active development.
 - ⚠️ Native ARM64 codegen (optlev=2) has remaining SR flag leakage in DBRA blocks
 
 **SheepShaver (PPC):**
-- ✅ **Mac OS 7.5 boots to desktop** with JIT active on AArch64
-- ✅ **100% opcode coverage** during boot (zero JIT misses)
-- ✅ **92.3% block completion** (110K+ / 120K+ blocks fully native)
-- ✅ **382 MIPS** on tight loops (2.2x over interpreter)
-- ✅ **321** PPC → ARM64 opcode handlers (scalar + FPU + AltiVec NEON, zero interpreter fallbacks)
-- ✅ FP arithmetic: fadd/fsub/fmul/fdiv/fmadd + lfs/lfd/stfs/stfd
-- ✅ Intra-block loop chaining for bdnz
-- ✅ Record forms (CR0 update) for ALU ops
-- ✅ Opcode test harness with **113** PPC vectors including 43 fuzzing edge cases (score=100)
+- ✅ **Mac OS boots to "Welcome to Mac OS" with JIT** (`SS_USE_JIT=1`)
+- ✅ **Mac OS boots to desktop** in interpreter mode (VNC on port 5999)
+- ✅ **209/209** opcode test vectors pass (score=100)
+- ✅ **663/766 ROM blocks pass** (86.6%) — headless ROM harness
+- ✅ **382 MIPS** on tight loops (2.2x over interpreter's 167 MIPS)
+- ✅ PPC → ARM64 opcode handlers: integer ALU, FPU (double+single),
+  AltiVec (NEON), CR logical ops, all branch variants
+- ✅ ROM harness (`rom-harness/`) — standalone headless JIT exerciser,
+  no display or hardware deps, found 5 JIT bugs the opcode harness missed
 - See [SheepShaver/AARCH64_JIT_PLAN.md](SheepShaver/AARCH64_JIT_PLAN.md) for full details
+- See [JIT-STATUS.md](JIT-STATUS.md) for current test results
 
 **Bugs fixed in BasiliskII JIT (this fork):**
 1. IRQ deliverability bug — latching pending interrupts while masked

@@ -7,25 +7,36 @@ starting with an optimized interpreter and progressing to a direct-codegen JIT.
 
 ## Current Status (April 2026)
 
-**Mac OS boots with the AArch64 JIT active.**
+**Mac OS boots to "Welcome to Mac OS" splash screen with JIT active (`SS_USE_JIT=1`).**
 
 | Metric | Value |
 |--------|-------|
-| Opcode coverage during boot | **100%** — zero misses, 321 return-true paths, 2 return-false |
-| Block completion rate | **~99%** (only unknown opcodes cause fallback) (110K+/120K+ blocks native) |
+| Opcode test harness | **209/209** pass (score=100) |
+| ROM harness (headless) | **663/766** blocks pass (86.6%) on PowerMac 9500 OldWorld ROM |
+| Block completion rate | **62.6%** of ROM blocks fully native, rest fall back to interpreter |
 | JIT benchmark (addi+bdnz 100M) | **382 MIPS** (2.2x over interpreter) |
 | Interpreter benchmark | 167 MIPS |
-| Total opcode handlers | **321** return-true paths (scalar + FPU + AltiVec NEON) |
 | FPU support | ✅ double + single precision |
-| Boot tested | Mac OS 7.5 to desktop ("Welcome to Mac OS") ("Welcome to Mac OS") |
+| AltiVec (NEON) | ✅ 142 opcodes via AArch64 NEON intrinsics |
+| Boot tested | Mac OS 7.5 to "Welcome to Mac OS" splash (JIT), desktop (interpreter) |
 
 ### Screenshots
 
 | Stage | Screenshot |
 |-------|-----------|
 | ROM boot (no disk) | ![](doc/aarch64-boot-nodisk.png) |
-| Mac OS boot | ![](doc/aarch64-macos-boot.png) |
+| Mac OS boot (interpreter) | ![](doc/aarch64-macos-boot.png) |
 | JIT-enabled boot | ![](doc/aarch64-jit-macos-welcome.png) |
+
+### ROM Harness
+
+A standalone headless tool (`rom-harness/`) loads the Mac ROM, scans for PPC
+basic blocks, JIT-compiles each, and compares outputs against a built-in
+reference interpreter. No display, no hardware, no SheepShaver runtime needed.
+
+The ROM harness found and helped fix 5 JIT bugs that the synthetic opcode
+harness missed (CR logical NOP-default, missing XER[SO] in comparisons,
+wrong NZCV→CR mapping in cmpi, bdz not implemented, bc epilogue skip-over).
 
 ## Architecture
 
@@ -152,9 +163,9 @@ CR/LR/CTR/XER/PC at known offsets from x20
 - [ ] Profile-guided hot-block prioritization
 
 ### Not yet implemented (rare opcodes)
-- CR logical ops (`crand`, `cror`, `crxor`, etc.) — encoding fix needed
-- `mcrf` (move CR field)
-- Some conditional `bclr`/`bcctr` with non-trivial BO fields
+- ~~CR logical ops~~ ✅ Implemented: crand, cror, crxor, crnor, crandc, creqv, crorc, crnand
+- ~~mcrf~~ ✅ Implemented
+- Complex `bc` variants (decrement CTR + test condition combo)
 - `frsp` (FP round to single)
 - `fctiw`/`fctiwz` (FP to integer conversion)
 - `mffs`/`mtfsf`/`mtfsfi`/`mtfsb0`/`mtfsb1` (FPSCR access)
@@ -262,8 +273,8 @@ which handles traps correctly.
 
 | Instruction | Why NOP |
 |---|---|
-| `LSWI`/`LSWX` | Compilers never generate these; if encountered, the block is incomplete and falls through to the interpreter |
-| `STSWI`/`STSWX` | Same |
+| `LSWI`/`STSWI` | ✅ Implemented (no longer NOP stubs) — string load/store with correct byte count and register wrapping |
+| `LSWX`/`STSWX` | Interpreter fallback — register count from XER not yet supported in JIT |
 
 These are the only NOPs that could theoretically affect correctness. In practice,
 no Mac OS 7.5–9 code uses string load/store instructions.
