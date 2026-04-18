@@ -2,6 +2,7 @@
 
 #include "vnc_server.h"
 #include "prefs.h"
+#include "adb.h"
 
 #include <algorithm>
 #include <atomic>
@@ -201,7 +202,7 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 	   window is larger than the logical size, this double-mapping causes
 	   a coordinate scaling error. Compensate by converting VNC coords
 	   from logical to window space. */
-	SDL_Window *win = SDL_GetWindowFromID(1);
+	SDL_Window *win = NULL; /* disabled for debug */ // SDL_GetWindowFromID(1);
 	if (win && vnc_width > 0 && vnc_height > 0) {
 		int ww, wh;
 		SDL_GetWindowSize(win, &ww, &wh);
@@ -210,16 +211,25 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 	}
 	vnc_push_pointer_motion(x, y);
 
+	/* Direct ADB injection — bypass SDL event queue for reliable VNC input */
+	ADBMouseMoved(x, y);
+
 	const int previous = vnc_pointer_buttons;
 	vnc_pointer_buttons = button_mask;
 
 	const int transitions[] = {1, 2, 4};
 	const Uint8 mapped[] = {SDL_BUTTON_LEFT, SDL_BUTTON_MIDDLE, SDL_BUTTON_RIGHT};
+	const int adb_buttons[] = {0, 2, 1}; /* SDL left/middle/right → ADB 0/2/1 */
 	for (size_t i = 0; i < 3; ++i) {
 		const bool was_down = (previous & transitions[i]) != 0;
 		const bool now_down = (button_mask & transitions[i]) != 0;
-		if (was_down != now_down)
+		if (was_down != now_down) {
 			vnc_push_pointer_button(mapped[i], now_down, x, y);
+			if (now_down)
+				ADBMouseDown(adb_buttons[i]);
+			else
+				ADBMouseUp(adb_buttons[i]);
+		}
 	}
 
 	if ((button_mask & 8) && !(previous & 8))

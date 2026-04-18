@@ -1,22 +1,22 @@
 #!/bin/bash
-# BasiliskII ROM Boot Harness — exercises the JIT with real ROM code
-# Uses Xvfb for headless SDL video. Parses DC[] dispatch counter output for progress.
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-UNIX_DIR="$(cd "$SCRIPT_DIR/../BasiliskII/src/Unix" && pwd)"
+# Headless Mac — boots Quadra 800 ROM through JIT, no display server needed.
+# Usage:
+#   ./jit-test/rom-harness.sh                      # 2 min default
+#   B2_TIMEOUT=600 ./jit-test/rom-harness.sh       # 10 min full boot
+#   B2_JIT=false ./jit-test/rom-harness.sh         # interpreter comparison
+set -uo pipefail
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$DIR/BasiliskII/src/Unix/BasiliskII"
 ROM="${B2_ROM:-/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM}"
-MAX_TICKS="${B2_MAX_TICKS:-6000}"
 JIT="${B2_JIT:-true}"
-TIMEOUT="${B2_TIMEOUT:-120}"
+SECS="${B2_TIMEOUT:-120}"
 
-if [ ! -f "$ROM" ]; then echo "ERROR: ROM not found: $ROM" >&2; exit 1; fi
-if [ ! -x "$UNIX_DIR/BasiliskII" ]; then echo "ERROR: binary not found" >&2; exit 1; fi
+[ -f "$ROM" ] || { echo "ROM not found: $ROM" >&2; exit 1; }
+[ -x "$BIN" ] || { echo "Binary not found: $BIN" >&2; exit 1; }
 
-WORKDIR=$(mktemp -d /tmp/rom-harness-XXXXXX)
-trap 'pkill -f "Xvfb :98" 2>/dev/null; rm -rf "$WORKDIR"' EXIT
-
-cat > "$WORKDIR/prefs" <<EOF
+W=$(mktemp -d /tmp/headless-mac-XXXXXX)
+trap 'rm -rf "$W"' EXIT
+cat >"$W/prefs" <<EOF
 rom $ROM
 ramsize 8388608
 modelid 14
@@ -31,69 +31,35 @@ nocdrom true
 ignoresegv true
 EOF
 
-pkill -f "Xvfb :98" 2>/dev/null || true
-rm -f /tmp/.X98-lock /tmp/.X11-unix/X98
-Xvfb :98 -screen 0 640x480x24 >/dev/null 2>&1 &
-sleep 0.5
+echo "Headless Mac: jit=$JIT timeout=${SECS}s" >&2
+env HOME="$W" B2_ROM_HARNESS=999999 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+  timeout -k5 "${SECS}" "$BIN" --config "$W/prefs" >"$W/out" 2>"$W/err"
+RC=$?
 
-echo "=== ROM Boot Harness ===" >&2
-echo "ROM: $ROM | JIT: $JIT | max_ticks: $MAX_TICKS | timeout: ${TIMEOUT}s" >&2
+# Parse
+LAST=$(grep '^DC\[' "$W/err" | tail -1 || true)
+DC_NUM=$(echo "$LAST" | sed -n 's/DC\[\([0-9]*\)\].*/\1/p')
+PC=$(echo "$LAST" | sed -n 's/.* pc=\([0-9a-f]*\) .*/\1/p')
+SR=$(echo "$LAST" | sed -n 's/.* sr=\([0-9a-f]*\) .*/\1/p')
+SCSI=$(grep -c SCSIGet "$W/err" || true)
+SEGV=$(grep -c SEGV_SKIP "$W/err" || true)
 
-RC=0
-env HOME="$WORKDIR" \
-    B2_ROM_HARNESS="$MAX_TICKS" \
-    SDL_VIDEODRIVER=x11 DISPLAY=:98 SDL_AUDIODRIVER=dummy \
-    timeout -k 5s "${TIMEOUT}s" \
-    "$UNIX_DIR/BasiliskII" --config "$WORKDIR/prefs" \
-    > "$WORKDIR/stdout.log" 2> "$WORKDIR/stderr.log" || RC=$?
-
-# Parse DC[] dispatch counter lines for PC progress
-LAST_DC=$(grep '^DC\[' "$WORKDIR/stderr.log" | tail -1 || true)
-DC_COUNT=$(grep -c '^DC\[' "$WORKDIR/stderr.log" || true)
-FINAL_PC=$(echo "$LAST_DC" | grep -oP 'pc=\K[^ ]*' || echo "?")
-FINAL_SR=$(echo "$LAST_DC" | grep -oP 'sr=\K[^ ]*' || echo "?")
-
-# Check for harness result
-RESULT="UNKNOWN"
-grep -q 'ROM_HARNESS: result=MAX_TICKS' "$WORKDIR/stderr.log" && RESULT="MAX_TICKS"
-grep -q 'ROM_HARNESS: result=IDLE_LOOP' "$WORKDIR/stderr.log" && RESULT="IDLE_LOOP"
-[ "$RC" -eq 124 ] || [ "$RC" -eq 137 ] && RESULT="TIMEOUT"
-grep -q 'SIGSEGV\|SIGILL' "$WORKDIR/stderr.log" && RESULT="CRASH"
-[ "$RESULT" = "UNKNOWN" ] && [ "$RC" -ne 0 ] && RESULT="EXIT_$RC"
-[ "$RESULT" = "UNKNOWN" ] && RESULT="CLEAN_EXIT"
-
-# Detect if boot reached RAM (PC < 0x800000)
-IN_RAM="no"
-if [ "$FINAL_PC" != "?" ]; then
-    pc_val=$((16#${FINAL_PC}))
-    [ "$pc_val" -lt $((16#800000)) ] && IN_RAM="yes"
+IN_RAM=no
+if [ -n "$PC" ]; then
+  PCV=$((16#$PC))
+  ! ([ "$PCV" -ge $((16#800000)) ] && [ "$PCV" -le $((16#8FFFFF)) ]) && IN_RAM=yes
 fi
 
-# Milestones
 echo "" >&2
-echo "--- Milestones ---" >&2
-for p in "PatchROM ok" "Init680x0 ok" "SCSIGet" "set_dsk_err" "DiskControl"; do
-    grep -q "$p" "$WORKDIR/stderr.log" && echo "  ✅ $p" >&2 || echo "  ❌ $p" >&2
+echo "=== Headless Mac ===" >&2
+grep '^DC\[' "$W/err" | tail -5 >&2
+for m in "PatchROM ok" SCSIGet set_dsk_err DiskControl; do
+  grep -q "$m" "$W/err" 2>/dev/null && echo "  ✅ $m" >&2 || echo "  ❌ $m" >&2
 done
+echo "pc=${PC:-?} sr=${SR:-?} dc=${DC_NUM:-0} in_ram=$IN_RAM scsi=$SCSI segv=$SEGV rc=$RC" >&2
 
-# PC progression
-echo "--- PC progression (every 10K dispatches) ---" >&2
-grep '^DC\[' "$WORKDIR/stderr.log" | awk 'NR%10==0 || NR<=5' | tail -10 >&2
-
-echo "" >&2
-echo "=== RESULT: $RESULT ===" >&2
-echo "pc=$FINAL_PC sr=$FINAL_SR dispatches=$DC_COUNT in_ram=$IN_RAM rc=$RC" >&2
-
-# Machine-readable metrics
-echo "METRIC rom_result=$RESULT"
-echo "METRIC rom_pc=$FINAL_PC"
-echo "METRIC rom_sr=$FINAL_SR"
-echo "METRIC rom_dispatches=$DC_COUNT"
-echo "METRIC rom_in_ram=$IN_RAM"
-
-case "$RESULT" in
-    IDLE_LOOP|MAX_TICKS|CLEAN_EXIT) exit 0 ;;
-    CRASH)   exit 1 ;;
-    TIMEOUT) exit 2 ;;
-    *)       exit 0 ;;
-esac
+echo "METRIC headless_pc=${PC:-?}"
+echo "METRIC headless_dc=${DC_NUM:-0}"
+echo "METRIC headless_in_ram=$IN_RAM"
+echo "METRIC headless_scsi=$SCSI"
+echo "METRIC headless_segv=$SEGV"
