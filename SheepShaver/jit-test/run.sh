@@ -492,6 +492,195 @@ TEST_ORDER+=(eieio_basic)
 TESTS[sync_basic]="7C0004AC 60000000"
 TEST_ORDER+=(sync_basic)
 
+
+# ============================================================
+# FUZZING VECTORS — edge cases, boundary values, corner cases
+# ============================================================
+
+# --- Integer overflow/underflow ---
+# add with MAX_INT + 1 → overflow
+TESTS[fuzz_add_overflow]="3C607FFF 6063FFFF 38800001 7CA32214"
+TEST_ORDER+=(fuzz_add_overflow)
+
+# sub producing MIN_INT
+TESTS[fuzz_sub_minint]="3C608000 38800001 7CA42050"
+TEST_ORDER+=(fuzz_sub_minint)
+
+# neg of MIN_INT (0x80000000) → still 0x80000000 (overflow)
+TESTS[fuzz_neg_minint]="3C608000 7CA300D0"
+TEST_ORDER+=(fuzz_neg_minint)
+
+# --- Shift edge cases ---
+# slw by 0 (no shift)
+TESTS[fuzz_slw_zero]="3860FFFF 38800000 7C652030"
+TEST_ORDER+=(fuzz_slw_zero)
+
+# slw by 31 (max valid shift)
+TESTS[fuzz_slw_31]="38600001 3880001F 7C652030"
+TEST_ORDER+=(fuzz_slw_31)
+
+# slw by 32 (should produce 0 on PPC)
+TESTS[fuzz_slw_32]="38600001 38800020 7C652030"
+TEST_ORDER+=(fuzz_slw_32)
+
+# srw by 32 (should produce 0)
+TESTS[fuzz_srw_32]="3860FFFF 38800020 7C652430"
+TEST_ORDER+=(fuzz_srw_32)
+
+# sraw by 31 (sign bit fill)
+TESTS[fuzz_sraw_31]="3C608000 3880001F 7C652630"
+TEST_ORDER+=(fuzz_sraw_31)
+
+# sraw of 0 by any amount
+TESTS[fuzz_sraw_zero]="38600000 38800010 7C652630"
+TEST_ORDER+=(fuzz_sraw_zero)
+
+# --- rlwinm edge cases ---
+# rotate by 0, full mask
+TESTS[fuzz_rlwinm_nop]="3860DEAD 5463003E"
+TEST_ORDER+=(fuzz_rlwinm_nop)
+
+# rotate by 16, swap halfwords: rlwinm r3,r3,16,0,31
+TESTS[fuzz_rlwinm_swap16]="3C6012AB 606360CD 5463801E"
+TEST_ORDER+=(fuzz_rlwinm_swap16)
+
+# rlwinm with wrapping mask (MB > ME)
+# rlwinm r4,r3,0,28,3 → mask = 0xF000000F
+TESTS[fuzz_rlwinm_wrapmask]="3C60ABCD 6063EF01 5464001E"
+TEST_ORDER+=(fuzz_rlwinm_wrapmask)
+
+# --- Multiply edge cases ---
+# multiply -1 × -1 = 1
+TESTS[fuzz_mul_neg1]="3860FFFF 3880FFFF 7CA321D6"
+TEST_ORDER+=(fuzz_mul_neg1)
+
+# multiply MAX_INT × 2 → overflow (low word)
+TESTS[fuzz_mul_overflow]="3C607FFF 6063FFFF 38800002 7CA321D6"
+TEST_ORDER+=(fuzz_mul_overflow)
+
+# mulhw: high word of large multiply
+TESTS[fuzz_mulhw_big]="3C607FFF 6063FFFF 3C807FFF 6084FFFF 7CA32096"
+TEST_ORDER+=(fuzz_mulhw_big)
+
+# --- Divide edge cases ---
+# divw MIN_INT / -1 → undefined (PPC produces 0)
+TESTS[fuzz_divw_minint]="3C608000 3880FFFF 7CA323D6"
+TEST_ORDER+=(fuzz_divw_minint)
+
+# divw by 0 → undefined
+TESTS[fuzz_divw_zero]="38600064 38800000 7CA323D6"
+TEST_ORDER+=(fuzz_divw_zero)
+
+# divwu large / small
+TESTS[fuzz_divwu_large]="3C60FFFF 6063FFFF 38800002 7CA32396"
+TEST_ORDER+=(fuzz_divwu_large)
+
+# --- Compare edge cases ---
+# cmpw: equal values
+TESTS[fuzz_cmpw_equal]="3860002A 3880002A 7C032000"
+TEST_ORDER+=(fuzz_cmpw_equal)
+
+# cmpw: MAX_INT vs MIN_INT
+TESTS[fuzz_cmpw_extremes]="3C607FFF 6063FFFF 3C808000 7C032000"
+TEST_ORDER+=(fuzz_cmpw_extremes)
+
+# cmplwi: 0 vs 0
+TESTS[fuzz_cmplwi_zero]="38600000 28030000"
+TEST_ORDER+=(fuzz_cmplwi_zero)
+
+# --- CR logical edge cases ---
+# crxor bit with itself → always 0
+TESTS[fuzz_crxor_self]="3860FFFF 2C030000 4C000182"
+TEST_ORDER+=(fuzz_crxor_self)
+
+# creqv bit with itself → always 1
+TESTS[fuzz_creqv_self]="3860FFFF 2C030000 4C000242"
+TEST_ORDER+=(fuzz_creqv_self)
+
+# --- Load/store with displacement 0 ---
+TESTS[fuzz_lwz_disp0]="3860BEEF 90610000 80A10000"
+TEST_ORDER+=(fuzz_lwz_disp0)
+
+# --- Load/store negative displacement ---
+# stwu r1,-32(r1) then lwz from that address
+TESTS[fuzz_stwu_neg]="9421FFE0 80610000"
+TEST_ORDER+=(fuzz_stwu_neg)
+
+# --- Byte operations with 0xFF ---
+TESTS[fuzz_stb_ff]="386000FF 98610200 88A10200"
+TEST_ORDER+=(fuzz_stb_ff)
+
+# --- Halfword sign extension edge ---
+# lha of 0x7FFF (positive, no sign ext)
+TESTS[fuzz_lha_pos]="38607FFF B0610300 A8A10300"
+TEST_ORDER+=(fuzz_lha_pos)
+
+# lha of 0xFFFF (-1 sign extended)
+TESTS[fuzz_lha_neg1]="3860FFFF B0610300 A8A10300"
+TEST_ORDER+=(fuzz_lha_neg1)
+
+# --- Record form with zero result ---
+# add. 0 + 0 → CR0.EQ should be set
+TESTS[fuzz_add_dot_zero]="38600000 38800000 7CA32215"
+TEST_ORDER+=(fuzz_add_dot_zero)
+
+# --- Carry chain ---
+# addic -1,1 → 0 with CA=1; addze r5,r0 → r5 = 0 + CA = 1
+TESTS[fuzz_carry_chain]="3860FFFF 30630001 7CA00194"
+TEST_ORDER+=(fuzz_carry_chain)
+
+# subfic 0,0 → 0 with CA=1; addze r5,r0 → 1
+TESTS[fuzz_subfic_carry]="20600000 7CA00194"
+TEST_ORDER+=(fuzz_subfic_carry)
+
+# --- FP edge cases ---
+# fneg of 0.0 → -0.0 (different bit pattern)
+TESTS[fuzz_fneg_zero]="38600000 90610100 90610104 C8210100 FC2000D0 D8210108"
+TEST_ORDER+=(fuzz_fneg_zero)
+
+# fabs of -0.0 → +0.0
+TESTS[fuzz_fabs_negzero]="3C608000 90610100 38600000 90610104 C8210100 FC200210 D8210108"
+TEST_ORDER+=(fuzz_fabs_negzero)
+
+# --- Multi-register operations ---
+# lmw/stmw with r31 only (minimum case)
+TESTS[fuzz_lmw_r31]="3BE0CAFE BFE10400 3BE00000 BBE10400"
+TEST_ORDER+=(fuzz_lmw_r31)
+
+# --- bdnz with count=1 (single iteration then fall through) ---
+TESTS[fuzz_bdnz_one]="38600000 38800001 7C8903A6 38630001 4200FFFC"
+TEST_ORDER+=(fuzz_bdnz_one)
+
+# --- cntlzw of powers of 2 ---
+TESTS[fuzz_cntlzw_bit0]="3C608000 7C650034"
+TEST_ORDER+=(fuzz_cntlzw_bit0)
+
+TESTS[fuzz_cntlzw_bit31]="38600001 7C650034"
+TEST_ORDER+=(fuzz_cntlzw_bit31)
+
+# --- extsb/extsh boundary ---
+# extsb of 0x80 → 0xFFFFFF80
+TESTS[fuzz_extsb_boundary]="38600080 7C650774"
+TEST_ORDER+=(fuzz_extsb_boundary)
+
+# extsb of 0x7F → 0x0000007F (no extension)
+TESTS[fuzz_extsb_noext]="3860007F 7C650774"
+TEST_ORDER+=(fuzz_extsb_noext)
+
+# extsh of 0x8000 → 0xFFFF8000
+TESTS[fuzz_extsh_boundary]="38608000 7C650734"
+TEST_ORDER+=(fuzz_extsh_boundary)
+
+# --- All-ones patterns ---
+TESTS[fuzz_and_allones]="3860FFFF 3880FFFF 7C651838"
+TEST_ORDER+=(fuzz_and_allones)
+
+TESTS[fuzz_or_allzero]="38600000 38800000 7C651B78"
+TEST_ORDER+=(fuzz_or_allzero)
+
+TESTS[fuzz_xor_same]="3860ABCD 7C651A78"
+TEST_ORDER+=(fuzz_xor_same)
+
 # ---- Execute all tests -------------------------------------------------------
 PASS=0
 FAIL=0
