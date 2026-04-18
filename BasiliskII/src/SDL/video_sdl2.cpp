@@ -1640,7 +1640,8 @@ bool VideoInit(bool classic)
 #endif
 	classic_mode = classic;
 
-	/* ROM harness: headless mode — create dummy framebuffer, skip SDL */
+	/* ROM harness: headless mode — BasiliskII only */
+#ifndef SHEEPSHAVER
 	if (getenv("B2_ROM_HARNESS")) {
 		int width = 640, height = 480;
 		static uint8 dummy_fb[640 * 480 * 4];
@@ -1665,6 +1666,7 @@ bool VideoInit(bool classic)
 		fprintf(stderr, "ROM_HARNESS: headless video %dx%dx%d\n", width, height, 8);
 		return true;
 	}
+#endif
 
 #ifdef ENABLE_VOSF
 	// Zero the mainBuffer structure
