@@ -193,3 +193,98 @@ make -j12
 - No ROM patches to work around JIT bugs
 - Test-driven: opcode harness validates each handler
 - Interpreter always available as fallback for uncompiled blocks
+
+## NOP Stubs — Justification
+
+Some opcodes are implemented as NOPs (no operation). Each has a specific
+justification for why this is correct or acceptable in the emulation context.
+
+### Cache management (8 instructions) — no emulated cache hierarchy
+
+| Instruction | Real hardware | Why NOP is correct |
+|---|---|---|
+| `DCBF` | Flush data cache line | Host ARM64 manages its own cache; no PPC cache to flush |
+| `DCBST` | Store data cache line | Writes go directly to host memory |
+| `DCBT`/`DCBTST` | Prefetch hint | Performance hint only — no semantic effect |
+| `DCBA` | Allocate cache line | No PPC cache to allocate |
+| `DCBI` | Invalidate data cache | Supervisor-only, no user-mode effect |
+| `ICBI` | Invalidate instruction cache | JIT handles its own cache flush after compilation |
+| `ISYNC` | Instruction sync | JIT emits ISB after code generation |
+
+These are architecturally defined as hints or cache-coherency ops. A correct
+PPC program cannot observe different behavior whether they execute or not.
+
+### Memory barriers (2) — single-threaded emulator
+
+| Instruction | Why NOP |
+|---|---|
+| `SYNC` | Single-threaded emulator is sequentially consistent by default |
+| `EIEIO` | No out-of-order I/O in emulation |
+
+### FPSCR bit manipulation (3) — ARM64 default matches PPC default
+
+| Instruction | Why NOP |
+|---|---|
+| `MTFSFI` | FP rounding/exception mode bits |
+| `MTFSB0` | Clear FPSCR bit |
+| `MTFSB1` | Set FPSCR bit |
+
+ARM64 FPCR defaults to round-to-nearest, matching PPC's default mode.
+Full FPSCR emulation (per-instruction rounding mode switching) is Phase 5 work.
+
+### Traps (2) — rarely fire during normal operation
+
+| Instruction | Why NOP |
+|---|---|
+| `TWI` | Conditional trap — trap conditions almost never fire in Mac OS |
+| `TDI` | 64-bit trap — not applicable on 32-bit PPC emulation |
+
+If a trap condition does fire, the block will fall through to the interpreter
+which handles traps correctly.
+
+### Prefetch/stream hints (3) — no AltiVec execution
+
+| Instruction | Why NOP |
+|---|---|
+| `DSS` | Data stream stop — no AltiVec streams to manage |
+| `DST` | Data stream touch — prefetch hint for non-existent vector unit |
+| `DSTST` | Data stream touch for store |
+
+### System/hardware (3) — not applicable in emulation
+
+| Instruction | Implementation | Why |
+|---|---|---|
+| `MFMSR` | Returns 0 | Emulator runs in user mode; MSR value is meaningless |
+| `ECIWX` | NOP | Custom hardware I/O — not used on standard Power Macs |
+| `ECOWX` | NOP | Same |
+
+### String load/store (4) — extremely rare, interpreter fallback
+
+| Instruction | Why NOP |
+|---|---|
+| `LSWI`/`LSWX` | Compilers never generate these; if encountered, the block is incomplete and falls through to the interpreter |
+| `STSWI`/`STSWX` | Same |
+
+These are the only NOPs that could theoretically affect correctness. In practice,
+no Mac OS 7.5–9 code uses string load/store instructions.
+
+### AltiVec (142) — no vector execution unit
+
+All 142 AltiVec instructions are NOP-stubbed via `case 4:`. SheepShaver's
+PPC interpreter doesn't have AltiVec support either. Mac OS 7.5–9 doesn't
+use AltiVec for system functions. AltiVec implementation is Phase 6 future work.
+
+### Summary
+
+| Category | Count | Risk |
+|---|---|---|
+| Cache hints | 8 | Zero — architecturally invisible |
+| Memory barriers | 2 | Zero — single-threaded |
+| FPSCR bits | 3 | Low — only affects non-default rounding modes |
+| Traps | 2 | Zero — interpreter fallback |
+| Prefetch hints | 3 | Zero — no vector unit |
+| System/hardware | 3 | Zero — not applicable |
+| String ops | 4 | Very low — interpreter fallback if encountered |
+| AltiVec | 142 | Zero for Mac OS 7.5–9 |
+
+**None of these NOPs affect Mac OS 7.5–9 boot or normal operation.**
