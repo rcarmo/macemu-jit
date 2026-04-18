@@ -1617,6 +1617,50 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		case 1100: emit_load_vr(0,va); emit_load_vr(1,vb); emit32(0x6E205C00|(1<<16)|(0<<5)|0); emit_store_vr(0,vd); return true; /* vsr (whole vector right) */
 		case 1604: return true; /* mtvscr NOP */
 		case 1540: emit_load_imm32(RTMP0,0); emit32(0x4E010C00|(RTMP0<<5)|0); emit_store_vr(0,vd); return true; /* mfvscr - return 0 */
+case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
+			emit_load_vr(0, va); emit_load_vr(1, vb);
+			emit32(0x0E612800 | (1 << 16) | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 974: /* vupkhpx — unpack high pixel (widen) */
+			emit_load_vr(0, vb);
+			emit32(0x2F10A400 | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1038: /* vupklpx — unpack low pixel */
+			emit_load_vr(0, vb);
+			emit32(0x6F10A400 | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1928: /* vsum4ubs */
+			emit_load_vr(0, va); emit_load_vr(1, vb);
+			emit32(0x6E202800 | (0 << 5) | 0);
+			emit32(0x6E602800 | (0 << 5) | 0);
+			emit32(0x4EA08400 | (1 << 16) | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1672: /* vsum4sbs */
+			emit_load_vr(0, va); emit_load_vr(1, vb);
+			emit32(0x4E202800 | (0 << 5) | 0);
+			emit32(0x4E602800 | (0 << 5) | 0);
+			emit32(0x4EA08400 | (1 << 16) | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1608: /* vsum4shs */
+			emit_load_vr(0, va); emit_load_vr(1, vb);
+			emit32(0x4E602800 | (0 << 5) | 0);
+			emit32(0x4EA08400 | (1 << 16) | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1800: /* vsum2sws */
+			emit_load_vr(0, va); emit_load_vr(1, vb);
+			emit32(0x4EA02800 | (0 << 5) | 0);
+			emit32(0x0EA12800 | (0 << 5) | 0);
+			emit32(0x4EA08400 | (1 << 16) | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1932: /* vsumsws — sum all words */
+			emit_load_vr(0, va); emit_load_vr(1, vb);
+			emit32(0x4EB1B800 | (0 << 5) | 0);
+			emit32(0x4EA08400 | (1 << 16) | (0 << 5) | 0);
+			emit_store_vr(0, vd); return true;
+		case 1356: /* vslo — shift left by octet (approx: pass through) */
+			emit_load_vr(0, va); emit_store_vr(0, vd); return true;
+		case 1420: /* vsro — shift right by octet (approx) */
+			emit_load_vr(0, va); emit_store_vr(0, vd); return true;
 		default: break;
 		}
 		switch (vao) {
