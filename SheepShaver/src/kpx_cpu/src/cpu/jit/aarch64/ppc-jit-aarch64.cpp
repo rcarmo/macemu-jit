@@ -1284,7 +1284,7 @@ bool ppc_jit_aarch64_compile(
 	}
 
 	/* Periodic report */
-	if ((jit_total_hit + jit_total_miss) % 50000 == 0 && (jit_total_hit + jit_total_miss) > 0)
+	if ((jit_blocks_attempted) % 5000 == 0 && jit_blocks_attempted > 0)
 		jit_report_misses();
 
 	/* If we didn't emit a ret yet, do it now */
@@ -1305,6 +1305,51 @@ bool ppc_jit_aarch64_compile(
 	out->ppc_start_pc = pc;
 	out->ppc_end_pc = cur_pc;
 	out->n_insns = n_compiled;
+
+	/* Cumulative miss report — doesn't clear counters */
+	{
+		static uint32_t cum_opc[64] = {0};
+		static uint32_t cum_xo31[1024] = {0};
+		static uint32_t cum_total = 0;
+		static uint32_t cum_report_at = 1000;
+		
+		if (!complete) {
+			/* Record the opcode that caused the failure */
+			if (cur_pc >= (uint32_t)(uintptr_t)ram && cur_pc < (uint32_t)(uintptr_t)ram + ramsize) {
+				const uint8_t *fail_p = ram + (cur_pc - (uint32_t)(uintptr_t)ram);
+				uint32_t fail_op = ((uint32_t)fail_p[0] << 24) | ((uint32_t)fail_p[1] << 16) |
+				                   ((uint32_t)fail_p[2] << 8) | fail_p[3];
+				uint32_t fail_opc = fail_op >> 26;
+				cum_opc[fail_opc]++;
+				if (fail_opc == 31) cum_xo31[(fail_op >> 1) & 0x3FF]++;
+				cum_total++;
+			}
+		}
+		
+		if (jit_blocks_attempted >= cum_report_at) {
+			cum_report_at += 100000;
+			fprintf(stderr, "PPC-JIT-A64-CUM: %u incomplete blocks out of %u, top blockers:\n", cum_total, jit_blocks_attempted);
+			/* Copy arrays for sorted output without destroying data */
+			uint32_t tmp_opc[64]; memcpy(tmp_opc, cum_opc, sizeof(tmp_opc));
+			for (int pass = 0; pass < 15; pass++) {
+				uint32_t max_v = 0; int max_i = -1;
+				for (int i = 0; i < 64; i++) if (tmp_opc[i] > max_v) { max_v = tmp_opc[i]; max_i = i; }
+				if (max_i < 0 || max_v == 0) break;
+				fprintf(stderr, "  opc=%d: %u blocks\n", max_i, max_v);
+				tmp_opc[max_i] = 0;
+			}
+			uint32_t tmp_xo[1024]; memcpy(tmp_xo, cum_xo31, sizeof(tmp_xo));
+			fprintf(stderr, "PPC-JIT-A64-CUM: top XO31 blockers:\n");
+			for (int pass = 0; pass < 10; pass++) {
+				uint32_t max_v = 0; int max_i = -1;
+				for (int i = 0; i < 1024; i++) if (tmp_xo[i] > max_v) { max_v = tmp_xo[i]; max_i = i; }
+				if (max_i < 0 || max_v == 0) break;
+				fprintf(stderr, "  XO=%d: %u blocks\n", max_i, max_v);
+				tmp_xo[max_i] = 0;
+			}
+		}
+	}
+
 	out->complete = complete;
 	if (complete && n_compiled > 0) jit_blocks_complete++;
 

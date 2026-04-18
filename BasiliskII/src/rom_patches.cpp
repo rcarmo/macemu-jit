@@ -1317,6 +1317,13 @@ static bool patch_rom_32(void)
 		fprintf(stderr, "ROM: patched FPU restore at 0x8DB1E (RTS, no FPU)\n");
 	}
 
+	// Ensure ROMBase low-memory global ($02AE) is set.
+	// The trap table builder at 0x809A9A loads A3 from ($02AE).W to
+	// use as the base address for computing trap handler addresses.
+	// If $02AE is 0 (ROM init skipped), all trap entries are wrong,
+	// causing millions of SEGVs from invalid memory accesses.
+	WriteMacInt32(0x02AE, ROMBaseMac);
+
 	// Don't init IWM
 	wp = (uint16 *)(ROMBaseHost + 0x9c0);
 	*wp = htons(M68K_RTS);
