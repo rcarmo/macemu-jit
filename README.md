@@ -215,11 +215,11 @@ The AArch64 JIT backend is under active development.
 - ✅ **100% opcode coverage** during boot (zero JIT misses)
 - ✅ **92.3% block completion** (110K+ / 120K+ blocks fully native)
 - ✅ **382 MIPS** on tight loops (2.2x over interpreter)
-- ✅ **170** PPC → ARM64 opcode handlers (all scalar + FPU + AltiVec stubs)
+- ✅ **321** PPC → ARM64 opcode handlers (scalar + FPU + AltiVec NEON, zero interpreter fallbacks)
 - ✅ FP arithmetic: fadd/fsub/fmul/fdiv/fmadd + lfs/lfd/stfs/stfd
 - ✅ Intra-block loop chaining for bdnz
 - ✅ Record forms (CR0 update) for ALU ops
-- ✅ Opcode test harness with **70** PPC vectors (score=100)
+- ✅ Opcode test harness with **113** PPC vectors including 43 fuzzing edge cases (score=100)
 - See [SheepShaver/AARCH64_JIT_PLAN.md](SheepShaver/AARCH64_JIT_PLAN.md) for full details
 
 **Bugs fixed in BasiliskII JIT (this fork):**
