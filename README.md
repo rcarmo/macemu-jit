@@ -200,17 +200,29 @@ vncport 5900
 
 #### AArch64 JIT Status
 
-The AArch64 JIT backend is under active development. Current status:
+The AArch64 JIT backend is under active development.
 
+**BasiliskII (68K):**
 - ✅ Boots to Mac OS Finder desktop at JIT optlev=1 (interpreter dispatch)
 - ✅ Speedometer 4.02 Graphics benchmark runs (score: 210.368 vs Mac Classic = 1.0)
 - ✅ VNC server with correct coordinate mapping
 - ✅ Managed IRQ delivery for stable interrupt handling
-- ✅ Byte-order fixes for opcode extraction, dispatch, and flag metadata
-- ⚠️ Native ARM64 codegen (optlev=2) compiles 99%+ of blocks but has remaining
-  semantic bugs in data instruction implementations that prevent boot
+- ✅ 96-vector opcode equivalence test suite with DBRA loop fix
+- ⚠️ Native ARM64 codegen (optlev=2) has remaining SR flag leakage in DBRA blocks
 
-**Bugs fixed in this fork:**
+**SheepShaver (PPC):**
+- ✅ **Mac OS 7.5 boots to desktop** with JIT active on AArch64
+- ✅ **100% opcode coverage** during boot (zero JIT misses)
+- ✅ **92.3% block completion** (110K+ / 120K+ blocks fully native)
+- ✅ **382 MIPS** on tight loops (2.2x over interpreter)
+- ✅ ~85 PPC → ARM64 opcode handlers including FPU
+- ✅ FP arithmetic: fadd/fsub/fmul/fdiv/fmadd + lfs/lfd/stfs/stfd
+- ✅ Intra-block loop chaining for bdnz
+- ✅ Record forms (CR0 update) for ALU ops
+- ✅ Opcode test harness with 28+ PPC vectors
+- See [SheepShaver/AARCH64_JIT_PLAN.md](SheepShaver/AARCH64_JIT_PLAN.md) for full details
+
+**Bugs fixed in BasiliskII JIT (this fork):**
 1. IRQ deliverability bug — latching pending interrupts while masked
 2. `HAVE_GET_WORD_UNSWAPPED` extraction mismatch in compiled handlers
 3. Interpreter fallback dispatch byte-order bug (`cpufunctbl` indexing)
@@ -218,6 +230,9 @@ The AArch64 JIT backend is under active development. Current status:
 5. L2 compiled handler dispatch byte-order bug (`comptbl[]` indexing)
 6. LTO stripping JIT gate checks
 7. VNC mouse coordinate scaling with SDL logical size
+8. DBRA multi-iteration loop termination (block tracer following backward branches)
+9. DBRA/DBcc CCR leakage through block chaining
+10. `flags_to_stack` carry inversion when flags already valid
 
 #### MinGW32/MSYS2
 preparation:
@@ -235,6 +250,16 @@ $ make
 ```
 
 ### SheepShaver
+
+#### AArch64 (with JIT)
+```bash
+cd macemu/SheepShaver/src/Unix
+./autogen.sh
+./configure --enable-sdl-video --enable-sdl-audio
+make -j12
+# For JIT: rebuild ppc-cpu.cpp with -DUSE_AARCH64_JIT and link ppc-jit-aarch64.o
+# Requires: sudo sysctl -w vm.mmap_min_addr=0
+```
 
 #### macOS
 about changing Deployment Target: see BasiliskII

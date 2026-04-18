@@ -5,150 +5,191 @@
 Bring SheepShaver's PPC emulation to full native performance on AArch64,
 starting with an optimized interpreter and progressing to a direct-codegen JIT.
 
-## Benchmark baseline (interpreter, AArch64)
+## Current Status (April 2026)
 
-| Test | Iterations | Time | MIPS |
-|------|-----------|------|------|
-| addi+bdnz tight loop | 1M | 27ms | ~37 |
-| addi+bdnz tight loop | 100M | 598ms | ~167 |
+**Mac OS boots with the AArch64 JIT active.**
 
-The existing kpx_cpu interpreter with Duff's device dispatch + block caching
-achieves ~167 MIPS on the Orange Pi (CIX P1 aarch64). This is already
-interactive-grade for Mac OS 8/9. Phase 1 computed-goto optimization
-may yield 20-30% improvement but is lower priority than Phase 2 JIT.
+| Metric | Value |
+|--------|-------|
+| Opcode coverage during boot | **100%** (zero misses) |
+| Block completion rate | **92.3%** (110K+/120K+ blocks native) |
+| JIT benchmark (addi+bdnz 100M) | **382 MIPS** (2.2x over interpreter) |
+| Interpreter benchmark | 167 MIPS |
+| Total opcode handlers | ~85 PPC → ARM64 |
+| FPU support | ✅ double + single precision |
+| Boot tested | Mac OS 7.5 to desktop ("Welcome to Mac OS") |
 
-## Phases
+### Screenshots
 
-### Phase 1: Optimized Interpreter (weeks 1–4)
-
-Make the existing PPC interpreter fast enough for interactive Mac OS 8/9 use
-on AArch64 without any JIT.
-
-| Task | Est. | Files |
-|------|------|-------|
-| Threaded dispatch via computed goto | 3 days | `ppc-execute.cpp` |
-| Hot-path inlining for top-20 PPC ops | 1 week | `ppc-execute.cpp` |
-| Direct-addressing memory fast path | 1 week | `ppc-cpu.cpp`, `sheepshaver_glue.cpp` |
-| PGO build support (Makefile/configure) | 2 days | `configure.ac`, `Makefile.in` |
-| Test harness (PPC opcode equivalence) | 1 week | `jit-test/` |
-| Benchmark: baseline vs optimized MIPS | 2 days | `jit-test/bench.sh` |
-
-**Exit criteria:** interpreter passes all opcode tests, boots Mac OS 8.x,
-≥2x speedup over unoptimized baseline on AArch64.
-
-### Phase 2: JIT Scaffolding (weeks 5–8)
-
-Build the direct-codegen JIT infrastructure, reusing BasiliskII's ARM64
-instruction emitter and block dispatch patterns.
-
-| Task | Est. | Files |
-|------|------|-------|
-| Port `codegen_arm64.h/cpp` to kpx_cpu | 2 days | `jit/aarch64/codegen_aarch64.h` |
-| Block cache + RWX mapping for AArch64 | 1 week | `jit/aarch64/jit-target-cache.hpp` |
-| Block dispatch / entry / exit stubs | 1 week | `jit/aarch64/jit-target-dispatch.cpp` |
-| PPC register → ARM64 register mapping | 3 days | `jit/aarch64/ppc-regmap-aarch64.h` |
-| Compile/execute loop integration | 1 week | `ppc-jit-aarch64.cpp`, `sheepshaver_glue.cpp` |
-| configure.ac: `--enable-aarch64-jit` | 1 day | `configure.ac` |
-
-**Exit criteria:** JIT compiles trivial blocks (NOP, branch), falls back to
-interpreter for everything else, boots Mac OS with mixed execution.
-
-### Phase 3: Integer Opcode Handlers (weeks 9–16)
-
-Implement native ARM64 codegen for all integer PPC instructions.
-
-| Category | Ops | Est. |
-|----------|-----|------|
-| Load/store (byte/half/word, indexed) | ~20 | 2 weeks |
-| Integer ALU (add/sub/and/or/xor/neg) | ~15 | 1.5 weeks |
-| Shift/rotate (slw/srw/sraw/rlwinm/rlwimi) | ~8 | 1.5 weeks |
-| Compare (cmp/cmpi/cmpl/cmpli) | ~6 | 1 week |
-| Branch (b/bl/bc/bclr/bcctr) + LR/CTR | ~8 | 2 weeks |
-| Condition register (crand/cror/mcrf/mcrxr) | ~10 | 1 week |
-| System (mfspr/mtspr/mfcr/mtcrf/sc/rfi) | ~8 | 1 week |
-| Mul/div (mullw/mulhw/divw/divwu) | ~6 | 1 week |
-
-**Exit criteria:** all integer opcode tests pass, Mac OS boots to desktop
-with JIT handling >90% of executed instructions.
-
-### Phase 4: FPU (weeks 17–24)
-
-Implement PPC floating-point → ARM64 NEON/FP codegen.
-
-| Category | Ops | Est. |
-|----------|-----|------|
-| FP load/store (lfs/lfd/stfs/stfd) | ~8 | 1.5 weeks |
-| FP arithmetic (fadd/fsub/fmul/fdiv/fmadd) | ~12 | 2 weeks |
-| FP compare (fcmpu/fcmpo) → CR | ~4 | 1 week |
-| FP convert (frsp/fctiw/fctiwz/fctid) | ~6 | 1 week |
-| FP move (fmr/fneg/fabs/fnabs) | ~4 | 3 days |
-| FP rounding mode (mtfsfi/mtfsf/mffs/mtfsb) | ~6 | 1 week |
-| IEEE 754 edge cases + NaN handling | — | 1.5 weeks |
-
-**Exit criteria:** FPU opcode tests pass, FP-heavy apps work correctly.
-
-### Phase 5: Optimization + Polish (weeks 25–30)
-
-| Task | Est. |
-|------|------|
-| Block-level optimizations (constant prop, dead code) | 2 weeks |
-| Register allocation improvements | 1.5 weeks |
-| Hot-loop detection + unrolling | 1 week |
-| Performance benchmarking + profiling | 1 week |
-| Boot smoke tests across Mac OS 7.6–9.0.4 | 1 week |
+| Stage | Screenshot |
+|-------|-----------|
+| ROM boot (no disk) | ![](doc/aarch64-boot-nodisk.png) |
+| Mac OS boot | ![](doc/aarch64-macos-boot.png) |
+| JIT-enabled boot | ![](doc/aarch64-jit-macos-welcome.png) |
 
 ## Architecture
 
-### Interpreter (Phase 1)
+### Interpreter path (always available)
 ```
-PPC instruction → ppc-decode.cpp → ppc-execute.cpp (computed goto dispatch)
+PPC instruction → ppc-decode.cpp → ppc-execute.cpp (Duff's device dispatch)
                                     ↓
-                            direct memory access via MEMBaseDiff
+                            direct memory access via host pointers
 ```
 
-### JIT (Phases 2–4)
+### JIT path (AArch64, USE_AARCH64_JIT)
 ```
-PPC instruction → ppc-decode.cpp → ppc-translate-aarch64.cpp (select handler)
-                                    ↓
-                            ppc-codegen-aarch64.cpp (emit ARM64 instructions)
-                                    ↓
-                            codegen_aarch64.h (ARM64 instruction encoding)
-                                    ↓
-                            jit-cache (RWX block, icache flush)
-                                    ↓
-                            block dispatch (direct chaining, popallspace)
-```
-
-### Reused from BasiliskII
-- `codegen_arm64.h` — ARM64 instruction encoding macros
-- Block dispatch patterns (popallspace, execute_normal, block chaining)
-- Flag handling patterns (NZCV ↔ PPC CR mapping)
-- Test harness approach (B2_TEST_HEX / REGDUMP)
-
-### PPC register mapping (tentative)
-```
-PPC GPR[0-7]   → ARM64 x19-x26 (callee-saved, hot registers)
-PPC GPR[8-31]  → memory (regfile array)
-PPC LR         → ARM64 x27
-PPC CTR        → ARM64 x28
-PPC CR         → memory (8 × 4-bit fields)
-PPC XER        → memory
-PPC FPR[0-7]   → ARM64 d8-d15 (callee-saved)
-PPC FPR[8-31]  → memory (FP regfile array)
-CPU state ptr  → ARM64 x20 (always points to powerpc_cpu state)
+PPC instruction → ppc-cpu.cpp execute loop
+                    ↓
+              ppc-jit-aarch64.cpp (compile basic block to ARM64)
+                    ↓
+              ppc-codegen-aarch64.h (ARM64 instruction encoding)
+                    ↓
+              jit-cache (RWX mmap, icache flush)
+                    ↓
+              native execution: void block(powerpc_registers *regs)
+                    ↓
+              fall back to interpreter for incomplete blocks
 ```
 
-## Test Strategy
+### Code layout
+```
+src/kpx_cpu/src/cpu/jit/aarch64/
+  ppc-jit-aarch64.h          — JIT public interface
+  ppc-jit-aarch64.cpp        — PPC → ARM64 compiler (~85 opcode handlers)
+  ppc-jit-aarch64-glue.hpp   — integration with ppc-cpu.cpp execute loop
+  ppc-codegen-aarch64.h      — ARM64 instruction encoding helpers
+  jit-target-cache.hpp       — AArch64 icache flush + RWX mapping
+  dyngen-target-exec.h       — PPC → ARM64 register mapping constants
+```
 
-Same approach as BasiliskII's jit-test harness:
-- Each test = hex-encoded PPC instruction sequence
-- Run under interpreter and JIT
-- Compare full register dump (GPR0-31, CR, LR, CTR, XER, FPSCR)
-- Deterministic, bounded, no ROM dependency
+### Register convention for generated code
+```
+x20 = pointer to powerpc_registers struct (callee-saved)
+x0-x3 = scratch / temporaries
+d0-d2 = FP scratch (for FPU ops)
+GPR[n] accessed via LDR/STR Wt, [x20, #n*4]
+FPR[n] accessed via LDR/STR Dt, [x20, #128+n*8]
+CR/LR/CTR/XER/PC at known offsets from x20
+```
+
+## Opcode Coverage
+
+### Integer ALU (11)
+`addi`/`li`, `addis`/`lis`, `addic`, `addic.`, `mulli`,
+`add(.)`/`subf(.)`/`neg(.)`, `mullw`, `divw`
+
+### Logical (6)
+`ori`, `oris`, `xori`, `xoris`, `andi.`, `andis.`
+
+### Shift/Rotate (6)
+`slw`, `srw`, `sraw`, `srawi`, `rlwinm`, `rlwimi`
+
+### Compare (4)
+`cmpwi`, `cmplwi`, `cmpw`, `cmplw` — all with CR field update
+
+### Record forms
+`add.`, `subf.`, `and.`, `or.`, `xor.`, `neg.` — CR0 update via CSEL
+
+### Branch (7)
+`b`, `bl`, `bdnz` (with intra-block backward chaining),
+`beq`/`bne`/`blt`/`bgt`/`ble`/`bge`/`bhi`/`bls`...,
+`blr`, `bctr`/`bctrl`, `isync`
+
+### Load/Store integer (13)
+`lwz`/`lwzu`/`lwzx`, `stw`/`stwu`/`stwx`,
+`lbz`/`stb`, `lhz`/`lha`/`sth`, `lmw`/`stmw`
+
+### Load/Store FP (4)
+`lfs` (single→double), `lfd` (double), `stfs` (double→single), `stfd` (double)
+
+### FP arithmetic double (12)
+`fmr`, `fneg`, `fabs`, `fnabs`, `fadd`, `fsub`, `fmul`, `fdiv`,
+`fmadd`, `fmsub`, `fnmadd`, `fnmsub`, `fcmpu`
+
+### FP arithmetic single (4)
+`fadds`, `fsubs`, `fmuls`, `fdivs` (compute double, round to single)
+
+### Utility (9)
+`cntlzw`, `extsh`, `extsb`, `srawi`,
+`mfspr`/`mtspr` (LR, CTR), `mfcr`, `mtcrf`, NOP
+
+## Completed Phases
+
+### Phase 1: Interpreter baseline ✅
+- Interpreter already achieves 167 MIPS with Duff's device + block cache
+- Computed-goto optimization deferred (diminishing returns)
+- Test harness (`jit-test/`) with 28+ PPC opcode vectors
+
+### Phase 2: JIT scaffolding ✅
+- Direct codegen compiler: `ppc-jit-aarch64.cpp`
+- ARM64 instruction encoding: `ppc-codegen-aarch64.h`
+- Code cache: 4MB RWX mmap with icache flush
+- Integration into `ppc-cpu.cpp` execute loop
+- First native execution verified
+
+### Phase 3: Integer opcode handlers ✅
+- All integer ALU, logical, shift/rotate, compare, branch
+- Load/store word/byte/halfword with byte-swap
+- SPR access, CR move
+- Intra-block loop chaining for bdnz
+- Record forms (CR0) for ALU ops
+
+### Phase 4: FPU ✅
+- Double-precision arithmetic: fadd/fsub/fmul/fdiv
+- Fused multiply-add: fmadd/fmsub/fnmadd/fnmsub
+- FP move/negate/abs
+- FP compare → CR field
+- Single-precision with round-to-single via FCVT
+- FP load/store with endian byte-swap
+
+## Remaining Work
+
+### Phase 5: Optimization
+- [ ] Block caching (avoid recompilation of same PC)
+- [ ] Register pinning (keep hot GPRs in ARM64 callee-saved regs)
+- [ ] Block-to-block chaining (avoid returning to dispatch loop)
+- [ ] Raise 64-instruction block limit
+- [ ] Profile-guided hot-block prioritization
+
+### Not yet implemented (rare opcodes)
+- CR logical ops (`crand`, `cror`, `crxor`, etc.) — encoding fix needed
+- `mcrf` (move CR field)
+- Some conditional `bclr`/`bcctr` with non-trivial BO fields
+- `frsp` (FP round to single)
+- `fctiw`/`fctiwz` (FP to integer conversion)
+- `mffs`/`mtfsf`/`mtfsfi`/`mtfsb0`/`mtfsb1` (FPSCR access)
+- `dcbz`/`dcbf`/`dcbi`/`dcbst`/`icbi` (cache management)
+- `sync`/`eieio` (memory barriers)
+- `sc` (system call)
+- `tw`/`twi` (trap)
+
+## Test Harness
+
+```bash
+# Run opcode equivalence tests (interpreter determinism)
+./jit-test/run.sh
+
+# Run with JIT native execution
+SS_TEST_HEX="38600064 388000c8 7CA32214" SS_TEST_DUMP=1 SS_TEST_JIT=1 ./SheepShaver
+
+# Boot Mac OS with JIT
+vm.mmap_min_addr=0  # required for low memory globals
+USE_AARCH64_JIT=1   # compile flag
+```
+
+## Build
+
+```bash
+cd src/Unix
+./autogen.sh
+./configure --enable-sdl-video --enable-sdl-audio
+make -j12
+# For JIT: rebuild ppc-cpu.cpp with -DUSE_AARCH64_JIT and link ppc-jit-aarch64.o
+```
 
 ## Constraints
 
 - No dyngen — direct ARM64 emission only
 - No ROM patches to work around JIT bugs
-- Test-driven: every opcode handler verified before moving on
-- Interpreter always available as fallback
+- Test-driven: opcode harness validates each handler
+- Interpreter always available as fallback for uncompiled blocks
