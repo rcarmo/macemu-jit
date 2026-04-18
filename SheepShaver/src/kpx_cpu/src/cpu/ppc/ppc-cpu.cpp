@@ -43,6 +43,7 @@
 #if defined(__aarch64__) && defined(USE_AARCH64_JIT)
 extern uint8 *RAMBaseHost;
 extern uint32 RAMSize;
+extern uint32 ROMBase;
 #include "cpu/jit/aarch64/ppc-jit.h"
 #endif
 
@@ -694,11 +695,20 @@ void powerpc_cpu::execute(uint32 entry)
 			/* AArch64 direct-codegen JIT: try compiling block natively */
 			{
 				static bool jit_init_done = false;
+				static bool jit_enabled = getenv("SS_USE_JIT") && *getenv("SS_USE_JIT") && strcmp(getenv("SS_USE_JIT"),"0")!=0;
+				if (!jit_enabled) goto skip_jit;
 				if (!jit_init_done) { ppc_jit_aarch64_init(4096); jit_init_done = true; }
 				ppc_jit_block jblk;
 				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) {
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
 					fn((void*)regs_ptr());
+					/* Validate PC after JIT execution */
+					uint32 jit_pc = pc();
+					if (jit_pc >= (uint32)(uintptr_t)RAMBaseHost + RAMSize &&
+					    !(jit_pc >= (uint32)ROMBase && jit_pc < (uint32)ROMBase + 0x500000)) {
+						/* PC outside RAM/ROM — JIT produced invalid target, skip to interpreter */
+						continue;
+					}
 					if (!spcflags().empty()) {
 						if (!check_spcflags()) goto return_site;
 					}
@@ -708,6 +718,7 @@ void powerpc_cpu::execute(uint32 entry)
 				}
 			}
 #endif
+		  skip_jit:
 			for (;;) {
 				const int r = bi->size % 4;
 				di = bi->di + r;

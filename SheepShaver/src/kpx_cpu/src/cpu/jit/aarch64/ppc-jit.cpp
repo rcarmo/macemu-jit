@@ -1405,7 +1405,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			}
 			return true;
 		}
-		return true; /* unknown opcode: NOP */
+		return false; /* unknown opcode: stop compilation */
 	}
 
 	case 19: /* CR ops, bclr, bcctr, isync */
@@ -1511,6 +1511,8 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		bool lk = op & 1;
 		bool aa = op & 2;
 		uint32_t target = aa ? (uint32_t)li : (pc + li);
+		/* Validate target is in compilable range — reject jumps to EMUL_OP trampolines */
+		if ((target >> 26) == 6) return false; /* EMUL_OP opcode range */
 		if (lk) {
 			emit_load_imm32(RTMP0, (int32_t)(pc + 4));
 			a64_str_w_imm(RTMP0, RSTATE, PPCR_LR);
@@ -2163,7 +2165,7 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 			return true;
 
 		default:
-			return true; /* unknown opcode: NOP */
+			return false; /* unknown opcode: stop compilation */
 		}
 	}
 
@@ -2237,7 +2239,7 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 			emit32(0x1E22C000 | (0 << 5) | 0); /* FCVT Dd,Sd */
 			emit_store_fpr(0, frd); return true;
 		default:
-			return true; /* unknown opcode: NOP */
+			return false; /* unknown opcode: stop compilation */
 		}
 	}
 
@@ -2255,7 +2257,7 @@ bool ppc_jit_aarch64_init(size_t cache_size_kb)
 	jit_cache_base = (uint8_t *)jit_cache_alloc(jit_cache_size);
 	if (!jit_cache_base) {
 		fprintf(stderr, "PPC-JIT-A64: failed to allocate %zu KB code cache\n", cache_size_kb);
-		return true; /* unknown opcode: NOP */
+		return false; /* unknown opcode: stop compilation */
 	}
 	jit_cache_wp = (uint32_t *)jit_cache_base;
 	jit_cache_end = (uint32_t *)(jit_cache_base + jit_cache_size);
@@ -2284,7 +2286,7 @@ bool ppc_jit_aarch64_compile(
 	ppc_jit_block *out)
 {
 	if (!jit_cache_wp || jit_cache_wp >= jit_cache_end - 256)
-		return true; /* unknown opcode: NOP */
+		return false; /* unknown opcode: stop compilation */
 
 	uint32_t *code_start = jit_cache_wp;
 	jit_code_ptr = jit_cache_wp;
