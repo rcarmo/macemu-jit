@@ -1245,6 +1245,14 @@ bool ppc_jit_aarch64_compile(
 			break;
 		}
 
+		/* Check if this is a block-terminating opcode */
+		uint32_t term_opc = op >> 26;
+		bool is_terminator = (term_opc == 18); /* b/bl */
+		if (term_opc == 19) {
+			uint32_t term_xo = (op >> 1) & 0x3FF;
+			if (term_xo == 16 || term_xo == 528) is_terminator = true; /* bclr/bcctr */
+		}
+
 		if (op == 0x00000000) { /* illegal — end of test code */
 			emit_epilogue_with_pc(cur_pc);
 			n_compiled++;
@@ -1270,10 +1278,13 @@ bool ppc_jit_aarch64_compile(
 		jit_total_hit++;
 		n_compiled++;
 		cur_pc += 4;
+
+		/* Block-terminating opcodes: break after compiling them */
+		if (is_terminator) break;
 	}
 
 	/* Periodic report */
-	if ((jit_total_hit + jit_total_miss) % 5000 == 0 && (jit_total_hit + jit_total_miss) > 0)
+	if ((jit_total_hit + jit_total_miss) % 50000 == 0 && (jit_total_hit + jit_total_miss) > 0)
 		jit_report_misses();
 
 	/* If we didn't emit a ret yet, do it now */
