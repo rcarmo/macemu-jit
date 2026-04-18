@@ -681,6 +681,213 @@ TEST_ORDER+=(fuzz_or_allzero)
 TESTS[fuzz_xor_same]="3860ABCD 7C651A78"
 TEST_ORDER+=(fuzz_xor_same)
 
+
+# ============================================================
+# FULL COVERAGE VECTORS — every remaining untested opcode class
+# ============================================================
+
+# --- FP single precision ---
+# fadds: 2.0f + 3.0f via stw/lfs pattern
+TESTS[fp_fadds]="3C604000 90610100 38600000 90610104 C0010100 3C604040 90610108 C0210108 EC211028 D0010110"
+TEST_ORDER+=(fp_fadds)
+
+# --- FP fused multiply-add ---
+# fmadd f0,f1,f2,f3 = f1*f2+f3
+TESTS[fp_fmadd]="3C604000 90610100 38600000 90610104 C8210100 FC00083A D8010108"
+TEST_ORDER+=(fp_fmadd)
+
+# --- frsp (round to single) ---
+TESTS[fp_frsp]="3C604000 90610100 38600000 90610104 C8210100 FC000018 D8010108"
+TEST_ORDER+=(fp_frsp)
+
+# --- fsel (select) ---
+TESTS[fp_fsel]="3C604000 90610100 38600000 90610104 C8010100 C8210100 FC00082E D8010108"
+TEST_ORDER+=(fp_fsel)
+
+# --- mffs/mtfsf ---
+TESTS[fp_mffs]="FC00048E D8010100"
+TEST_ORDER+=(fp_mffs)
+
+# --- Indexed load/store ---
+# stwx: li r3,0xDEAD; li r4,0; stwx r3,r1,r4; lwzx r5,r1,r4
+TESTS[stwx_basic]="3860dead 38800000 7C61212E 7CA1202E"
+TEST_ORDER+=(stwx_basic)
+
+# stbx/lbzx round-trip
+TESTS[stbx_lbzx]="38600042 38800100 7C6120AE 7CA120AE"
+TEST_ORDER+=(stbx_lbzx)
+
+# sthx/lhzx round-trip  
+TESTS[sthx_lhzx]="38601234 38800200 7C61232E 7CA1232E"
+TEST_ORDER+=(sthx_lhzx)
+
+# lhax (sign-extending indexed)
+TESTS[lhax_basic]="38608000 B0610300 38800300 7CA122AE"
+TEST_ORDER+=(lhax_basic)
+
+# --- Byte-reversed loads ---
+# lhbrx: store 0x1234 normally, load byte-reversed → 0x3412
+TESTS[lhbrx_basic]="38601234 B0610400 38800400 7CA1262C"
+TEST_ORDER+=(lhbrx_basic)
+
+# lwbrx
+TESTS[lwbrx_basic]="3C60DEAD 6063BEEF 90610500 38800500 7CA1242C"
+TEST_ORDER+=(lwbrx_basic)
+
+# --- Update forms ---
+# lbzu
+TESTS[lbzu_basic]="38600042 98610200 388101FF 8CA40001"
+TEST_ORDER+=(lbzu_basic)
+
+# sthu
+TESTS[sthu_basic]="38601234 388102FE B0640002"
+TEST_ORDER+=(sthu_basic)
+
+# --- Carry extended ---
+# adde: set CA via addic, then adde
+TESTS[adde_chain]="3860FFFF 30630001 38800005 7CA42114"
+TEST_ORDER+=(adde_chain)
+
+# subfe
+TESTS[subfe_chain]="3860FFFF 30630001 38800005 38600003 7CA32110"
+TEST_ORDER+=(subfe_chain)
+
+# addme: rA + CA - 1
+TESTS[addme_basic]="3860FFFF 30630001 38600005 7CA301D4"
+TEST_ORDER+=(addme_basic)
+
+# addze: rA + CA
+TESTS[addze_chain]="3860FFFF 30630001 38600005 7CA30194"
+TEST_ORDER+=(addze_chain)
+
+# subfze: ~rA + CA
+TESTS[subfze_basic]="3860FFFF 30630001 38600005 7CA30190"
+TEST_ORDER+=(subfze_basic)
+
+# subfme: ~rA + CA - 1
+TESTS[subfme_basic]="3860FFFF 30630001 38600005 7CA301D0"
+TEST_ORDER+=(subfme_basic)
+
+# --- mulhwu (unsigned high multiply) ---
+TESTS[mulhwu_basic]="3C60FFFF 6063FFFF 3C80FFFF 6084FFFF 7CA32016"
+TEST_ORDER+=(mulhwu_basic)
+
+# --- mfcr/mtcrf round-trip ---
+TESTS[mfcr_mtcrf]="3860FFFF 2C030000 7CA00026 7CA0F120"
+TEST_ORDER+=(mfcr_mtcrf)
+
+# --- mcrxr ---
+TESTS[mcrxr_basic]="3860FFFF 30630001 7C200400"
+TEST_ORDER+=(mcrxr_basic)
+
+# --- Conditional bclr ---
+# Set CR0.LT via cmpwi, then beqlr (should NOT branch since LT not EQ)
+TESTS[bclr_cond]="3860FFFF 2C030000 4D820020"
+TEST_ORDER+=(bclr_cond)
+
+# --- orc ---
+TESTS[orc_basic]="38600000 388000FF 7C652338"
+TEST_ORDER+=(orc_basic)
+
+# --- eqv ---
+TESTS[eqv_basic2]="386000FF 388000FF 7C652238"
+TEST_ORDER+=(eqv_basic2)
+
+# --- andc ---
+TESTS[andc_basic2]="386000FF 3880000F 7C652078"
+TEST_ORDER+=(andc_basic2)
+
+# --- nor ---
+TESTS[nor_basic2]="38600000 38800000 7C6518F8"
+TEST_ORDER+=(nor_basic2)
+
+# --- nand ---
+TESTS[nand_basic2]="3860FFFF 388000FF 7C6523B8"
+TEST_ORDER+=(nand_basic2)
+
+# --- rlwimi ---
+TESTS[rlwimi_basic2]="3860FF00 38A000FF 5065043E"
+TEST_ORDER+=(rlwimi_basic2)
+
+# --- srawi edge ---
+TESTS[srawi_neg]="3860FF80 7C651E70"
+TEST_ORDER+=(srawi_neg)
+
+# --- subfic ---
+TESTS[subfic_basic2]="3860001E 20A30064"
+TEST_ORDER+=(subfic_basic2)
+
+# --- addic carry ---
+TESTS[addic_ca]="3860FFFF 30A30001"
+TEST_ORDER+=(addic_ca)
+
+# --- mfspr/mtspr XER ---
+TESTS[mfspr_xer]="7CA102A6"
+TEST_ORDER+=(mfspr_xer)
+
+# --- cmpw with negative ---
+TESTS[cmpw_neg]="3860FFFF 38800001 7C032000"
+TEST_ORDER+=(cmpw_neg)
+
+# --- cmplw ---
+TESTS[cmplw_basic]="3860FFFF 38800001 7C032040"
+TEST_ORDER+=(cmplw_basic)
+
+# --- lmw with 4 regs ---
+TESTS[lmw_4regs]="3B800011 3BA00022 3BC00033 3BE00044 BF810400 3B800000 3BA00000 3BC00000 3BE00000 BB810400"
+TEST_ORDER+=(lmw_4regs)
+
+# --- divwu ---
+TESTS[divwu_basic2]="3C60FFFF 6063FFFF 38800002 7CA32396"
+TEST_ORDER+=(divwu_basic2)
+
+# --- cntlzw edge: single bit ---
+TESTS[cntlzw_bit15]="38600001 7C650034"
+TEST_ORDER+=(cntlzw_bit15)
+
+# --- neg with 0 ---
+TESTS[neg_zero]="38600000 7CA300D0"
+TEST_ORDER+=(neg_zero)
+
+# --- extsh with 0 ---
+TESTS[extsh_zero]="38600000 7C650734"
+TEST_ORDER+=(extsh_zero)
+
+# --- extsb with 0xFF ---
+TESTS[extsb_ff]="386000FF 7C650774"
+TEST_ORDER+=(extsb_ff)
+
+# --- bdnz with count=0 (should NOT loop, fall through) ---
+TESTS[bdnz_zero]="38600000 38800000 7C8903A6 38630001 4200FFFC"
+TEST_ORDER+=(bdnz_zero)
+
+# --- b (unconditional forward branch) ---
+# b +8 skips one instruction
+TESTS[b_forward]="48000008 38600001 38A00042"
+TEST_ORDER+=(b_forward)
+
+# --- record form: subf. ---
+TESTS[subf_dot]="38600005 38800003 7CA42051"
+TEST_ORDER+=(subf_dot)
+
+# --- record form: xor. ---
+TESTS[xor_dot]="386000FF 388000FF 7C651A79"
+TEST_ORDER+=(xor_dot)
+
+# --- record form: neg. ---
+TESTS[neg_dot]="3860002A 7CA300D1"
+TEST_ORDER+=(neg_dot)
+
+# --- isync ---
+TESTS[isync_only]="4C00012C"
+TEST_ORDER+=(isync_only)
+
+# --- sc (system call) ---
+
+# --- twi (trap word immediate) - should NOP ---
+TESTS[twi_basic]="0C000000"
+TEST_ORDER+=(twi_basic)
+
 # ---- Execute all tests -------------------------------------------------------
 PASS=0
 FAIL=0
