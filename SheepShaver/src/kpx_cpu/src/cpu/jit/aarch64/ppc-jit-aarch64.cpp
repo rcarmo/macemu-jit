@@ -990,14 +990,68 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			return true;
 
 
-		case 597: /* lswi — load string: simplified as NOP (rare) */
+		case 597: /* lswi rD,rA,NB */
+		{
+			uint32_t nb_field = rb;
+			uint32_t nb = nb_field == 0 ? 32 : nb_field;
+			if (ra == 0) { a64_movz(RTMP0, 0, 0); }
+			else { emit_load_gpr(RTMP0, ra); }
+			uint32_t r = rd;
+			uint32_t bytes_done = 0;
+			while (bytes_done < nb) {
+				if (nb - bytes_done >= 4) {
+					emit32(0xB9400000 | (RTMP0 << 5) | RTMP1);
+					emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1);
+					emit_store_gpr(RTMP1, r);
+					if (bytes_done + 4 < nb) emit32(0x11001000 | (RTMP0 << 5) | RTMP0);
+					bytes_done += 4;
+				} else {
+					a64_movz(RTMP1, 0, 0);
+					for (uint32_t b = 0; b < nb - bytes_done; b++) {
+						emit32(0x38401400 | (RTMP0 << 5) | RTMP2);
+						uint32_t sh = (3 - b) * 8;
+						if (sh) { emit_load_imm32(3, sh); emit32(0x1AC02000 | (3 << 16) | (RTMP2 << 5) | RTMP2); }
+						emit32(0x2A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1);
+					}
+					emit_store_gpr(RTMP1, r);
+					bytes_done = nb;
+				}
+				r = (r + 1) & 31;
+			}
 			return true;
-		case 725: /* stswi — store string: simplified as NOP (rare) */
+		}
+		case 725: /* stswi rS,rA,NB */
+		{
+			uint32_t nb_field = rb;
+			uint32_t nb = nb_field == 0 ? 32 : nb_field;
+			if (ra == 0) { a64_movz(RTMP0, 0, 0); }
+			else { emit_load_gpr(RTMP0, ra); }
+			uint32_t r = PPC_RS(op);
+			uint32_t bytes_done = 0;
+			while (bytes_done < nb) {
+				if (nb - bytes_done >= 4) {
+					emit_load_gpr(RTMP1, r);
+					emit32(0x5AC00800 | (RTMP1 << 5) | RTMP1);
+					emit32(0xB8004400 | (RTMP0 << 5) | RTMP1);
+					bytes_done += 4;
+				} else {
+					emit_load_gpr(RTMP1, r);
+					for (uint32_t b = 0; b < nb - bytes_done; b++) {
+						a64_mov_reg(RTMP2, RTMP1);
+						uint32_t sh = (3 - b) * 8;
+						if (sh) { emit_load_imm32(3, sh); emit32(0x1AC02400 | (3 << 16) | (RTMP2 << 5) | RTMP2); }
+						emit32(0x38001400 | (RTMP0 << 5) | RTMP2);
+					}
+					bytes_done = nb;
+				}
+				r = (r + 1) & 31;
+			}
 			return true;
-		case 533: /* lswx — load string indexed: NOP */
-			return true;
-		case 661: /* stswx — store string indexed: NOP */
-			return true;
+		}
+		case 533: /* lswx: NB from XER at runtime, fall to interpreter */
+			return false;
+		case 661: /* stswx: NB from XER at runtime, fall to interpreter */
+			return false;
 
 
 										default:
