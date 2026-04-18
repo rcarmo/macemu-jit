@@ -68,3 +68,7 @@ void jit_op_cpusha(void);
 
 #endif /* CPU_aarch64 */
 #endif /* JIT_NATIVE_HELPERS_H */
+
+/* ARM_CCR_MAP: M68K NZVC→ARM NZCV flag translation table (defined in compemu_midfunc_arm64_2.cpp) */
+extern const uae_u32 ARM_CCR_MAP[];
+

@@ -31,7 +31,7 @@
  *
  */
 
-const uae_u32 ARM_CCR_MAP[] = { 0, ARM_C_FLAG, // 1 C
+extern const uae_u32 ARM_CCR_MAP[] = { 0, ARM_C_FLAG, // 1 C
                                 ARM_V_FLAG, // 2 V
                                 ARM_C_FLAG | ARM_V_FLAG, // 3 VC
                                 ARM_Z_FLAG, // 4 Z
@@ -8059,3 +8059,153 @@ MIDFUNC(1,jff_TAS,(RW1 d))
 	unlock2(d);
 }
 MENDFUNC(1,jff_TAS,(RW1 d))
+
+/*
+ * TRAPV: Trap on overflow (V flag set)
+ * If V flag is set in NZCV, signal exception 7 via jit_exception.
+ */
+MIDFUNC(0,jnf_TRAPV,(void))
+{
+	/* Read NZCV, test V bit (bit 28), write exception number if set */
+	MRS_NZCV_x(REG_WORK1);
+	if (flags_carry_inverted) {
+		EOR_xxCflag(REG_WORK1, REG_WORK1);
+		flags_carry_inverted = false;
+	}
+	/* V flag is bit 28 in NZCV */
+	TBZ_xii(REG_WORK1, 28, 3);   /* if V=0, skip next 3 instructions */
+	MOV_wi(REG_WORK2, 7);        /* exception number 7 */
+	uintptr idx = (uintptr)(&regs.jit_exception) - (uintptr)(&regs);
+	STR_wXi(REG_WORK2, R_REGSTRUCT, idx);
+}
+MENDFUNC(0,jnf_TRAPV,(void))
+
+/*
+ * ROXLW: Rotate left through extend, word, memory (shift by 1)
+ * bit_out = MSB; result = (val << 1) | X; X = C = bit_out
+ * N set from MSB of result, Z from result==0, V cleared
+ */
+MIDFUNC(1,jff_ROXLW,(RW2 d))
+{
+	d = rmw(d);
+	int x = readreg(FLAGX);
+
+	UNSIGNED16_REG_2_REG(REG_WORK1, d);
+	/* Shift left by 1, insert old X into bit 0 */
+	LSL_wwi(REG_WORK2, REG_WORK1, 1);
+	/* Insert X flag (bit 0 of FLAGX) into bit 0 of result */
+	BFI_wwii(REG_WORK2, x, 0, 1);
+	/* Extract old MSB (bit 15 of original) for new X/C */
+	UBFX_wwii(REG_WORK3, REG_WORK1, 15, 1);
+
+	/* Store result back into low 16 bits */
+	BFI_wwii(d, REG_WORK2, 0, 16);
+
+	/* Set X flag = old MSB */
+	MOV_ww(x, REG_WORK3);
+
+	/* Set N, Z flags from result (16-bit) */
+	SIGNED16_REG_2_REG(REG_WORK1, REG_WORK2);
+	TST_ww(REG_WORK1, REG_WORK1);
+
+	/* Set C = X */
+	TBZ_wii(REG_WORK3, 0, 4);
+	MRS_NZCV_x(REG_WORK4);
+	SET_xxCflag(REG_WORK4, REG_WORK4);
+	MSR_NZCV_x(REG_WORK4);
+
+	flags_carry_inverted = false;
+	DUPLICACTE_CARRY
+
+	unlock2(x);
+	unlock2(d);
+}
+MENDFUNC(1,jff_ROXLW,(RW2 d))
+
+/*
+ * ROXRW: Rotate right through extend, word, memory (shift by 1)
+ * bit_out = LSB; result = (val >> 1) | (X << 15); X = C = bit_out
+ */
+MIDFUNC(1,jff_ROXRW,(RW2 d))
+{
+	d = rmw(d);
+	int x = readreg(FLAGX);
+
+	UNSIGNED16_REG_2_REG(REG_WORK1, d);
+	/* Extract LSB for new X/C */
+	MOV_wi(REG_WORK3, 1);
+	AND_www(REG_WORK3, REG_WORK1, REG_WORK3);
+	/* Shift right by 1 */
+	LSR_wwi(REG_WORK2, REG_WORK1, 1);
+	/* Insert old X into bit 15 */
+	BFI_wwii(REG_WORK2, x, 15, 1);
+
+	/* Store result back */
+	BFI_wwii(d, REG_WORK2, 0, 16);
+
+	/* Set X flag = old LSB */
+	MOV_ww(x, REG_WORK3);
+
+	/* Set N, Z from result */
+	SIGNED16_REG_2_REG(REG_WORK1, REG_WORK2);
+	TST_ww(REG_WORK1, REG_WORK1);
+
+	/* Set C = X */
+	TBZ_wii(REG_WORK3, 0, 4);
+	MRS_NZCV_x(REG_WORK4);
+	SET_xxCflag(REG_WORK4, REG_WORK4);
+	MSR_NZCV_x(REG_WORK4);
+
+	flags_carry_inverted = false;
+	DUPLICACTE_CARRY
+
+	unlock2(x);
+	unlock2(d);
+}
+MENDFUNC(1,jff_ROXRW,(RW2 d))
+
+/*
+ * MV2SCCR: Move to CCR (byte → condition codes)
+ * Maps M68K XNZVC bits to ARM64 NZCV + FLAGX
+ */
+MIDFUNC(1,jff_MV2SCCR,(RR4 s))
+{
+	s = readreg(s);
+	int x = writereg(FLAGX);
+
+	/* Extract X flag (bit 4) */
+	UBFX_wwii(x, s, 4, 1);
+
+	/* Build ARM NZCV from M68K NZVC:
+	   M68K: bit3=N, bit2=Z, bit1=V, bit0=C
+	   ARM:  bit31=N, bit30=Z, bit29=C, bit28=V
+	   Remap: N stays at top, Z shifts, C and V swap positions */
+	MOV_xi(REG_WORK1, 0);
+
+	/* N flag: M68K bit 3 → ARM bit 31 */
+	UBFX_wwii(REG_WORK2, s, 3, 1);
+	LSL_xxi(REG_WORK2, REG_WORK2, 31);
+	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
+
+	/* Z flag: M68K bit 2 → ARM bit 30 */
+	UBFX_wwii(REG_WORK2, s, 2, 1);
+	LSL_xxi(REG_WORK2, REG_WORK2, 30);
+	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
+
+	/* C flag: M68K bit 0 → ARM bit 29 */
+	UBFX_wwii(REG_WORK2, s, 0, 1);
+	LSL_xxi(REG_WORK2, REG_WORK2, 29);
+	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
+
+	/* V flag: M68K bit 1 → ARM bit 28 */
+	UBFX_wwii(REG_WORK2, s, 1, 1);
+	LSL_xxi(REG_WORK2, REG_WORK2, 28);
+	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
+
+	MSR_NZCV_x(REG_WORK1);
+	flags_carry_inverted = false;
+
+	unlock2(x);
+	unlock2(s);
+}
+MENDFUNC(1,jff_MV2SCCR,(RR4 s))
