@@ -160,6 +160,10 @@ static uint32_t jit_total_miss = 0;
 static uint32_t jit_total_hit = 0;
 static uint32_t jit_blocks_attempted = 0;
 static uint32_t jit_blocks_complete = 0;
+static uint32_t jit_last_fail_op = 0;
+static uint32_t jit_cum_fail_opc[64] = {0};
+static uint32_t jit_cum_fail_xo31[1024] = {0};
+static uint32_t jit_cum_fail_total = 0;
 
 static void jit_report_misses(void) {
 	if (jit_total_miss == 0 && jit_total_hit == 0) return;
@@ -511,13 +515,13 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 	case 32: /* lwz rD,d(rA) */
 		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
 		if (ra == 0) {
-			/* lwz rD, d(0) = load from absolute address d — rare in test code */
-			return false;
-		}
-		emit_load_gpr(RTMP0, ra);                /* base address */
-		if (simm) {
-			emit_load_imm32(RTMP1, (int32_t)simm);
-			emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADD */
+			emit_load_imm32(RTMP0, (int32_t)simm);
+		} else {
+			emit_load_gpr(RTMP0, ra);
+			if (simm) {
+				emit_load_imm32(RTMP1, (int32_t)simm);
+				emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			}
 		}
 		/* LDR W(RTMP1), [X(RTMP0)] — load 32-bit from host address */
 		emit32(0xB9400000 | (RTMP0 << 5) | RTMP1); /* LDR Wt, [Xn] */
@@ -866,11 +870,16 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 
 	case 18: /* b/bl (unconditional branch) */
 	{
-		int32_t li = ((op & 0x03FFFFFC) ^ 0x02000000) - 0x02000000; /* sign-extend 26-bit */
+		int32_t li = ((op & 0x03FFFFFC) ^ 0x02000000) - 0x02000000;
 		bool lk = op & 1;
 		bool aa = op & 2;
-		/* Can't handle branches within JIT blocks yet — emit PC update and return */
-		return false;
+		uint32_t target = aa ? (uint32_t)li : (pc + li);
+		if (lk) {
+			emit_load_imm32(RTMP0, (int32_t)(pc + 4));
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_LR);
+		}
+		emit_epilogue_with_pc(target);
+		return true;
 	}
 
 	case 42: /* lha rD,d(rA) — load halfword algebraic (sign-extended) */
@@ -1270,6 +1279,9 @@ bool ppc_jit_aarch64_compile(
 		if (!compile_one(op, cur_pc)) {
 			jit_total_miss++;
 			jit_miss_count[op >> 26]++;
+			jit_cum_fail_opc[op >> 26]++;
+			if ((op >> 26) == 31) jit_cum_fail_xo31[(op >> 1) & 0x3FF]++;
+			jit_cum_fail_total++;
 			emit_epilogue_with_pc(cur_pc);
 			complete = false;
 			break;
@@ -1283,8 +1295,12 @@ bool ppc_jit_aarch64_compile(
 		if (is_terminator) break;
 	}
 
+	/* Track why blocks are incomplete */
+	if (!complete && 0) {
+	}
+
 	/* Periodic report */
-	if ((jit_blocks_attempted) % 5000 == 0 && jit_blocks_attempted > 0)
+	if ((jit_blocks_attempted) % 100000 == 0 && jit_blocks_attempted > 0)
 		jit_report_misses();
 
 	/* If we didn't emit a ret yet, do it now */
@@ -1311,7 +1327,7 @@ bool ppc_jit_aarch64_compile(
 		static uint32_t cum_opc[64] = {0};
 		static uint32_t cum_xo31[1024] = {0};
 		static uint32_t cum_total = 0;
-		static uint32_t cum_report_at = 1000;
+		static uint32_t cum_report_at = 100000;
 		
 		if (!complete) {
 			/* Record the opcode that caused the failure */
@@ -1328,9 +1344,9 @@ bool ppc_jit_aarch64_compile(
 		
 		if (jit_blocks_attempted >= cum_report_at) {
 			cum_report_at += 100000;
-			fprintf(stderr, "PPC-JIT-A64-CUM: %u incomplete blocks out of %u, top blockers:\n", cum_total, jit_blocks_attempted);
+			fprintf(stderr, "PPC-JIT-A64-CUM: %u fail opcodes in %u blocks (%u attempted), top blockers:\n", jit_cum_fail_total, jit_blocks_attempted - jit_blocks_complete, jit_blocks_attempted);
 			/* Copy arrays for sorted output without destroying data */
-			uint32_t tmp_opc[64]; memcpy(tmp_opc, cum_opc, sizeof(tmp_opc));
+			uint32_t tmp_opc[64]; memcpy(tmp_opc, jit_cum_fail_opc, sizeof(tmp_opc));
 			for (int pass = 0; pass < 15; pass++) {
 				uint32_t max_v = 0; int max_i = -1;
 				for (int i = 0; i < 64; i++) if (tmp_opc[i] > max_v) { max_v = tmp_opc[i]; max_i = i; }
@@ -1338,7 +1354,7 @@ bool ppc_jit_aarch64_compile(
 				fprintf(stderr, "  opc=%d: %u blocks\n", max_i, max_v);
 				tmp_opc[max_i] = 0;
 			}
-			uint32_t tmp_xo[1024]; memcpy(tmp_xo, cum_xo31, sizeof(tmp_xo));
+			uint32_t tmp_xo[1024]; memcpy(tmp_xo, jit_cum_fail_xo31, sizeof(tmp_xo));
 			fprintf(stderr, "PPC-JIT-A64-CUM: top XO31 blockers:\n");
 			for (int pass = 0; pass < 10; pass++) {
 				uint32_t max_v = 0; int max_i = -1;
