@@ -2,7 +2,7 @@
 
 ## Status
 
-**28 deterministic test vectors**, all passing against the PPC interpreter.
+**70 deterministic test vectors**, all passing against the PPC interpreter.
 
 ## How it works
 

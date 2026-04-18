@@ -15,9 +15,9 @@ starting with an optimized interpreter and progressing to a direct-codegen JIT.
 | Block completion rate | **92.3%** (110K+/120K+ blocks native) |
 | JIT benchmark (addi+bdnz 100M) | **382 MIPS** (2.2x over interpreter) |
 | Interpreter benchmark | 167 MIPS |
-| Total opcode handlers | ~85 PPC → ARM64 |
+| Total opcode handlers | **170** PPC → ARM64 (all scalar) |
 | FPU support | ✅ double + single precision |
-| Boot tested | Mac OS 7.5 to desktop ("Welcome to Mac OS") |
+| Boot tested | Mac OS 7.5 to desktop ("Welcome to Mac OS") ("Welcome to Mac OS") |
 
 ### Screenshots
 
@@ -118,7 +118,7 @@ CR/LR/CTR/XER/PC at known offsets from x20
 ### Phase 1: Interpreter baseline ✅
 - Interpreter already achieves 167 MIPS with Duff's device + block cache
 - Computed-goto optimization deferred (diminishing returns)
-- Test harness (`jit-test/`) with 28+ PPC opcode vectors
+- Test harness (`jit-test/`) with **70** PPC opcode vectors (score=100)
 
 ### Phase 2: JIT scaffolding ✅
 - Direct codegen compiler: `ppc-jit-aarch64.cpp`
