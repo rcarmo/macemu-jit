@@ -403,6 +403,95 @@ TEST_ORDER+=(extsh_positive)
 TESTS[extsb_positive]="3860007f 7C650774"
 TEST_ORDER+=(extsb_positive)
 
+
+# --- FP operations ---
+# fneg: store 2.0 as double, negate it, check sign
+# 2.0 double = 0x40000000_00000000
+TESTS[fp_neg]="3C604000 90610100 38600000 90610104 C8210100 FC2000D0 D8210108"
+TEST_ORDER+=(fp_neg)
+
+# fabs: store -2.0 (0xC0000000_00000000), take abs
+TESTS[fp_abs]="3C60C000 90610100 38600000 90610104 C8210100 FC200210 D8210108"
+TEST_ORDER+=(fp_abs)
+
+# --- Branch ---
+# bl +8; nop; mfspr r5,LR → r5 should equal address of nop
+# bl = 0x48000009 (LK=1, +8 bytes)... actually bl offset must be from current insn
+# bl +8 = 0x48000009 (branch 8 bytes forward, link)
+TESTS[bl_basic]="7CA802A6"
+TEST_ORDER+=(bl_basic)
+
+# --- srawi ---
+# li r3,-128; srawi r5,r3,3 → r5 = -16 = 0xFFFFFFF0
+# srawi r5,r3,3: XO=31 XO=824, rS=3 rA=5 SH=3 = 0x7C651E70
+TESTS[srawi_basic]="3860ff80 7C651E70"
+TEST_ORDER+=(srawi_basic)
+
+# --- lha (sign-extending halfword) ---
+# li r3,0x8000; sth r3,0x300(r1); lha r5,0x300(r1) → r5 = 0xFFFF8000
+TESTS[lha_signext]="38608000 B0610300 A8A10300"
+TEST_ORDER+=(lha_signext)
+
+# --- lmw/stmw ---
+# li r28,0x28; li r29,0x29; li r30,0x30; li r31,0x31; stmw r28,0x400(r1); 
+# li r28,0; li r29,0; li r30,0; li r31,0; lmw r28,0x400(r1)
+TESTS[lmw_stmw]="3B800028 3BA00029 3BC00030 3BE00031 BF810400 3B800000 3BA00000 3BC00000 3BE00000 BB810400"
+TEST_ORDER+=(lmw_stmw)
+
+# --- mcrf ---
+# cmpwi cr0,r3,0 (r3=-1 → LT); mcrf cr1,cr0; then check cr1 has LT
+# cmpwi cr0,r3,0 = 0x2C030000; mcrf cr1,cr0 = 0x4C840000
+TESTS[mcrf_basic]="3860ffff 2C030000 4C840000"
+TEST_ORDER+=(mcrf_basic)
+
+# --- subfe (simplified) ---
+# li r3,5; li r4,10; subfe r5,r3,r4 → r5 = r4 + ~r3 + CA ≈ 4 (simplified as subf)
+# subfe = XO=31 XO=136: 0x7C000110 | (5<<21)|(3<<16)|(4<<11) = 0x7CA32110
+TESTS[subfe_basic]="38600005 3880000a 7CA32110"
+TEST_ORDER+=(subfe_basic)
+
+# --- addze (simplified) ---
+# li r3,42; addze r5,r3 → r5 = 42 (simplified: ignores CA)
+# addze = XO=31 XO=202: 0x7C000194 | (5<<21)|(3<<16) = 0x7CA30194
+TESTS[addze_basic]="3860002a 7CA30194"
+TEST_ORDER+=(addze_basic)
+
+# --- dcbz ---
+# stw r3,0x500(r1); li r4,0x500; dcbz r1,r4; lwz r5,0x500(r1) → r5=0
+# dcbz = XO=31 XO=1014: 0x7C0007EC | (0<<21)|(1<<16)|(4<<11) = 0x7C0127EC
+TESTS[dcbz_basic]="3860beef 90610500 38800500 7C0127EC 80A10500"
+TEST_ORDER+=(dcbz_basic)
+
+# --- xori ---
+# li r3,0xFF; xori r5,r3,0xF0 → r5=0x0F
+# xori rA=5,rS=3,UIMM=0xF0: 0x686500F0
+TESTS[xori_basic]="386000ff 686500F0"
+TEST_ORDER+=(xori_basic)
+
+# --- FP compare ---
+# Store 1.0 and 2.0, compare: fcmpu cr0,f0,f1 → CR0.LT
+TESTS[fcmpu_basic]="3C603F80 90610100 38600000 90610104 C0010100 3C604000 90610108 C021010C C8010100 C8210108 FC000000"
+TEST_ORDER+=(fcmpu_basic)
+
+# --- FP mul ---
+# Store 3.0 (0x40080000) and 4.0 (0x40100000), multiply → 12.0
+TESTS[fp_mul]="3C604008 90610100 38600000 90610104 C8010100 3C604010 90610108 90610104 C8210108 FC000072 D8010110"
+TEST_ORDER+=(fp_mul)
+
+# --- isync (should be NOP) ---
+TESTS[isync_basic]="4C00012C 60000000"
+TEST_ORDER+=(isync_basic)
+
+# --- eieio (should be NOP) ---
+# eieio = 0x7C0006AC
+TESTS[eieio_basic]="7C0006AC 60000000"
+TEST_ORDER+=(eieio_basic)
+
+# --- sync (should be NOP) ---
+# sync = 0x7C0004AC
+TESTS[sync_basic]="7C0004AC 60000000"
+TEST_ORDER+=(sync_basic)
+
 # ---- Execute all tests -------------------------------------------------------
 PASS=0
 FAIL=0
