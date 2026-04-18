@@ -1089,7 +1089,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 
 										default:
 			jit_xo_miss[(op >> 1) & 0x3FF]++;
-			return true; /* unknown opcode: NOP */
+			return false;
 		}
 	}
 
@@ -2243,7 +2243,7 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 
 	default:
 		jit_miss_count[opc]++;
-		return true; /* unknown opcode: NOP */
+		return false;
 	}
 }
 
@@ -2328,7 +2328,8 @@ bool ppc_jit_aarch64_compile(
 			if (term_xo == 16 || term_xo == 528) is_terminator = true; /* bclr/bcctr */
 		}
 
-		if (op == 0x00000000) { /* illegal — end of test code */
+		if (op == 0x00000000) { /* illegal — end of test code / zero-filled memory */
+			if (n_compiled == 0) return false; /* don't compile empty blocks */
 			emit_epilogue_with_pc(cur_pc);
 			n_compiled++;
 			cur_pc += 4;
