@@ -38,7 +38,15 @@ if [ ! -f config.h ] || [ ! -f Makefile ]; then
     fi
 fi
 
-if ! make -j12 >"$RUN_DIR/build.log" 2>&1; then
+# Build base objects (make will fail on link due to missing JIT, that's ok)
+make -j12 >"$RUN_DIR/build.log" 2>&1 || true
+# Compile JIT-specific objects with USE_AARCH64_JIT
+JITDIR="../kpx_cpu/src/cpu/jit/aarch64"
+g++ -c -o obj/ppc-jit-aarch64.o "$JITDIR/ppc-jit-aarch64.cpp" -I"$JITDIR" -DHAVE_CONFIG_H -g -O2 -std=c++11 >>"$RUN_DIR/build.log" 2>&1
+g++ -c -o obj/ppc-cpu.o ../kpx_cpu/src/cpu/ppc/ppc-cpu.cpp -I../include -I. -I.. -I../CrossPlatform -I../kpx_cpu/include -I../kpx_cpu/src -DHAVE_CONFIG_H -DUSE_AARCH64_JIT -g -O2 >>"$RUN_DIR/build.log" 2>&1
+g++ -c -o obj/sheepshaver_glue.o ../kpx_cpu/sheepshaver_glue.cpp -I../include -I. -I.. -I../CrossPlatform -I../kpx_cpu/include -I../kpx_cpu/src -DHAVE_CONFIG_H -DUSE_AARCH64_JIT -g -O2 >>"$RUN_DIR/build.log" 2>&1
+# Final link
+if ! g++ -o SheepShaver obj/*.o -lpthread -lm -lSDL2 -lgtk-x11-2.0 -lgdk-x11-2.0 -lpangocairo-1.0 -latk-1.0 -lcairo -lgdk_pixbuf-2.0 -lgio-2.0 -lpangoft2-1.0 -lpango-1.0 -lgobject-2.0 -lglib-2.0 -lharfbuzz -lvncserver -lfontconfig -lfreetype >>"$RUN_DIR/build.log" 2>&1; then
     echo "METRIC build_ok=0"
     echo "METRIC pass=0"
     echo "METRIC fail=0"
@@ -252,6 +260,148 @@ TEST_ORDER+=(extsh_basic)
 # extsb rA,rS = 0x7C000774 | (rS<<21) | (rA<<16)
 TESTS[extsb_basic]="38600080 7C650774"
 TEST_ORDER+=(extsb_basic)
+
+
+# --- Carry/overflow ALU ---
+# addc r5,r3,r4: li r3,-1; li r4,2; addc r5,r3,r4 → r5=1, XER.CA=1
+# addc = 0x7C000014 | (5<<21)|(3<<16)|(4<<11)
+TESTS[addc_basic]="3860ffff 38800002 7CA32014"
+TEST_ORDER+=(addc_basic)
+
+# subfc r5,r4,r3: li r3,10; li r4,3; subfc r5,r4,r3 → r5=7
+# subfc = 0x7C000010 | (5<<21)|(4<<16)|(3<<11)
+TESTS[subfc_basic]="3860000a 38800003 7CA41810"
+TEST_ORDER+=(subfc_basic)
+
+# subfic r5,r3,100: li r3,30; subfic r5,r3,100 → r5=70
+# subfic = 0x20000000 | (5<<21)|(3<<16)|100
+TESTS[subfic_basic]="3860001e 20A30064"
+TEST_ORDER+=(subfic_basic)
+
+# --- Logical ops ---
+# andc r5,r3,r4: li r3,0xFF; li r4,0x0F; andc r5,r3,r4 → r5=0xF0
+# andc = 0x7C000078 | (3<<21)|(5<<16)|(4<<11)
+TESTS[andc_basic]="386000ff 3880000f 7C652078"
+TEST_ORDER+=(andc_basic)
+
+# nor r5,r3,r3: li r3,0; nor r5,r3,r3 → r5=0xFFFFFFFF
+# nor = 0x7C0000F8 | (3<<21)|(5<<16)|(3<<11)
+TESTS[nor_basic]="38600000 7C6518F8"
+TEST_ORDER+=(nor_basic)
+
+# nand r5,r3,r4: li r3,-1; li r4,0xFF; nand r5,r3,r4 → r5=0xFFFFFF00
+# nand = 0x7C0003B8 | (3<<21)|(5<<16)|(4<<11)
+TESTS[nand_basic]="3860ffff 388000ff 7C6523B8"
+TEST_ORDER+=(nand_basic)
+
+# eqv r5,r3,r4: li r3,0xFF; li r4,0xFF; eqv r5,r3,r4 → r5=0xFFFFFFFF (XNOR)
+# eqv = 0x7C000238 | (3<<21)|(5<<16)|(4<<11)
+TESTS[eqv_basic]="386000ff 388000ff 7C652238"
+TEST_ORDER+=(eqv_basic)
+
+# orc r5,r3,r4: li r3,0; li r4,0xFF; orc r5,r3,r4 → r5=0xFFFFFF00
+# orc = 0x7C000338 | (3<<21)|(5<<16)|(4<<11)
+TESTS[orc_basic]="38600000 388000ff 7C652338"
+TEST_ORDER+=(orc_basic)
+
+# --- Multiply/divide ---
+# divwu r5,r3,r4: li r3,100; li r4,7; divwu r5,r3,r4 → r5=14
+# divwu = 0x7C000396 | (5<<21)|(3<<16)|(4<<11)
+TESTS[divwu_basic]="38600064 38800007 7CA32396"
+TEST_ORDER+=(divwu_basic)
+
+# mulhw r5,r3,r4: lis r3,0x1000; lis r4,0x1000; mulhw r5,r3,r4 → r5=0x01000000
+# mulhw = 0x7C000096 | (5<<21)|(3<<16)|(4<<11)
+TESTS[mulhw_basic]="3C601000 3C801000 7CA32096"
+TEST_ORDER+=(mulhw_basic)
+
+# --- Rotate ---
+# rlwnm r5,r3,r4,0,31: li r3,1; li r4,8; rlwnm r5,r3,r4,0,31 → r5=256
+# rlwnm = 0x5C000000 | (3<<21)|(5<<16)|(4<<11)|(0<<6)|(31<<1)
+TESTS[rlwnm_basic]="38600001 38800008 5C65203E"
+TEST_ORDER+=(rlwnm_basic)
+
+# --- CR logical ---
+# cmpwi cr0,r3,0; cmpwi cr1,r4,0; crand 0,0,4 (AND cr0.lt with cr1.lt)
+# cmpwi cr0,r3,0 = 0x2C030000; cmpwi cr1,r4,0 = 0x2C840000
+# crand 0,0,4 = 0x4C000202
+TESTS[crand_basic]="3860ffff 3880ffff 2C030000 2C840000 4C000202"
+TEST_ORDER+=(crand_basic)
+
+# crxor 0,0,0 (clear CR bit 0) then cror 0,0,4 (OR)
+# crxor 0,0,0 = 0x4C000182; cror 0,0,4 = 0x4C000382
+TESTS[crxor_cror]="3860ffff 2C030000 4C000182 4C000382"
+TEST_ORDER+=(crxor_cror)
+
+# --- FP operations ---
+# fadd: load 2.0 and 3.0 via lis/stw/lfs, add them
+# This is complex in hex. Use simpler approach: stfd a known pattern.
+# li r3,0x4000; stw r3,0x100(r1); li r3,0; stw r3,0x104(r1); lfd f1,0x100(r1)
+# That stores 0x40000000_00000000 as a double = 2.0
+TESTS[fp_add]="3C604000 90610100 38600000 90610104 C8210100 FC200890 FC211028 D8210108"
+TEST_ORDER+=(fp_add)
+
+# --- Load/store indexed ---
+# lwzx: li r3,0xBEEF; stw r3,0(r1); li r4,0; lwzx r5,r1,r4
+# lwzx = 0x7C00002E | (5<<21)|(1<<16)|(4<<11)
+TESTS[lwzx_basic]="3860beef 90610000 38800000 7CA1202E"
+TEST_ORDER+=(lwzx_basic)
+
+# lbzx: li r3,0x42; stb r3,0x200(r1); li r4,0x200; lbzx r5,r1,r4
+# lbzx = 0x7C0000AE | (5<<21)|(1<<16)|(4<<11)
+TESTS[lbzx_basic]="38600042 98610200 38800200 7CA120AE"
+TEST_ORDER+=(lbzx_basic)
+
+# --- Record forms ---
+# or. r5,r3,r3 with negative value (sets CR0.LT)
+# or. = 0x7C000379 | (3<<21)|(5<<16)|(3<<11)
+TESTS[or_dot_neg]="3860ffff 7C651B79"
+TEST_ORDER+=(or_dot_neg)
+
+# and. r5,r3,r4 with zero result (sets CR0.EQ)
+# and. = 0x7C000039 | (3<<21)|(5<<16)|(4<<11)
+TESTS[and_dot_zero]="38600ff0 3880000f 7C651839"
+TEST_ORDER+=(and_dot_zero)
+
+# --- mftb (time base) ---
+# mftb r5 → should return non-zero
+# mftb = 0x7C0002E6 | (5<<21) with TBR=268
+TESTS[mftb_basic]="7CA602A6"
+TEST_ORDER+=(mftb_basic)
+
+# --- cntlzw edge cases ---
+# cntlzw r5,r3: li r3,0; cntlzw r5,r3 → r5=32
+TESTS[cntlzw_zero]="38600000 7C650034"
+TEST_ORDER+=(cntlzw_zero)
+
+# cntlzw r5,r3: li r3,-1; cntlzw r5,r3 → r5=0
+TESTS[cntlzw_allones]="3860ffff 7C650034"
+TEST_ORDER+=(cntlzw_allones)
+
+# --- bdnz loop (longer) ---
+# li r3,0; li r4,10; mtctr r4; addi r3,r3,1; bdnz -4
+TESTS[bdnz_10]="38600000 3880000a 7C8903A6 38630001 4200FFFC"
+TEST_ORDER+=(bdnz_10)
+
+# --- compare unsigned ---
+# cmplwi cr0,r3,100: li r3,200; cmplwi cr0,r3,100
+# cmplwi = 0x28030064
+TESTS[cmplwi_basic]="386000c8 28030064"
+TEST_ORDER+=(cmplwi_basic)
+
+# --- stwu/lwzu stack frame ---
+# stwu r1,-16(r1); lwzu r3,16(r1)
+TESTS[stwu_lwzu]="9421FFF0 84610010"
+TEST_ORDER+=(stwu_lwzu)
+
+# --- extsh/extsb edge ---
+# li r3,0x7FFF; extsh r5,r3 → r5=0x7FFF (positive, no sign ext)
+TESTS[extsh_positive]="38607fff 7C650734"
+TEST_ORDER+=(extsh_positive)
+
+# li r3,0x7F; extsb r5,r3 → r5=0x7F
+TESTS[extsb_positive]="3860007f 7C650774"
+TEST_ORDER+=(extsb_positive)
 
 # ---- Execute all tests -------------------------------------------------------
 PASS=0

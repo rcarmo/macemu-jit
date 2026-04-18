@@ -914,6 +914,22 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			emit_load_imm32(RTMP0, 0);
 			emit_store_gpr(RTMP0, rd);
 			return true;
+
+		case 83: /* mfmsr rD — simplified: return 0 */
+			emit_load_imm32(RTMP0, 0);
+			emit_store_gpr(RTMP0, rd);
+			return true;
+		case 310: /* eciwx rD,rA,rB — external control in word: NOP */
+			return true;
+		case 438: /* ecowx rS,rA,rB — external control out word: NOP */
+			return true;
+
+		case 822: /* dss — data stream stop: NOP */
+			return true;
+		case 342: /* dst — data stream touch: NOP */
+			return true;
+		case 374: /* dstst — data stream touch for store: NOP */
+			return true;
 		default:
 			jit_xo_miss[(op >> 1) & 0x3FF]++;
 			return false;
