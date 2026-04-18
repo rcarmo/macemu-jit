@@ -175,6 +175,30 @@ static void emit_load_ea_base(int ra_num) {
 		emit_load_gpr(RTMP0, ra_num);
 	}
 }
+
+/* ---- AltiVec Vector Register helpers ---- */
+/* VR[n] at offset 384 + n*16, each 128-bit (16 bytes) */
+#define PPCR_VR(n) ((uint32_t)(384 + (n) * 16))
+
+/* Load 128-bit vector register into ARM64 Q register (NEON) */
+static void emit_load_vr(int qd, int vr_num) {
+	uint32_t off = PPCR_VR(vr_num);
+	/* LDR Qt, [Xn, #imm] — 128-bit vector load, unsigned offset scaled by 16 */
+	emit32(0x3DC00000 | ((off / 16) << 10) | (RSTATE << 5) | qd);
+}
+
+/* Store ARM64 Q register into VR[n] */
+static void emit_store_vr(int qs, int vr_num) {
+	uint32_t off = PPCR_VR(vr_num);
+	emit32(0x3D800000 | ((off / 16) << 10) | (RSTATE << 5) | qs);
+}
+
+/* AltiVec field extraction */
+static inline uint32_t VR_VD(uint32_t op) { return (op >> 21) & 0x1F; }
+static inline uint32_t VR_VA(uint32_t op) { return (op >> 16) & 0x1F; }
+static inline uint32_t VR_VB(uint32_t op) { return (op >> 11) & 0x1F; }
+static inline uint32_t VR_VC(uint32_t op) { return (op >> 6) & 0x1F; }
+
 /* Emit: store next_pc to regs->pc, epilogue, ret */
 static void emit_epilogue_with_pc(uint32_t next_pc) {
 	emit_load_imm32(RTMP0, (int32_t)next_pc);
