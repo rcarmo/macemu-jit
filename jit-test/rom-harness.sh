@@ -1,14 +1,15 @@
 #!/bin/bash
-# Headless Mac — boots Quadra 800 ROM through JIT, no display server needed.
+# Headless Mac — boots Quadra 800 ROM through JIT at optlev=2.
+# NO interpreter fallback. All blocks compile to native ARM64 on first hit.
+# No display server needed.
+#
 # Usage:
-#   ./jit-test/rom-harness.sh                      # 2 min default
+#   ./jit-test/rom-harness.sh                      # 2 min smoke test
 #   B2_TIMEOUT=600 ./jit-test/rom-harness.sh       # 10 min full boot
-#   B2_JIT=false ./jit-test/rom-harness.sh         # interpreter comparison
 set -uo pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$DIR/BasiliskII/src/Unix/BasiliskII"
 ROM="${B2_ROM:-/workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM}"
-JIT="${B2_JIT:-true}"
 SECS="${B2_TIMEOUT:-120}"
 
 [ -f "$ROM" ] || { echo "ROM not found: $ROM" >&2; exit 1; }
@@ -22,7 +23,7 @@ ramsize 8388608
 modelid 14
 cpu 4
 fpu false
-jit $JIT
+jit true
 jitfpu false
 jitcachesize 8192
 screen win/640/480
@@ -31,8 +32,13 @@ nocdrom true
 ignoresegv true
 EOF
 
-echo "Headless Mac: jit=$JIT timeout=${SECS}s" >&2
-env HOME="$W" B2_ROM_HARNESS=999999 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+echo "Headless Mac: optlev=2, force-translate, timeout=${SECS}s" >&2
+env HOME="$W" \
+    B2_ROM_HARNESS=999999 \
+    B2_JIT_FORCE_TRANSLATE=1 \
+    B2_JIT_MAX_OPTLEV=2 \
+    SDL_VIDEODRIVER=dummy \
+    SDL_AUDIODRIVER=dummy \
   timeout -k5 "${SECS}" "$BIN" --config "$W/prefs" >"$W/out" 2>"$W/err"
 RC=$?
 
@@ -53,7 +59,7 @@ fi
 echo "" >&2
 echo "=== Headless Mac ===" >&2
 grep '^DC\[' "$W/err" | tail -5 >&2
-for m in "PatchROM ok" SCSIGet set_dsk_err DiskControl; do
+for m in "FORCE_TRANSLATE" "max_optlev" "PatchROM ok" SCSIGet set_dsk_err DiskControl; do
   grep -q "$m" "$W/err" 2>/dev/null && echo "  ✅ $m" >&2 || echo "  ❌ $m" >&2
 done
 echo "pc=${PC:-?} sr=${SR:-?} dc=${DC_NUM:-0} in_ram=$IN_RAM scsi=$SCSI segv=$SEGV rc=$RC" >&2
