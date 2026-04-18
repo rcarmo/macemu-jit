@@ -955,7 +955,7 @@ static inline bool jit_disable_hardcoded_optlev1(void)
 	return enabled != 0;
 }
 
-static void flush(int save_regs);
+void flush(int save_regs);
 
 static void op_fullsr_orsr_w_comp_ff(uae_u32 opcode);
 static void op_fullsr_andsr_w_comp_ff(uae_u32 opcode);
@@ -3981,7 +3981,7 @@ static void init_comp(void)
 }
 
 /* Only do this if you really mean it! The next call should be to init!*/
-static void flush(int save_regs)
+void flush(int save_regs)
 {
     int i;
 

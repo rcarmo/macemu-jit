@@ -112,3 +112,4 @@ DECLARE_MIDFUNC(fp_from_double_mr(RR4 adr, FR s));
 DECLARE_MIDFUNC(fp_to_double_rm(FW d, RR4 adr));
 DECLARE_MIDFUNC(fp_fscc_ri(RW4, int cc));
 DECLARE_MIDFUNC(roxr_b_ri(RW1 d, IM8 i));
+DECLARE_MIDFUNC(call_helper(IMPTR addr));

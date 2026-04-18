@@ -1630,8 +1630,32 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_NBCD:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	if (curi->smode == Dreg) {
+	    comprintf("\t{\n");
+	    comprintf("\t  int enc = scratchie++;\n");
+	    comprintf("\t  mov_l_ri(enc, srcreg & 7);\n");
+	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
+	    comprintf("\t}\n");
+	} else {
+	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	    comprintf("\t{\n");
+	    comprintf("\t  int enc = scratchie++;\n");
+	    comprintf("\t  mov_l_ri(enc, 8);\n");
+	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
+	    comprintf("\t}\n");
+	}
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_nbcd(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_nbcd);\n");
+	}
+#else
 	failure;
 	/* Nope! */
+#endif
 	break;
 
      case i_CLR:
@@ -2780,35 +2804,123 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_ASRW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_asrw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_asrw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_ASLW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_aslw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_aslw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_LSRW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_lsrw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_lsrw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_LSLW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_lslw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_lslw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_ROLW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_rolw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_rolw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_RORW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_rorw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_rorw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_ROXLW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_roxlw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_roxlw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_ROXRW:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_roxrw(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_roxrw);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_MOVEC2:
@@ -2896,8 +3008,33 @@ gen_opcode (unsigned int opcode)
      case i_BFCLR:
      case i_BFFFO:
      case i_BFSET:
-     case i_BFINS:
+	/* TODO: Implement BFSET natively */
 	failure;
+	break;
+
+     case i_BFINS:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "extra", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
+	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, extra);\n");
+	if (curi->dmode == Dreg) {
+	    comprintf("\t{\n");
+	    comprintf("\t  int ea_enc = scratchie++;\n");
+	    comprintf("\t  mov_l_ri(ea_enc, (dstreg & 7) | 0x80000000u);\n");
+	    comprintf("\t  mov_l_mr((uintptr)&regs.scratchregs[0], ea_enc);\n");
+	    comprintf("\t}\n");
+	} else {
+	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], dsta);\n");
+	}
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_bfins(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_bfins);\n");
+	}
+#else
+	failure;
+#endif
 	break;
 
      case i_PACK:
@@ -2909,7 +3046,31 @@ gen_opcode (unsigned int opcode)
 	break;
 
 	 case i_TAS:
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
+	comprintf("\tdont_care_flags();\n");
+	if (curi->smode == Dreg) {
+	    comprintf("\t{\n");
+	    comprintf("\t  int enc = scratchie++;\n");
+	    comprintf("\t  mov_l_ri(enc, srcreg & 7);\n");
+	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
+	    comprintf("\t}\n");
+	} else {
+	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
+	    comprintf("\t{\n");
+	    comprintf("\t  int enc = scratchie++;\n");
+	    comprintf("\t  mov_l_ri(enc, 8);\n");
+	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
+	    comprintf("\t}\n");
+	}
+	comprintf("\tflush(1);\n");
+	{
+	    extern void jit_op_tas(void);
+	    comprintf("\tcall_helper((uintptr)jit_op_tas);\n");
+	}
+#else
 	failure;
+#endif
 	break;
 
      case i_FPP:
@@ -3511,6 +3672,7 @@ int main(void)
     generate_includes (stblfile);
 
     printf("#include \"" JIT_PATH "compemu.h\"\n");
+    printf("#include \"" JIT_PATH "jit_native_helpers.h\"\n");
     printf("#include \"" JIT_PATH "flags_x86.h\"\n");
 
     noflags=0;

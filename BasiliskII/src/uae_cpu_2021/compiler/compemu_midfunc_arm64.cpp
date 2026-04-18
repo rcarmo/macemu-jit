@@ -1406,3 +1406,13 @@ MIDFUNC(3,dbcc_cond_move_ne_w,(RW4 d, RR4 s, RR4 src_w))
 	unlock2(d);
 }
 MENDFUNC(3,dbcc_cond_move_ne_w,(RW4 d, RR4 s, RR4 src_w))
+
+/* Call a C helper function from JIT-compiled code.
+ * This emits a BL instruction to the given address.
+ * Used by the JIT to call interpreter-helper functions for
+ * opcodes that are too complex to compile natively. */
+MIDFUNC(1,call_helper,(IMPTR addr))
+{
+	compemu_raw_call(addr);
+}
+MENDFUNC(1,call_helper,(IMPTR addr))

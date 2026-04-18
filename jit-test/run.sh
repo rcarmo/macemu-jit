@@ -90,6 +90,7 @@ run_test() {
     local use_jit="$3"       # "true" or "false"
     local sentinel_a6="$4"   # 8-hex-digit value expected in A6
     local outfile="$5"
+    local init_regs="${6:-}"  # optional: D0-D7 A0-A7 [SR] space-separated hex
 
     local td="$RUN_DIR/test-${name}-jit${use_jit}"
     local reason_file="${outfile}.reason"
@@ -134,6 +135,9 @@ EOF
     )
     if [ "$use_jit" = "true" ]; then
         env_vars+=(B2_JIT_FORCE_TRANSLATE=1)
+    fi
+    if [ -n "$init_regs" ]; then
+        env_vars+=(B2_TEST_INIT="$init_regs")
     fi
     if ! env "${env_vars[@]}" \
       timeout -k 5s 30s "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
@@ -188,7 +192,7 @@ fi
 # Format: name|hex_words (M68K big-endian, STOP #0x2700 appended automatically)
 # Each test sets up known state and exercises one opcode class.
 
-declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_long_wrap addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_sizes_zero cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes clr_byte_preserve_upper clr_word_preserve_upper neg_sizes neg_zero_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_byte_highbit imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero tst_positive bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_long_neg_roundtrip quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbra_start_minus1_branch dbra_start_8000_branch dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear moveq_edges alu_negative_roundtrip imm_logic_word_highbit branch_chain_z_clear branch_chain_carry_set branch_chain_overflow_set scc_ccr_preserve_bvs_taken dbra_four_iter scc_ccr_preserve_bvc_taken scc_ccr_preserve_bhi_taken scc_ccr_preserve_bls_taken dbra_five_iter branch_chain_eq_then_ne branch_chain_carry_clear imm_logic_long_highbit dbra_six_iter not_sizes not_word_preserve_upper not_byte_preserve_upper scc_ccr_preserve_bpl_taken scc_ccr_preserve_bmi_taken scc_ccr_preserve_bge_taken scc_ccr_preserve_bgt_taken scc_ccr_preserve_ble_taken nop_triplet roxl_x_propagation roxr_x_propagation roxl_count_2 asl_overflow lsr_count_32 asr_count_0 ror_word rol_word btst_reg_high_bit muls_neg_neg muls_zero divs_neg_neg divs_overflow abcd_basic sbcd_basic negx_with_x negx_zero addx_basic subx_basic ext_word ext_long move_to_mem_and_back movem_predec_postinc movem_predec_mixed_order addx_chain flag_chain_xzn shift_chain roxl_reg_count_32 roxl_reg_count_33 roxr_reg_count_33 roxr_reg_count_32 roxr_reg_count_0 roxl_reg_count_63 roxr_reg_count_63 roxr_roxl_chain_x roxl_lsr_chain_x mulu_large divu_remainder abcd_with_carry nbcd_basic bsr_rts link_unlk indexed_addr_mode byte_postinc cmpm_equal move_sr_roundtrip dbra_loop_100 dbne_loop_cmpi bsr_in_dbra_loop table_lookup dbra_loop_1000 swap_pack lea_scaled_index multi_branch andi_l_dn eor_self asl_w_vflag asl_b_overflow lsr_w_regcount asr_w_preserve movem_w_signext cmpm_l_equal cmpm_b_unequal addx_64bit subx_64bit muls_boundary divu_max_quotient move_b_preserve_flags byte_logic_chain bchg_imm_high neg_w_partial clr_b_tst all_regs_alive scaled_index_word byte_indexed_load indexed_store_load addq_subq_sizes x_flag_chain sub_w_subx_chain exg_dn_an push_pop_a0 dbeq_loop_50 dbmi_loop_neg lsl_l_count0 asr_l_8_neg rol_l_16 lsl_b_7 asr_b_1_sign move_b_flags move_w_zero add_l_an_dn sub_w_dn_an cmp_b cmp_w ori_w_mem andi_b_mem link_neg16 mulu_max divs_neg_rem negx_64bit cmpi_l_abs_short_eq cmpi_l_abs_short_ne cmpi_bne_w_not_taken cmpi_bne_w_taken cmpi_b_abs_short_blt movem_save_modify_restore bsr_l_long jmp_d8_pc_dn_w pea_movem_stack subq_sp_movea_write tst_bne_after_bsr_rts tst_bne_after_jsr_an save_clear_slot_restore_tst movec_cacr_roundtrip cache_init_sequence move_l_neg_disp_a5 sr_barrier_cache_init divs_word_hardfail divu_word_hardfail mull_32_hardfail divl_32_hardfail aslw_mem_hardfail lsrw_mem_hardfail rolw_mem_hardfail ori_sr_hardfail andi_sr_hardfail eori_sr_hardfail move_from_sr_hardfail move_to_sr_hardfail divs_neg_by_neg_edge divs_by_minus_one_edge divs_zero_dividend_edge divs_overflow_edge divu_exact_edge divu_with_remainder_edge divu_overflow_edge mull_unsigned_32 mull_signed_32 divl_unsigned_32 divl_signed_32 asrw_mem_edge roxlw_mem_edge roxrw_mem_edge abcd_99_plus_01_edge sbcd_with_x_edge nbcd_99_edge bfextu_reg_edge bfexts_reg_edge bfffo_reg_edge bfset_reg_edge bfclr_reg_edge bfchg_reg_edge bftst_reg_edge bfins_reg_edge pack_dn_edge unpk_dn_edge movep_l_roundtrip sr_ops_combo moves_write_read adda_w_cov adda_l_cov adda_w_neg_cov eori_ccr_cov rtr_cov mvr2usp_cov move_b_d16_an_cov move_w_d16_an_cov move_l_d16_an_cov move_b_idx_cov move_l_idx_scale_cov move_l_pc_rel_cov move_l_abs_w_cov move_l_abs_l_cov predec_postinc_cov imm_to_mem_b_cov imm_to_mem_w_cov imm_to_mem_l_cov add_b_overflow_cov sub_w_borrow_cov cmp_l_equal_cov and_l_zero_cov or_l_allones_cov eor_self_cov neg_b_overflow_cov not_b_cov odd_addr_cov a7_byte_postinc_cov)
+declare -a TEST_ORDER=(nop move moveq_signext alu alu_overflow addi_subi_long addi_subi_long_wrap addi_subi_word addi_subi_word_wrap addi_subi_byte addi_subi_byte_wrap shift bitops bitops_chg bitops_highbit bitops_chg_highbit branch branch_chain compare compare_negative cmpi_sizes cmpi_sizes_zero cmpi_byte_negative cmpi_word_negative cmpi_long_negative cmpi_beq_taken muldiv movem misc clr_sizes clr_byte_preserve_upper clr_word_preserve_upper neg_sizes neg_zero_sizes swap_roundtrip flags flags_eori_ccr exg exg_roundtrip imm_logic imm_logic_alt imm_logic_byte_highbit imm_logic_word imm_logic_long imm_logic_long_alt tst_sizes tst_zero tst_positive bra_taken bra_w_taken bne_not_taken bne_taken bne_w_not_taken bne_w_taken beq_taken beq_not_taken beq_w_taken beq_w_not_taken bpl_taken bpl_not_taken bpl_w_taken bpl_w_not_taken bmi_taken bmi_not_taken bmi_w_taken bmi_w_not_taken bvc_taken bvc_not_taken_overflow bvc_w_taken bvc_w_not_taken_overflow bvs_taken_overflow bvs_not_taken bvs_w_taken_overflow bvs_w_not_taken bge_taken bge_not_taken bge_w_taken bge_w_not_taken blt_taken blt_not_taken blt_w_taken blt_w_not_taken bgt_taken bgt_not_taken bgt_w_taken bgt_w_not_taken ble_taken ble_not_taken ble_w_taken ble_w_not_taken bcc_taken bcc_not_taken bcc_w_taken bcc_w_not_taken bcs_taken bcs_not_taken bcs_w_taken bcs_w_not_taken bhi_taken bhi_not_taken bhi_w_taken bhi_w_not_taken bls_taken bls_not_taken bls_w_taken bls_w_not_taken scc_basic scc_eq_ne scc_carry scc_hi_ls scc_hi_ls_z scc_vc_vs scc_pl_mi scc_ge_lt scc_gt_le scc_ccr_preserve_blt scc_ccr_preserve_bcs scc_ccr_preserve_bne_not_taken scc_ccr_preserve_beq_taken quick_ops quick_ops_long_neg_roundtrip quick_ops_word quick_ops_word_wrap quick_ops_long_wrap quick_ops_byte quick_ops_byte_wrap quick_ops_addr dbra dbra_not_taken dbra_start_minus1_branch dbra_start_8000_branch dbt_true_not_taken dbra_three_iter dbcc_loop_c_set dbcs_not_taken_c_set dbpl_loop_n_set dbmi_not_taken_n_set dbhi_not_taken_hi_set dbls_not_taken_ls_set dbge_not_taken_n_eq_v dblt_not_taken_n_ne_v dbgt_not_taken_gt_set dble_not_taken_le_set dbhi_false_dec_terminal_ls_set dbls_false_dec_terminal_hi_set dbge_false_dec_terminal_n_ne_v dblt_false_dec_terminal_n_eq_v dbgt_false_dec_terminal_z_set dble_false_dec_terminal_gt_set dbcc_ccr_preserve_beq_taken dbcc_ccr_preserve_bne_taken dbcc_ccr_preserve_bcs_taken dbcc_ccr_preserve_bvc_taken dbcc_ccr_preserve_bvs_taken dbcc_ccr_preserve_bhi_taken dbcc_ccr_preserve_bls_taken dbcc_ccr_preserve_bge_taken dbcc_ccr_preserve_blt_taken dbcc_ccr_preserve_bgt_taken dbcc_ccr_preserve_ble_taken dbvc_loop_v_set dbvs_loop_v_clear dbvc_not_taken_v_clear dbvs_not_taken_v_set dbne_loop_z_set dbeq_loop_z_clear moveq_edges alu_negative_roundtrip imm_logic_word_highbit branch_chain_z_clear branch_chain_carry_set branch_chain_overflow_set scc_ccr_preserve_bvs_taken dbra_four_iter scc_ccr_preserve_bvc_taken scc_ccr_preserve_bhi_taken scc_ccr_preserve_bls_taken dbra_five_iter branch_chain_eq_then_ne branch_chain_carry_clear imm_logic_long_highbit dbra_six_iter not_sizes not_word_preserve_upper not_byte_preserve_upper scc_ccr_preserve_bpl_taken scc_ccr_preserve_bmi_taken scc_ccr_preserve_bge_taken scc_ccr_preserve_bgt_taken scc_ccr_preserve_ble_taken nop_triplet roxl_x_propagation roxr_x_propagation roxl_count_2 asl_overflow lsr_count_32 asr_count_0 ror_word rol_word btst_reg_high_bit muls_neg_neg muls_zero divs_neg_neg divs_overflow abcd_basic sbcd_basic negx_with_x negx_zero addx_basic subx_basic ext_word ext_long move_to_mem_and_back movem_predec_postinc movem_predec_mixed_order addx_chain flag_chain_xzn shift_chain roxl_reg_count_32 roxl_reg_count_33 roxr_reg_count_33 roxr_reg_count_32 roxr_reg_count_0 roxl_reg_count_63 roxr_reg_count_63 roxr_roxl_chain_x roxl_lsr_chain_x mulu_large divu_remainder abcd_with_carry nbcd_basic bsr_rts link_unlk indexed_addr_mode byte_postinc cmpm_equal move_sr_roundtrip dbra_loop_100 dbne_loop_cmpi bsr_in_dbra_loop table_lookup dbra_loop_1000 swap_pack lea_scaled_index multi_branch andi_l_dn eor_self asl_w_vflag asl_b_overflow lsr_w_regcount asr_w_preserve movem_w_signext cmpm_l_equal cmpm_b_unequal addx_64bit subx_64bit muls_boundary divu_max_quotient move_b_preserve_flags byte_logic_chain bchg_imm_high neg_w_partial clr_b_tst all_regs_alive scaled_index_word byte_indexed_load indexed_store_load addq_subq_sizes x_flag_chain sub_w_subx_chain exg_dn_an push_pop_a0 dbeq_loop_50 dbmi_loop_neg lsl_l_count0 asr_l_8_neg rol_l_16 lsl_b_7 asr_b_1_sign move_b_flags move_w_zero add_l_an_dn sub_w_dn_an cmp_b cmp_w ori_w_mem andi_b_mem link_neg16 mulu_max divs_neg_rem negx_64bit cmpi_l_abs_short_eq cmpi_l_abs_short_ne cmpi_bne_w_not_taken cmpi_bne_w_taken cmpi_b_abs_short_blt movem_save_modify_restore bsr_l_long jmp_d8_pc_dn_w pea_movem_stack subq_sp_movea_write tst_bne_after_bsr_rts tst_bne_after_jsr_an save_clear_slot_restore_tst movec_cacr_roundtrip cache_init_sequence move_l_neg_disp_a5 sr_barrier_cache_init divs_word_hardfail divu_word_hardfail mull_32_hardfail divl_32_hardfail aslw_mem_hardfail lsrw_mem_hardfail rolw_mem_hardfail ori_sr_hardfail andi_sr_hardfail eori_sr_hardfail move_from_sr_hardfail move_to_sr_hardfail divs_neg_by_neg_edge divs_by_minus_one_edge divs_zero_dividend_edge divs_overflow_edge divu_exact_edge divu_with_remainder_edge divu_overflow_edge mull_unsigned_32 mull_signed_32 divl_unsigned_32 divl_signed_32 asrw_mem_edge roxlw_mem_edge roxrw_mem_edge abcd_99_plus_01_edge sbcd_with_x_edge nbcd_99_edge bfextu_reg_edge bfexts_reg_edge bfffo_reg_edge bfset_reg_edge bfclr_reg_edge bfchg_reg_edge bftst_reg_edge bfins_reg_edge pack_dn_edge unpk_dn_edge movep_l_roundtrip sr_ops_combo moves_write_read adda_w_cov adda_l_cov adda_w_neg_cov eori_ccr_cov rtr_cov mvr2usp_cov move_b_d16_an_cov move_w_d16_an_cov move_l_d16_an_cov move_b_idx_cov move_l_idx_scale_cov move_l_pc_rel_cov move_l_abs_w_cov move_l_abs_l_cov predec_postinc_cov imm_to_mem_b_cov imm_to_mem_w_cov imm_to_mem_l_cov add_b_overflow_cov sub_w_borrow_cov cmp_l_equal_cov and_l_zero_cov or_l_allones_cov eor_self_cov neg_b_overflow_cov not_b_cov odd_addr_cov a7_byte_postinc_cov fuzz_alu_0 fuzz_shift_0 fuzz_bitops_0 fuzz_muldiv_0 fuzz_extswap_0 fuzz_addxsubx_0 fuzz_memrt_0 fuzz_exg_0 fuzz_mixed_0 fuzz_flags_0 fuzz_alu_1 fuzz_shift_1 fuzz_bitops_1 fuzz_muldiv_1 fuzz_extswap_1 fuzz_addxsubx_1 fuzz_memrt_1 fuzz_exg_1 fuzz_mixed_1 fuzz_flags_1 fuzz_alu_2 fuzz_shift_2 fuzz_bitops_2 fuzz_muldiv_2 fuzz_extswap_2 fuzz_addxsubx_2 fuzz_memrt_2 fuzz_exg_2 fuzz_mixed_2 fuzz_flags_2 fuzz_alu_3 fuzz_shift_3 fuzz_bitops_3 fuzz_muldiv_3 fuzz_extswap_3 fuzz_addxsubx_3 fuzz_memrt_3 fuzz_exg_3 fuzz_mixed_3 fuzz_flags_3 fuzz_alu_4 fuzz_shift_4 fuzz_bitops_4 fuzz_muldiv_4 fuzz_extswap_4 fuzz_addxsubx_4 fuzz_memrt_4 fuzz_exg_4 fuzz_mixed_4 fuzz_flags_4)
 declare -A TESTS
 # NOP: trivial decode/execute path sanity check
 TESTS[nop]="4E71 4E71"
@@ -953,7 +957,162 @@ TESTS[not_b_cov]="103C 00AA 4600"
 TESTS[odd_addr_cov]="41F9 0000 A001 20BC CAFE BABE 41F9 0000 A001 2010"
 TESTS[a7_byte_postinc_cov]="41F9 0000 E000 2E48 3F3C ABCD 101F"
 
+# ---- FUZZ VECTORS (auto-generated, seed=0xDEADBEEF) ----
+# ALU chain: and.l d4,d3; sub.l d4,d3
+TESTS[fuzz_alu_0]="C684 9684"
+# Shift chain: asr.l #8,d3; asr.l #3,d3; rol.l #7,d3
+TESTS[fuzz_shift_0]="E083 E683 EF9B"
+# Bit ops: bchg #17,d4; bchg #25,d4; bclr #0,d4; bchg #31,d4
+TESTS[fuzz_bitops_0]="0844 0011 0844 0019 0884 0000 0844 001F"
+# Mul/Div: muls.w d5,d3; divs.w d5,d3
+TESTS[fuzz_muldiv_0]="C7C5 87C5"
+# Ext/Swap: tst.l d0; ext.l d0; not.l d0
+TESTS[fuzz_extswap_0]="4A80 48C0 4680"
+# Addx/Subx: ori #$10,ccr; subx.l d5,d2; negx.l d2
+TESTS[fuzz_addxsubx_0]="003C 0010 9585 4082"
+# Mem roundtrip: move.l d3,(60,a1); not.l d3; move.l (60,a1),d0; cmp.l d3,d0
+TESTS[fuzz_memrt_0]="2343 003C 4683 2029 003C B083"
+# Exg chain: exg d4,d1; exg d1,d5; exg d2,d3; tst.l d1
+TESTS[fuzz_exg_0]="C941 C345 C543 4A81"
+# Mixed ALU+Shift: or.l d1,d0; swap d0; sub.l d3,d0
+TESTS[fuzz_mixed_0]="8081 4840 9083"
+# Flag stress: ori #$0,ccr; tst.l d0
+TESTS[fuzz_flags_0]="003C 0000 4A80"
+# ALU chain: and.l d5,d5; add.l d4,d5
+TESTS[fuzz_alu_1]="CA85 DA84"
+# Shift chain: lsr.l #3,d1; asr.l #5,d1
+TESTS[fuzz_shift_1]="E689 EA81"
+# Bit ops: bset #5,d5; bchg #8,d5
+TESTS[fuzz_bitops_1]="08C5 0005 0845 0008"
+# Mul/Div: mulu.w d5,d1; divu.w d5,d1
+TESTS[fuzz_muldiv_1]="C2C5 82C5"
+# Ext/Swap: swap d2; neg.l d2; ext.w d2; tst.l d2
+TESTS[fuzz_extswap_1]="4842 4482 4882 4A82"
+# Addx/Subx: andi #$EF,ccr; subx.l d5,d2; negx.l d2
+TESTS[fuzz_addxsubx_1]="023C 00EF 9585 4082"
+# Mem roundtrip: move.l d3,(212,a1); not.l d3; move.l (212,a1),d0; cmp.l d3,d0
+TESTS[fuzz_memrt_1]="2343 00D4 4683 2029 00D4 B083"
+# Exg chain: exg d5,d2; exg d4,d3; tst.l d4
+TESTS[fuzz_exg_1]="CB42 C943 4A84"
+# Mixed ALU+Shift: lsl.l #1,d2; and.l d0,d2; lsl.l #2,d2
+TESTS[fuzz_mixed_1]="E38A C480 E58A"
+# Flag stress: ori #$11,ccr; addx.l d4,d0; tst.l d0
+TESTS[fuzz_flags_1]="003C 0011 D184 4A80"
+# ALU chain: or.l d1,d3; eor.l d1,d3
+TESTS[fuzz_alu_2]="8681 B383"
+# Shift chain: ror.l #6,d3; asr.l #1,d3; asl.l #8,d3
+TESTS[fuzz_shift_2]="EC9B E283 E183"
+# Bit ops: bset #7,d1; bchg #21,d1; bset #1,d1
+TESTS[fuzz_bitops_2]="08C1 0007 0841 0015 08C1 0001"
+# Mul/Div: muls.w d4,d2; divu.w d4,d2
+TESTS[fuzz_muldiv_2]="C5C4 84C4"
+# Ext/Swap: tst.l d0; ext.l d0; swap d0; not.l d0
+TESTS[fuzz_extswap_2]="4A80 48C0 4840 4680"
+# Addx/Subx: andi #$EF,ccr; addx.l d5,d0; negx.l d0
+TESTS[fuzz_addxsubx_2]="023C 00EF D185 4080"
+# Mem roundtrip: move.l d2,(60,a2); not.l d2; move.l (60,a2),d3; cmp.l d2,d3
+TESTS[fuzz_memrt_2]="2542 003C 4682 262A 003C B682"
+# Exg chain: exg d1,d3; exg d0,d2; tst.l d5
+TESTS[fuzz_exg_2]="C343 C142 4A85"
+# Mixed ALU+Shift: lsr.l #7,d3; swap d3; or.l d5,d3; neg.l d3; or.l d5,d3
+TESTS[fuzz_mixed_2]="EE8B 4843 8685 4483 8685"
+# Flag stress: ori #$f,ccr; addx.l d4,d1; tst.l d1
+TESTS[fuzz_flags_2]="003C 000F D384 4A81"
+# ALU chain: and.l d3,d1; sub.l d5,d1
+TESTS[fuzz_alu_3]="C283 9285"
+# Shift chain: asl.l #8,d5; ror.l #8,d5
+TESTS[fuzz_shift_3]="E185 E09D"
+# Bit ops: bset #31,d1; bset #0,d1; bclr #24,d1; bset #8,d1
+TESTS[fuzz_bitops_3]="08C1 001F 08C1 0000 0881 0018 08C1 0008"
+# Mul/Div: muls.w d4,d2; divu.w d4,d2
+TESTS[fuzz_muldiv_3]="C5C4 84C4"
+# Ext/Swap: ext.l d3; swap d3; tst.l d3
+TESTS[fuzz_extswap_3]="48C3 4843 4A83"
+# Addx/Subx: ori #$10,ccr; subx.l d4,d0; negx.l d0
+TESTS[fuzz_addxsubx_3]="003C 0010 9184 4080"
+# Mem roundtrip: move.l d2,(244,a1); not.l d2; move.l (244,a1),d3; cmp.l d2,d3
+TESTS[fuzz_memrt_3]="2342 00F4 4682 2629 00F4 B682"
+# Exg chain: exg d1,d3; exg d5,d4; tst.l d2
+TESTS[fuzz_exg_3]="C343 CB44 4A82"
+# Mixed ALU+Shift: or.l d4,d3; sub.l d3,d3; lsl.l #6,d3; swap d3; sub.l d3,d3; add.l d2,d3
+TESTS[fuzz_mixed_3]="8684 9683 ED8B 4843 9683 D682"
+# Flag stress: ori #$13,ccr; addx.l d4,d0; tst.l d0
+TESTS[fuzz_flags_3]="003C 0013 D184 4A80"
+# ALU chain: add.l d2,d2; sub.l d5,d2; and.l d5,d2
+TESTS[fuzz_alu_4]="D482 9485 C485"
+# Shift chain: rol.l #7,d2; asr.l #1,d2; asl.l #7,d2
+TESTS[fuzz_shift_4]="EF9A E282 EF82"
+# Bit ops: bclr #13,d3; bset #28,d3; bchg #10,d3
+TESTS[fuzz_bitops_4]="0883 000D 08C3 001C 0843 000A"
+# Mul/Div: muls.w d5,d2; divs.w d5,d2
+TESTS[fuzz_muldiv_4]="C5C5 85C5"
+# Ext/Swap: ext.w d5; tst.l d5; ext.l d5; tst.l d5
+TESTS[fuzz_extswap_4]="4885 4A85 48C5 4A85"
+# Addx/Subx: ori #$10,ccr; subx.l d4,d1
+TESTS[fuzz_addxsubx_4]="003C 0010 9384"
+# Mem roundtrip: move.l d0,(8,a0); not.l d0; move.l (8,a0),d1; cmp.l d0,d1
+TESTS[fuzz_memrt_4]="2140 0008 4680 2228 0008 B280"
+# Exg chain: exg d4,d0; tst.l d1
+TESTS[fuzz_exg_4]="C940 4A81"
+# Mixed ALU+Shift: swap d1; or.l d1,d1; neg.l d1; lsr.l #3,d1; neg.l d1
+TESTS[fuzz_mixed_4]="4841 8281 4481 E689 4481"
+# Flag stress: ori #$1a,ccr; addx.l d4,d2; tst.l d2
+TESTS[fuzz_flags_4]="003C 001A D584 4A82"
+
+
 declare -A SENTINEL_A6
+declare -A INIT_REGS   # optional initial register state (D0-D7 A0-A7 [SR])
+# Fuzz vector initial register states
+INIT_REGS[fuzz_alu_0]="8878FDF6 80000000 00000000 637A51D3 7FFFFFFF 00000000 000000FF FFFFFFFF 0038D748 007BBF88 003C4A38 0023044C 003974BC 00072334 00000000 007EFF00"
+INIT_REGS[fuzz_shift_0]="7FFFFFFF FFFFFFFF 0000FFFF 000000FF FFFFFFFF 80000000 0000FFFF 6F01C50E 00124FD8 005EB90C 0032C4F4 006E747C 005771AC 002B43C0 00000000 007EFF00"
+INIT_REGS[fuzz_bitops_0]="FFFFFFFF F567E951 3D5E6FD4 000000FF 10F5BF4D 7FFFFFFF 11D9AF43 75616BFD 001AAB38 00330250 0075C460 005CAF44 00439394 000B9E84 00000000 007EFF00"
+INIT_REGS[fuzz_muldiv_0]="000000FF 00000000 FFFFFFFF 80000000 0000008E 0000760C CC333AE3 5CB9710E 0044EBD0 005ABBFC 00695CC8 007CE2A4 006C5B90 00733658 00000000 007EFF00"
+INIT_REGS[fuzz_extswap_0]="7FFFFFFF A0635EFF 000000FF 80000000 00000000 00000000 7FFFFFFF 000000C5 006FADBC 006CCE54 00631828 00753CB8 000B9958 00570EEC 00000000 007EFF00"
+INIT_REGS[fuzz_addxsubx_0]="7FFFFFFF 7FFFFFFF 00000000 000000F3 00000000 00000000 0000FFFF 80000000 0020F168 00580528 001E44E8 002F4F34 002C2B74 002D03EC 00000000 007EFF00"
+INIT_REGS[fuzz_memrt_0]="7FFFFFFF BD92BE4B 00000000 FFFFFFFF A287EB05 55E7D610 000000FF 0000FFFF 00414E60 0051A0B8 007394F8 00694E60 0034DD04 0035BE6C 00000000 007EFF00"
+INIT_REGS[fuzz_exg_0]="7FFFFFFF 00000000 000000FF 475A6474 0000008F FFFFFFFF AA6BA628 032BD4ED 002651D4 003F6728 003EFB14 0007632C 0014D140 005B2EBC 00000000 007EFF00"
+INIT_REGS[fuzz_mixed_0]="00000000 0000FFFF 00000004 00000027 80000000 000000B8 DE82A945 0000FFFF 00341FB8 0002FB2C 001CBAC4 0056F5D0 003C7BDC 003F7804 00000000 007EFF00"
+INIT_REGS[fuzz_flags_0]="80000000 80000000 000000C0 F311B6E1 0000FFFF 7FFFFFFF C91E5274 FFFFFFFF 0029D134 0063A530 006C413C 001FD270 0012EA80 0070F5E0 00000000 007EFF00"
+INIT_REGS[fuzz_alu_1]="E8EE138F FFFFFFFF 80000000 0000FFFF 0000FFFF 80000000 E3BC7C50 59D6AAA6 00154C7C 0004F11C 002CAFE4 005FE0A8 000C3530 006C2ED8 00000000 007EFF00"
+INIT_REGS[fuzz_shift_1]="00000000 00000000 FFFFFFFF 5448D078 0000FFFF FFFFFFFF FFFFFFFF B3497EB3 00590C00 0015C96C 00316E30 00378A68 003B0BF4 0026E3A0 00000000 007EFF00"
+INIT_REGS[fuzz_bitops_1]="FFFFFFFF 00000000 00000000 0000007E 0000007D 4AB3775A FB60C0C3 0000FFFF 0009F9BC 003737C0 0044E830 0024A9C0 00339F64 00233F90 00000000 007EFF00"
+INIT_REGS[fuzz_muldiv_1]="AEECBF29 80000000 80000000 FFFFFFFF 1BE0D930 0000B5C7 7FFFFFFF 00000000 003F05F0 0057A43C 00459DBC 000BB2C8 007ADE84 003AA810 00000000 007EFF00"
+INIT_REGS[fuzz_extswap_1]="3EFDD522 00000036 80000000 6AF18701 80000000 FFFFFFFF 000000FF 0000FFFF 003AFDF8 00507248 0049E580 005FC27C 0015E3F0 00301E1C 00000000 007EFF00"
+INIT_REGS[fuzz_addxsubx_1]="7FFFFFFF 80000000 00000062 0000004B 7FFFFFFF 87040427 7FFFFFFF A35154CE 00366F60 001A16F8 00724F4C 003DF7AC 004B7B40 0010FA88 00000000 007EFF00"
+INIT_REGS[fuzz_memrt_1]="C245E710 3B4DA9EF 241620CC 7FFFFFFF FFFFFFFF 00000019 9DD3E198 00000000 001FD5F8 00142300 0079C99C 001DADC4 00585FB0 007A0C68 00000000 007EFF00"
+INIT_REGS[fuzz_exg_1]="00000000 0000FFFF 7FFFFFFF 00000000 0000FFFF 0000FFFF 00000000 000000BC 0031A1B8 003EF580 00459FE4 0006BD90 002F6B80 0009D460 00000000 007EFF00"
+INIT_REGS[fuzz_mixed_1]="00000000 80000000 7FFFFFFF 00000000 0000FFFF 00000000 000000FF 80000000 0078F5DC 001F065C 0010F264 0032D7D0 005F0B0C 003E697C 00000000 007EFF00"
+INIT_REGS[fuzz_flags_1]="C04533B9 00000000 4689409F 00000005 00000000 0B795496 CEF18F0E FACF15E9 00124C74 00566848 0062A114 002740D0 005BC32C 002C2150 00000000 007EFF00"
+INIT_REGS[fuzz_alu_2]="2BB84DD1 7FFFFFFF 0000FFFF B88D9738 00000000 FFFFFFFF 00000041 80000000 00361470 001D1ACC 007E2F9C 003AE218 0040B090 00585EB0 00000000 007EFF00"
+INIT_REGS[fuzz_shift_2]="0000FFFF BE83F4AB 00000000 80000000 00000000 80000000 80000000 00000000 0077A1E4 00247BD8 004BED8C 00286964 002BADC4 007D41D8 00000000 007EFF00"
+INIT_REGS[fuzz_bitops_2]="80000000 FFFFFFFF FFFFFFFF 00000023 80000000 7FFFFFFF 0000FFFF 00000084 005B7F3C 0005EE58 00781E7C 0024174C 000AA384 007B0B00 00000000 007EFF00"
+INIT_REGS[fuzz_muldiv_2]="0000FFFF 000000D4 595124DA 7FFFFFFF 0000D55A 0000007C 2E24CEC1 4C0F0F27 00007C30 003F3944 00351CB0 003656C0 003F1824 005E60B0 00000000 007EFF00"
+INIT_REGS[fuzz_extswap_2]="80000000 000000FF 4FC1F43B F26435A8 0000FFFF 7FFFFFFF 00000000 000000FF 0014FBA8 005800A0 0008C620 00080578 006D2B98 007422E8 00000000 007EFF00"
+INIT_REGS[fuzz_addxsubx_2]="02C481F3 6A4AE5AD 80000000 95EAD6BA 7FFFFFFF 0000FFFF 677BE43B 9A6E70E5 000479F0 006C80F8 00104B8C 0028EC7C 006CE61C 0061BA50 00000000 007EFF00"
+INIT_REGS[fuzz_memrt_2]="7FFFFFFF 000000FF FFFFFFFF 000000BC 7FFFFFFF 00000000 A08A2385 AD0C4765 0020B96C 00555408 00196114 004B94E4 006E5368 006ACC94 00000000 007EFF00"
+INIT_REGS[fuzz_exg_2]="00000000 00000000 80000000 07465B1C 00000000 0000FFFF 00000085 DAA4134D 002AF0EC 00639414 0024E28C 0076C624 00540F70 0025AF44 00000000 007EFF00"
+INIT_REGS[fuzz_mixed_2]="00000000 000000FF FFFFFFFF 0000FFFF 7FFFFFFF 03465513 221C64EA 80000000 007B34B4 0039DAA4 004F6F20 00114818 005A2644 00797148 00000000 007EFF00"
+INIT_REGS[fuzz_flags_2]="0000FFFF 00000000 C459EA3A 80000000 00000000 1136C00B A6B7D7DE 00000000 004935D0 007DC188 00458580 002328E4 003E2864 003309CC 00000000 007EFF00"
+INIT_REGS[fuzz_alu_3]="00000067 000000B7 7FFFFFFF 9B0B8017 0000FFFF 80000000 7FFFFFFF D03FF5DA 0044C65C 0072C5E0 0048C79C 006E0518 0008DCA0 0070FEDC 00000000 007EFF00"
+INIT_REGS[fuzz_shift_3]="0BDBFE50 FFFFFFFF 00000000 7FFFFFFF 47D43365 E08347E3 7FFFFFFF 927EE333 00689DB8 000FAA94 0067413C 000B56DC 0016EE04 0040835C 00000000 007EFF00"
+INIT_REGS[fuzz_bitops_3]="88596DE9 FFFFFFFF 7FFFFFFF FFFFFFFF 7FFFFFFF F86E8FA7 BA114E62 7FFFFFFF 006B6D30 000C73C4 003BE184 0002C488 004BAF8C 000E54E0 00000000 007EFF00"
+INIT_REGS[fuzz_muldiv_3]="80000000 000000FF 00000000 7FFFFFFF 00005110 7AB04BDC 3ECFA952 BC405280 00276380 003D79B4 002DF3C0 006257D4 004A3988 00261688 00000000 007EFF00"
+INIT_REGS[fuzz_extswap_3]="0000FFFF 00000036 FFFFFFFF 7FFFFFFF 00000000 0000FFFF 000000FF 00000055 004335E0 0002A388 007287C8 00584D40 00339710 00520748 00000000 007EFF00"
+INIT_REGS[fuzz_addxsubx_3]="FFFFFFFF FFFFFFFF 5AB0C8C7 0000FFFF FFFFFFFF 0000007B 00000000 FFFFFFFF 00043CDC 000A0C4C 00050074 00132CCC 00135EA4 00761FA4 00000000 007EFF00"
+INIT_REGS[fuzz_memrt_3]="000000FF 092D6826 00000000 1B613295 FFFFFFFF 000000FF 39374372 00000000 00216324 007097F8 006063B8 007D5844 00112DB4 000BD0E8 00000000 007EFF00"
+INIT_REGS[fuzz_exg_3]="897A1A19 80000000 80000000 7FFFFFFF 00000000 7FFFFFFF 58FD46B7 80000000 0017F2C0 00627BF8 005773EC 0005FFBC 001F4DAC 005CF8E8 00000000 007EFF00"
+INIT_REGS[fuzz_mixed_3]="FFFFFFFF 00000000 000000FF 00000000 7FFFFFFF 0000FFFF 000000D5 7FFFFFFF 00031B6C 007706C4 000EB344 0011D03C 0004937C 0064B398 00000000 007EFF00"
+INIT_REGS[fuzz_flags_3]="93FDE8D8 7FFFFFFF 7FFFFFFF 000000FF FFFFFFFF 00000000 0000FFFF E3976C1E 005F2C8C 001AA328 00402EB0 0079B354 003C55A4 004E5DC4 00000000 007EFF00"
+INIT_REGS[fuzz_alu_4]="E814971D 00000022 FFFFFFFF 00000000 7FFFFFFF 00000001 0B8E2A96 D15F0551 004CE140 005C15AC 002152BC 00078ADC 00138CE0 001222EC 00000000 007EFF00"
+INIT_REGS[fuzz_shift_4]="80000000 00000000 FFFFFFFF 000000E9 DCFDF7CF 00000000 CDD2AB32 0000FFFF 00439B04 002F7E14 006D7A70 0061AE70 0077845C 00673AB8 00000000 007EFF00"
+INIT_REGS[fuzz_bitops_4]="80000000 4C01E224 00000000 00000000 000000FF 1ABCB699 00000000 000000FF 006DEDC8 00458F14 005E8554 00404918 00393DDC 0030DC8C 00000000 007EFF00"
+INIT_REGS[fuzz_muldiv_4]="000000FF 000000FF 7FFFFFFF 000000B0 FFFFFFFF 0000B35A 00000000 E8863BAD 000BB0E8 003FDE68 0056BB90 003151B8 001B5728 0070AC64 00000000 007EFF00"
+INIT_REGS[fuzz_extswap_4]="80000000 6361AA64 000000FF 0000FFFF 12047320 FFFFFFFF 80000000 7FFFFFFF 0044A034 0065CB9C 004A336C 0079B13C 0068E7C0 00074BD0 00000000 007EFF00"
+INIT_REGS[fuzz_addxsubx_4]="23D01E2E 00000000 F7F440AC 7FFFFFFF 00000000 0000FFFF 000000FF CE808892 00214B28 004B1844 00144DC0 000F502C 002972A8 002DF22C 00000000 007EFF00"
+INIT_REGS[fuzz_memrt_4]="000000FF 6B78D8FC 0000FFFF 0000FFFF 80000000 FA7FE2E8 000000FF FFFFFFFF 006F9C80 00347EAC 00527498 00467C38 003C6564 0014C494 00000000 007EFF00"
+INIT_REGS[fuzz_exg_4]="000000FF 80000000 000000FF 68651AA6 80000000 000000FF FFFFFFFF 7FFFFFFF 0028E76C 001B17E4 003806E0 004FF650 005A19BC 00313940 00000000 007EFF00"
+INIT_REGS[fuzz_mixed_4]="80000000 0000FFFF 80000000 9BA96951 7FFFFFFF 80000000 FFFFFFFF 7FFFFFFF 0005ADF8 0043FF50 0048CF98 00464810 0025684C 00195E8C 00000000 007EFF00"
+INIT_REGS[fuzz_flags_4]="FFFFFFFF 00000000 000000FF 0000002F 00000000 35FDF202 FFFFFFFF 00000000 0025B20C 003BEC14 00482078 00628CFC 005D71F0 0057BB88 00000000 007EFF00"
 SENTINEL_A6[nop]="a601005a"
 SENTINEL_A6[nop_triplet]="a60100c2"
 SENTINEL_A6[roxl_x_propagation]="a60100c3"
@@ -1332,6 +1491,57 @@ SENTINEL_A6[neg_b_overflow_cov]="a60001f8"
 SENTINEL_A6[not_b_cov]="a60001f9"
 SENTINEL_A6[odd_addr_cov]="a60001fa"
 SENTINEL_A6[a7_byte_postinc_cov]="a60001fb"
+# Fuzz vector sentinels
+SENTINEL_A6[fuzz_alu_0]="a6f00000"
+SENTINEL_A6[fuzz_shift_0]="a6f00100"
+SENTINEL_A6[fuzz_bitops_0]="a6f00200"
+SENTINEL_A6[fuzz_muldiv_0]="a6f00300"
+SENTINEL_A6[fuzz_extswap_0]="a6f00400"
+SENTINEL_A6[fuzz_addxsubx_0]="a6f00500"
+SENTINEL_A6[fuzz_memrt_0]="a6f00600"
+SENTINEL_A6[fuzz_exg_0]="a6f00700"
+SENTINEL_A6[fuzz_mixed_0]="a6f00800"
+SENTINEL_A6[fuzz_flags_0]="a6f00900"
+SENTINEL_A6[fuzz_alu_1]="a6f00a00"
+SENTINEL_A6[fuzz_shift_1]="a6f00b00"
+SENTINEL_A6[fuzz_bitops_1]="a6f00c00"
+SENTINEL_A6[fuzz_muldiv_1]="a6f00d00"
+SENTINEL_A6[fuzz_extswap_1]="a6f00e00"
+SENTINEL_A6[fuzz_addxsubx_1]="a6f00f00"
+SENTINEL_A6[fuzz_memrt_1]="a6f01000"
+SENTINEL_A6[fuzz_exg_1]="a6f01100"
+SENTINEL_A6[fuzz_mixed_1]="a6f01200"
+SENTINEL_A6[fuzz_flags_1]="a6f01300"
+SENTINEL_A6[fuzz_alu_2]="a6f01400"
+SENTINEL_A6[fuzz_shift_2]="a6f01500"
+SENTINEL_A6[fuzz_bitops_2]="a6f01600"
+SENTINEL_A6[fuzz_muldiv_2]="a6f01700"
+SENTINEL_A6[fuzz_extswap_2]="a6f01800"
+SENTINEL_A6[fuzz_addxsubx_2]="a6f01900"
+SENTINEL_A6[fuzz_memrt_2]="a6f01a00"
+SENTINEL_A6[fuzz_exg_2]="a6f01b00"
+SENTINEL_A6[fuzz_mixed_2]="a6f01c00"
+SENTINEL_A6[fuzz_flags_2]="a6f01d00"
+SENTINEL_A6[fuzz_alu_3]="a6f01e00"
+SENTINEL_A6[fuzz_shift_3]="a6f01f00"
+SENTINEL_A6[fuzz_bitops_3]="a6f02000"
+SENTINEL_A6[fuzz_muldiv_3]="a6f02100"
+SENTINEL_A6[fuzz_extswap_3]="a6f02200"
+SENTINEL_A6[fuzz_addxsubx_3]="a6f02300"
+SENTINEL_A6[fuzz_memrt_3]="a6f02400"
+SENTINEL_A6[fuzz_exg_3]="a6f02500"
+SENTINEL_A6[fuzz_mixed_3]="a6f02600"
+SENTINEL_A6[fuzz_flags_3]="a6f02700"
+SENTINEL_A6[fuzz_alu_4]="a6f02800"
+SENTINEL_A6[fuzz_shift_4]="a6f02900"
+SENTINEL_A6[fuzz_bitops_4]="a6f02a00"
+SENTINEL_A6[fuzz_muldiv_4]="a6f02b00"
+SENTINEL_A6[fuzz_extswap_4]="a6f02c00"
+SENTINEL_A6[fuzz_addxsubx_4]="a6f02d00"
+SENTINEL_A6[fuzz_memrt_4]="a6f02e00"
+SENTINEL_A6[fuzz_exg_4]="a6f02f00"
+SENTINEL_A6[fuzz_mixed_4]="a6f03000"
+SENTINEL_A6[fuzz_flags_4]="a6f03100"
 
 # Risk-focused subset used for strict mismatch-first autoresearch.
 # Only these vectors count toward risky_total progression.
@@ -1563,6 +1773,57 @@ declare -A RISKY_TESTS=(
     [odd_addr_cov]=1
     [a7_byte_postinc_cov]=1
     [dbra_loop_100]=1
+
+    [fuzz_alu_0]=1
+    [fuzz_shift_0]=1
+    [fuzz_bitops_0]=1
+    [fuzz_muldiv_0]=1
+    [fuzz_extswap_0]=1
+    [fuzz_addxsubx_0]=1
+    [fuzz_memrt_0]=1
+    [fuzz_exg_0]=1
+    [fuzz_mixed_0]=1
+    [fuzz_flags_0]=1
+    [fuzz_alu_1]=1
+    [fuzz_shift_1]=1
+    [fuzz_bitops_1]=1
+    [fuzz_muldiv_1]=1
+    [fuzz_extswap_1]=1
+    [fuzz_addxsubx_1]=1
+    [fuzz_memrt_1]=1
+    [fuzz_exg_1]=1
+    [fuzz_mixed_1]=1
+    [fuzz_flags_1]=1
+    [fuzz_alu_2]=1
+    [fuzz_shift_2]=1
+    [fuzz_bitops_2]=1
+    [fuzz_muldiv_2]=1
+    [fuzz_extswap_2]=1
+    [fuzz_addxsubx_2]=1
+    [fuzz_memrt_2]=1
+    [fuzz_exg_2]=1
+    [fuzz_mixed_2]=1
+    [fuzz_flags_2]=1
+    [fuzz_alu_3]=1
+    [fuzz_shift_3]=1
+    [fuzz_bitops_3]=1
+    [fuzz_muldiv_3]=1
+    [fuzz_extswap_3]=1
+    [fuzz_addxsubx_3]=1
+    [fuzz_memrt_3]=1
+    [fuzz_exg_3]=1
+    [fuzz_mixed_3]=1
+    [fuzz_flags_3]=1
+    [fuzz_alu_4]=1
+    [fuzz_shift_4]=1
+    [fuzz_bitops_4]=1
+    [fuzz_muldiv_4]=1
+    [fuzz_extswap_4]=1
+    [fuzz_addxsubx_4]=1
+    [fuzz_memrt_4]=1
+    [fuzz_exg_4]=1
+    [fuzz_mixed_4]=1
+    [fuzz_flags_4]=1
 )
 
 # Preflight harness invariants: deterministic mapping and sentinel hygiene.
@@ -1676,8 +1937,9 @@ for name in "${ACTIVE_TEST_ORDER[@]}"; do
 
     interp_ok=1
     jit_ok=1
-    run_test "$name" "$hex" "false" "$sentinel_a6" "$ifile" || interp_ok=0
-    run_test "$name" "$hex" "true"  "$sentinel_a6" "$jfile" || jit_ok=0
+    init="${INIT_REGS[$name]:-}"
+    run_test "$name" "$hex" "false" "$sentinel_a6" "$ifile" "$init" || interp_ok=0
+    run_test "$name" "$hex" "true"  "$sentinel_a6" "$jfile" "$init" || jit_ok=0
 
     if [ "$interp_ok" -eq 1 ] && [ "$jit_ok" -eq 1 ]; then
         if diff -q "$ifile" "$jfile" >/dev/null 2>&1; then

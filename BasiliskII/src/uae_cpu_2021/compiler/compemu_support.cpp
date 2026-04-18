@@ -3748,6 +3748,7 @@ void flush_reg(int reg)
 	}
 }
 
+#if !defined(CPU_aarch64) && !defined(CPU_AARCH64)
 /* Only do this if you really mean it! The next call should be to init!*/
 void flush(int save_regs)
 {
@@ -3779,6 +3780,7 @@ void flush(int save_regs)
 		jit_log("Warning! flush with needflags=1!");
 	}
 }
+#endif /* !CPU_aarch64 */
 
 #if 0
 static void flush_keepflags(void)
