@@ -204,7 +204,11 @@ static void emit_epilogue_with_pc(uint32_t next_pc) {
 	emit_load_imm32(RTMP0, (int32_t)next_pc);
 	a64_str_w_imm(RTMP0, RSTATE, PPCR_PC);
 	/* Restore callee-saved regs and return */
-	a64_ldp_post(RSTATE, 21, A64_SP, 16);
+	a64_ldp_post(27, 28, A64_SP, 16);
+	a64_ldp_post(25, 26, A64_SP, 16);
+	a64_ldp_post(23, 24, A64_SP, 16);
+	a64_ldp_post(21, 22, A64_SP, 16);
+	a64_ldp_post(19, RSTATE, A64_SP, 16);
 	a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
 	a64_ret();
 }
@@ -1421,7 +1425,11 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 				if (lk) { emit_load_imm32(RTMP0, (int32_t)(pc + 4)); a64_str_w_imm(RTMP0, RSTATE, PPCR_LR); }
 				a64_ldr_w_imm(RTMP0, RSTATE, PPCR_LR);
 				a64_str_w_imm(RTMP0, RSTATE, PPCR_PC);
-				a64_ldp_post(RSTATE, 21, A64_SP, 16);
+				a64_ldp_post(27, 28, A64_SP, 16);
+				a64_ldp_post(25, 26, A64_SP, 16);
+				a64_ldp_post(23, 24, A64_SP, 16);
+				a64_ldp_post(21, 22, A64_SP, 16);
+				a64_ldp_post(19, RSTATE, A64_SP, 16);
 				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
 				a64_ret();
 				return true;
@@ -1450,7 +1458,11 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 					a64_mov_reg(RTMP1, RTMP2);
 				}
 				a64_str_w_imm(RTMP1, RSTATE, PPCR_PC);
-				a64_ldp_post(RSTATE, 21, A64_SP, 16);
+				a64_ldp_post(27, 28, A64_SP, 16);
+				a64_ldp_post(25, 26, A64_SP, 16);
+				a64_ldp_post(23, 24, A64_SP, 16);
+				a64_ldp_post(21, 22, A64_SP, 16);
+				a64_ldp_post(19, RSTATE, A64_SP, 16);
 				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
 				a64_ret();
 				return true;
@@ -1465,7 +1477,11 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 				if (lk) { emit_load_imm32(RTMP0, (int32_t)(pc + 4)); a64_str_w_imm(RTMP0, RSTATE, PPCR_LR); }
 				a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CTR);
 				a64_str_w_imm(RTMP0, RSTATE, PPCR_PC);
-				a64_ldp_post(RSTATE, 21, A64_SP, 16);
+				a64_ldp_post(27, 28, A64_SP, 16);
+				a64_ldp_post(25, 26, A64_SP, 16);
+				a64_ldp_post(23, 24, A64_SP, 16);
+				a64_ldp_post(21, 22, A64_SP, 16);
+				a64_ldp_post(19, RSTATE, A64_SP, 16);
 				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
 				a64_ret();
 				return true;
@@ -1488,7 +1504,11 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 					a64_mov_reg(RTMP1, RTMP2);
 				}
 				a64_str_w_imm(RTMP1, RSTATE, PPCR_PC);
-				a64_ldp_post(RSTATE, 21, A64_SP, 16);
+				a64_ldp_post(27, 28, A64_SP, 16);
+				a64_ldp_post(25, 26, A64_SP, 16);
+				a64_ldp_post(23, 24, A64_SP, 16);
+				a64_ldp_post(21, 22, A64_SP, 16);
+				a64_ldp_post(19, RSTATE, A64_SP, 16);
 				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
 				a64_ret();
 				return true;
@@ -2293,7 +2313,11 @@ bool ppc_jit_aarch64_compile(
 
 	/* Prologue: save callee-saved regs, set x20 = regs ptr from x0 */
 	a64_stp_pre(A64_FP, A64_LR, A64_SP, -16);
-	a64_stp_pre(RSTATE, 21, A64_SP, -16);
+	a64_stp_pre(19, RSTATE, A64_SP, -16);  /* save x19, x20 */
+	a64_stp_pre(21, 22, A64_SP, -16);      /* save x21, x22 */
+	a64_stp_pre(23, 24, A64_SP, -16);      /* save x23, x24 */
+	a64_stp_pre(25, 26, A64_SP, -16);      /* save x25, x26 */
+	a64_stp_pre(27, 28, A64_SP, -16);      /* save x27, x28 */
 	a64_mov_reg(RSTATE, A64_X0);
 
 	jit_blocks_attempted++;
@@ -2314,9 +2338,13 @@ bool ppc_jit_aarch64_compile(
 		if (op == 0x4E800020) { /* blr — block terminator */
 			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_LR);
 			a64_str_w_imm(RTMP0, RSTATE, PPCR_PC);
-			a64_ldp_post(RSTATE, 21, A64_SP, 16);
-			a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
-			a64_ret();
+			a64_ldp_post(27, 28, A64_SP, 16);
+				a64_ldp_post(25, 26, A64_SP, 16);
+				a64_ldp_post(23, 24, A64_SP, 16);
+				a64_ldp_post(21, 22, A64_SP, 16);
+				a64_ldp_post(19, RSTATE, A64_SP, 16);
+				a64_ldp_post(A64_FP, A64_LR, A64_SP, 16);
+				a64_ret();
 			n_compiled++;
 			cur_pc += 4;
 			break;

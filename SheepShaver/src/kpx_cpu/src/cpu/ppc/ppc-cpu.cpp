@@ -695,11 +695,11 @@ void powerpc_cpu::execute(uint32 entry)
 			/* AArch64 direct-codegen JIT: try compiling block natively */
 			{
 				static bool jit_init_done = false;
-				static bool jit_enabled = getenv("SS_USE_JIT") && *getenv("SS_USE_JIT") && strcmp(getenv("SS_USE_JIT"),"0")!=0;
+				static bool jit_enabled = getenv("SS_USE_JIT") && *getenv("SS_USE_JIT");
 				if (!jit_enabled) goto skip_jit;
 				if (!jit_init_done) { ppc_jit_aarch64_init(4096); jit_init_done = true; }
 				ppc_jit_block jblk;
-				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) {
+				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete && jblk.n_insns <= 4) {
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
 					fn((void*)regs_ptr());
 					/* Validate PC after JIT execution */
