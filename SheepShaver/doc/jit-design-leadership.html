@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SheepShaver AArch64 JIT — Design Leadership & Decision Log</title>
+<style>
+:root { --bg: #1a1a2e; --card: #16213e; --accent: #e94560; --text: #eee; --muted: #a0a0b8; --green: #4ecca3; --blue: #7ec8e3; --orange: #f0a500; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem; max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 2rem; margin-bottom: 0.3rem; background: linear-gradient(135deg, var(--accent), var(--orange)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+h2 { color: var(--blue); font-size: 1.3rem; margin: 2rem 0 0.8rem 0; border-bottom: 1px solid #333; padding-bottom: 0.3rem; }
+h3 { color: var(--green); font-size: 1.05rem; margin: 1.2rem 0 0.5rem 0; }
+section { background: var(--card); border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; border-left: 4px solid var(--accent); }
+section.green { border-left-color: var(--green); }
+section.blue { border-left-color: var(--blue); }
+section.orange { border-left-color: var(--orange); }
+ul { padding-left: 1.5rem; }
+li { margin-bottom: 0.4rem; }
+.quote { background: #0f1729; border-radius: 6px; padding: 1rem 1.2rem; margin: 0.8rem 0; font-style: italic; color: var(--muted); border-left: 3px solid var(--accent); }
+.quote em { color: var(--text); font-style: normal; }
+.metric { display: inline-block; background: var(--bg); border-radius: 6px; padding: 0.3rem 0.8rem; margin: 0.2rem; font-family: monospace; font-size: 0.9rem; }
+.metric.good { border: 1px solid var(--green); color: var(--green); }
+.metric.warn { border: 1px solid var(--orange); color: var(--orange); }
+table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; }
+th, td { text-align: left; padding: 0.5rem 0.8rem; border-bottom: 1px solid #333; font-size: 0.9rem; }
+th { color: var(--blue); font-weight: 600; }
+.timeline { position: relative; padding-left: 1.5rem; }
+.timeline::before { content: ''; position: absolute; left: 0.4rem; top: 0; bottom: 0; width: 2px; background: #333; }
+.timeline .event { position: relative; margin-bottom: 1rem; }
+.timeline .event::before { content: '●'; position: absolute; left: -1.35rem; color: var(--accent); font-size: 0.8rem; }
+.timeline .event.green::before { color: var(--green); }
+.timeline .time { color: var(--muted); font-size: 0.8rem; font-family: monospace; }
+.prompt-box { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; margin: 1rem 0; font-size: 0.85rem; color: var(--muted); white-space: pre-wrap; font-family: monospace; max-height: 200px; overflow-y: auto; }
+footer { text-align: center; color: var(--muted); font-size: 0.8rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #333; }
+</style>
+</head>
+<body>
+
+<h1>SheepShaver AArch64 PPC JIT</h1>
+<p class="subtitle">Design Leadership, Guidance & Decision Log — April 17–18, 2026</p>
+
+<section>
+<h2>The Prompt That Started This Page</h2>
+<div class="prompt-box">Give me a single page html presentation of what I provided guidance in for the PPC JIT and the design inputs I gave around the harness and validation workflow, and the tradeoffs I imposed. Include this prompt.</div>
+</section>
+
+<section class="blue">
+<h2>1. Strategic Direction</h2>
+<h3>Phase Strategy: C → B with FPU</h3>
+<div class="quote">"Our plan is to indeed start with option C and then move to option B with an FPU."</div>
+<p>The user chose to start with the optimized interpreter (Option C) as a quick baseline, then transition to direct-codegen JIT (Option B) including full FPU support — bypassing the legacy dyngen architecture entirely.</p>
+
+<h3>Why Not Dyngen</h3>
+<p>The existing kpx_cpu JIT uses a QEMU-era <code>dyngen</code> approach (compile C templates, extract machine code from .o files). The user chose <strong>direct codegen</strong> instead because:</p>
+<ul>
+<li>dyngen is compiler-version-fragile and architecturally dead</li>
+<li>AArch64 ELF relocations (ADRP/ADD) aren't supported in dyngen</li>
+<li>BasiliskII's working ARM64 codegen macros could be directly reused</li>
+</ul>
+</section>
+
+<section class="green">
+<h2>2. Harness & Validation Workflow</h2>
+<div class="quote">"Build a scaffolding and a project plan in the repository, then sketch out a harness for opcodes, implementation, and start a test build."</div>
+
+<h3>Design Inputs</h3>
+<ul>
+<li><strong>Test-driven from day one</strong> — the harness was built before the first opcode handler</li>
+<li><strong>Interpreter as oracle</strong> — run the same PPC bytecode under both interpreter and JIT, diff register dumps</li>
+<li><strong><code>SS_TEST_HEX</code> / <code>SS_TEST_DUMP</code></strong> — environment-variable-driven test injection, bypassing all ROM/GUI init</li>
+<li><strong>Determinism checking</strong> — each vector runs twice, both outputs must match</li>
+<li><strong>Self-contained test mode</strong> — allocates own RAM at low addresses (REAL_ADDRESSING safe), creates its own CPU instance</li>
+</ul>
+
+<h3>Harness Architecture</h3>
+<table>
+<tr><th>Component</th><th>Purpose</th></tr>
+<tr><td><code>SS_TEST_HEX</code></td><td>Hex PPC instruction sequence injected at startup</td></tr>
+<tr><td><code>SS_TEST_DUMP</code></td><td>Emit <code>REGDUMP:</code> with GPR0-31, CR, LR, CTR, XER</td></tr>
+<tr><td><code>SS_TEST_JIT</code></td><td>Compile and execute natively instead of interpreting</td></tr>
+<tr><td><code>SS_TEST_INIT</code></td><td>Seed initial register state</td></tr>
+<tr><td>Illegal opcode trap</td><td>Clean exit via <code>SPCFLAG_CPU_EXEC_RETURN</code></td></tr>
+</table>
+</section>
+
+<section class="orange">
+<h2>3. Tradeoffs Imposed</h2>
+
+<h3>Hard Constraints</h3>
+<div class="quote">"No messing about with the ROM unless it's the absolute last resort. Prioritize fixing JIT opcodes."</div>
+<ul>
+<li><strong>No ROM patches</strong> to work around JIT bugs</li>
+<li><strong>No stub regions or RAM pre-sets</strong></li>
+<li><strong>Booting is a progress marker, not a goal</strong> — opcode correctness is the objective</li>
+<li><strong>Commit and push regularly</strong> — no accumulating uncommitted work</li>
+<li><strong>Interpreter always available</strong> as fallback for uncompiled blocks</li>
+</ul>
+
+<h3>Coverage vs Correctness</h3>
+<div class="quote">"Our goal for today is 100% opcode coverage in the JIT harness."</div>
+<p>The user pushed for breadth (all opcodes handled) while maintaining correctness (harness score=100). When partial implementations were found, the directive was clear:</p>
+<div class="quote">"Implement all partials."</div>
+
+<h3>NOP Stubs: Explicit Justification Required</h3>
+<div class="quote">"And explain why you have NOPs."</div>
+<p>Every NOP stub must have a documented justification. No silent shortcuts. The resulting NOP audit categorized 167 stubs across 8 categories with risk assessments.</p>
+
+<h3>AltiVec: Photoshop Matters</h3>
+<div class="quote">"Mac OS doesn't use AltiVec, but Photoshop does. Implement those."</div>
+<p>The user pushed past "Mac OS boot coverage" to app-level compatibility, driving implementation of ~100 AltiVec→NEON handlers for real-world workloads.</p>
+</section>
+
+<section>
+<h2>4. Key Decisions Timeline</h2>
+<div class="timeline">
+<div class="event"><span class="time">17:22</span> — Source audit of SheepShaver requested</div>
+<div class="event"><span class="time">17:27</span> — "Can we use the current JIT to bootstrap an ARM one?" → Led to architecture analysis</div>
+<div class="event"><span class="time">17:30</span> — Effort estimation requested → 3 options presented (A/B/C)</div>
+<div class="event green"><span class="time">17:30</span> — <strong>"Our plan is C then B with FPU"</strong> → Strategy locked</div>
+<div class="event"><span class="time">17:43</span> — "Start implementing the scaffolding" → Build begins</div>
+<div class="event green"><span class="time">18:26</span> — First native ARM64 PPC code execution verified</div>
+<div class="event green"><span class="time">18:35</span> — 382 MIPS benchmark (2.2× interpreter)</div>
+<div class="event"><span class="time">20:21</span> — "Commit and push SheepShaver work"</div>
+<div class="event green"><span class="time">21:10</span> — First ROM boot (question-mark floppy)</div>
+<div class="event green"><span class="time">22:51</span> — Mac OS 7.5 boots to desktop</div>
+<div class="event green"><span class="time">23:01</span> — Mac OS boots with JIT integrated</div>
+<div class="event"><span class="time">23:19</span> — "Continue increasing opcode coverage"</div>
+<div class="event"><span class="time">23:26</span> — "Continue" → FPU implementation</div>
+<div class="event green"><span class="time">06:27</span> — 100% boot opcode coverage achieved</div>
+<div class="event"><span class="time">06:47</span> — "Figure out which ones don't [compile] and what opcodes we need"</div>
+<div class="event"><span class="time">06:50</span> — "Update our README and push to GitHub"</div>
+<div class="event"><span class="time">07:08</span> — "Implement them now in the harness"</div>
+<div class="event"><span class="time">07:29</span> — "Let's focus on opcode coverage today"</div>
+<div class="event"><span class="time">07:33</span> — "Implement as many opcodes as you can and test them in the harness"</div>
+<div class="event"><span class="time">07:49</span> — "Compile, update docs, push"</div>
+<div class="event"><span class="time">07:51</span> — "Coverage report with implementation column" → Full audit</div>
+<div class="event"><span class="time">08:09</span> — "Implement all partials" → XER carry chain fixed</div>
+<div class="event"><span class="time">08:11</span> — "Explain why you have NOPs" → NOP justification document</div>
+<div class="event"><span class="time">08:17</span> — "Can we implement string ops" → LSWI/STSWI done</div>
+<div class="event"><span class="time">08:25</span> — "What else is deferred to interpreter" → 48→30 fallbacks</div>
+<div class="event"><span class="time">08:30</span> — "Add fuzzing vectors" → 43 edge-case vectors added</div>
+<div class="event"><span class="time">08:33</span> — "Mac OS doesn't use AltiVec, but Photoshop does. Implement those"</div>
+<div class="event"><span class="time">08:39</span> — "Create a skill to describe our workflow"</div>
+<div class="event"><span class="time">08:40</span> — "Change that file name to ppc-jit"</div>
+<div class="event"><span class="time">10:20</span> — This document requested</div>
+</div>
+</section>
+
+<section class="green">
+<h2>5. Results</h2>
+<p>
+<span class="metric good">~230 opcode handlers</span>
+<span class="metric good">113 test vectors</span>
+<span class="metric good">score=100</span>
+<span class="metric good">92.3% block completion</span>
+<span class="metric good">382 MIPS</span>
+<span class="metric good">100% boot coverage</span>
+<span class="metric good">~100 AltiVec→NEON</span>
+</p>
+
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Time from source audit to first native execution</td><td>~1 hour</td></tr>
+<tr><td>Time from source audit to Mac OS boot with JIT</td><td>~6 hours</td></tr>
+<tr><td>Time from zero to 100% boot opcode coverage</td><td>~13 hours</td></tr>
+<tr><td>Time from zero to AltiVec NEON implementation</td><td>~15 hours</td></tr>
+<tr><td>Scalar PPC opcodes implemented</td><td>177 / 191 (93%)</td></tr>
+<tr><td>AltiVec ops with NEON backing</td><td>~100 / 142</td></tr>
+<tr><td>Harness fuzzing vectors</td><td>113 (all passing)</td></tr>
+<tr><td>Interpreter fallback paths remaining</td><td>30 (architecturally necessary)</td></tr>
+<tr><td>NOP stubs with correctness impact</td><td>0</td></tr>
+</table>
+</section>
+
+<section class="blue">
+<h2>6. Design Principles Enforced</h2>
+<table>
+<tr><th>Principle</th><th>How Enforced</th></tr>
+<tr><td>Test before ship</td><td>Every opcode handler verified via harness before commit</td></tr>
+<tr><td>Interpreter is truth</td><td>JIT output diffed against interpreter — any divergence is a bug</td></tr>
+<tr><td>No workarounds</td><td>ROM patches, stub regions, RAM pre-sets all prohibited</td></tr>
+<tr><td>Document everything</td><td>NOP justifications, coverage reports, plan updates after every session</td></tr>
+<tr><td>Push regularly</td><td>Commits pushed to GitHub after each milestone</td></tr>
+<tr><td>Correctness over speed</td><td>Harness score must stay at 100 — no regression allowed</td></tr>
+<tr><td>Breadth then depth</td><td>Cover all opcodes first, optimize later (Phase 5)</td></tr>
+<tr><td>Real workloads matter</td><td>AltiVec implemented for Photoshop, not just Mac OS boot</td></tr>
+</table>
+</section>
+
+<footer>
+Generated April 18, 2026 — SheepShaver AArch64 JIT project on Orange Pi (CIX P1)
+</footer>
+
+</body>
+</html>
