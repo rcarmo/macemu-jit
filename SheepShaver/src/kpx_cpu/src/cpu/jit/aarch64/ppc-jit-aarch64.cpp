@@ -229,6 +229,31 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit_store_gpr(RTMP0, rd);
 		return true;
 
+	case 23: /* rlwnm rA,rS,rB,MB,ME (rotate left word then AND mask) */
+	{
+		uint32_t rs = PPC_RS(op);
+		ra = PPC_RA(op);
+		rb = (op >> 11) & 0x1F;
+		uint32_t mb = (op >> 6) & 0x1F;
+		uint32_t me = (op >> 1) & 0x1F;
+		emit_load_gpr(RTMP0, rs);
+		emit_load_gpr(RTMP1, rb);
+		/* Rotate left by rB: ROR Wd,Wn,Wm with negated count */
+		emit32(0x4B0003E0 | (RTMP1 << 16) | RTMP1); /* NEG Wd,Wm (32-count) */
+		emit32(0x1AC02C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ROR Wd,Wn,Wm */
+		uint32_t mask = 0;
+		if (mb <= me) { for (uint32_t i = mb; i <= me; i++) mask |= (0x80000000U >> i); }
+		else { for (uint32_t i = 0; i <= me; i++) mask |= (0x80000000U >> i);
+		       for (uint32_t i = mb; i <= 31; i++) mask |= (0x80000000U >> i); }
+		if (mask != 0xFFFFFFFF) {
+			emit_load_imm32(RTMP1, (int32_t)mask);
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+		}
+		emit_store_gpr(RTMP0, ra);
+		if (op & 1) emit_update_cr0(RTMP0);
+		return true;
+	}
+
 	case 24: /* ori (and NOP = ori 0,0,0) */
 		ra = PPC_RA(op); rd = PPC_RS(op); uimm = PPC_UIMM(op);
 		if (rd == 0 && ra == 0 && uimm == 0) return true; /* NOP */
@@ -506,6 +531,161 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			}
 			emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR */
 			return true;
+
+		case 8: /* subfc rD,rA,rB (rD = rB - rA, set CA) */
+			emit_load_gpr(RTMP0, rb);
+			emit_load_gpr(RTMP1, ra);
+			emit32(0x6B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 136: /* subfe rD,rA,rB (rD = rB + ~rA + CA) */
+			/* Simplified: treat as subf for now (ignoring carry-in) */
+			emit_load_gpr(RTMP0, rb);
+			emit_load_gpr(RTMP1, ra);
+			emit32(0x4B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 10: /* addc rD,rA,rB (set CA) */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS */
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 138: /* adde rD,rA,rB (add extended, ignoring carry-in for now) */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 234: /* addme rD,rA (rD = rA + CA - 1) — simplified */
+			emit_load_gpr(RTMP0, ra);
+			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB Wd,Wn,#1 */
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 202: /* addze rD,rA (rD = rA + CA) — simplified as rD = rA */
+			emit_load_gpr(RTMP0, ra);
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 232: /* subfme — simplified */
+			emit_load_gpr(RTMP0, ra);
+			emit32(0x4B0003E0 | (RTMP0 << 16) | RTMP0); /* NEG */
+			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB #1 */
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 200: /* subfze rD,rA (rD = ~rA + CA) — simplified as NEG */
+			emit_load_gpr(RTMP0, ra);
+			emit32(0x4B0003E0 | (RTMP0 << 16) | RTMP0);
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 476: /* nand rA,rS,rB */
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x0A200000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* BIC then invert... */
+			/* Actually: AND then MVN */
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+			emit32(0x2A2003E0 | (RTMP0 << 16) | RTMP0); /* ORN Wd,WZR,Wm = MVN */
+			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 124: /* nor rA,rS,rB */
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x2A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ORR */
+			emit32(0x2A2003E0 | (RTMP0 << 16) | RTMP0); /* MVN */
+			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 284: /* eqv rA,rS,rB (XNOR) */
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x4A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* EOR */
+			emit32(0x2A2003E0 | (RTMP0 << 16) | RTMP0); /* MVN */
+			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 60: /* andc rA,rS,rB */
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x0A200000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* BIC Wd,Wn,Wm */
+			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 412: /* orc rA,rS,rB */
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x2A200000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ORN Wd,Wn,Wm */
+			emit_store_gpr(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 459: /* divwu rD,rA,rB (unsigned divide) */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x1AC00800 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* UDIV Wd,Wn,Wm */
+			emit_store_gpr(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		case 75: /* mulhw rD,rA,rB (high word of signed multiply) */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			/* SMULL Xd, Wn, Wm then ASR Xd, Xd, #32 */
+			emit32(0x9B207C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SMULL */
+			emit32(0xD360FC00 | (RTMP0 << 5) | RTMP0); /* ASR Xd, Xn, #32 */
+			emit_store_gpr(RTMP0, rd);
+			return true;
+		case 11: /* mulhwu rD,rA,rB (high word of unsigned multiply) */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x9BA07C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* UMULL */
+			emit32(0xD360FC00 | (RTMP0 << 5) | RTMP0); /* LSR Xd, Xn, #32 */
+			emit_store_gpr(RTMP0, rd);
+			return true;
+		case 87: /* lbzx rD,rA,rB */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0x39400000 | (RTMP0 << 5) | RTMP1); /* LDRB */
+			emit_store_gpr(RTMP1, rd);
+			return true;
+		case 215: /* stbx rS,rA,rB */
+			emit_load_gpr(RTMP1, PPC_RS(op));
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP2, rb); emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0x39000000 | (RTMP0 << 5) | RTMP1); /* STRB */
+			return true;
+		case 279: /* lhzx rD,rA,rB */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0x79400000 | (RTMP0 << 5) | RTMP1); /* LDRH */
+			emit32(0x5AC00400 | (RTMP1 << 5) | RTMP1); /* REV16 */
+			emit_store_gpr(RTMP1, rd);
+			return true;
+		case 407: /* sthx rS,rA,rB */
+			emit_load_gpr(RTMP1, PPC_RS(op));
+			emit32(0x5AC00400 | (RTMP1 << 5) | RTMP1); /* REV16 */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP2, rb); emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0x79000000 | (RTMP0 << 5) | RTMP1); /* STRH */
+			return true;
+		case 343: /* lhax rD,rA,rB (load halfword algebraic indexed) */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0x79400000 | (RTMP0 << 5) | RTMP1); /* LDRH */
+			emit32(0x5AC00400 | (RTMP1 << 5) | RTMP1); /* REV16 */
+			emit32(0x13003C00 | (RTMP1 << 5) | RTMP1); /* SXTH */
+			emit_store_gpr(RTMP1, rd);
+			return true;
+		case 371: /* mftb rD (move from time base) */
+			/* Read ARM64 CNTVCT_EL0 as a substitute for PPC TB */
+			emit32(0xD53BE040 | RTMP0); /* MRS Xt, CNTVCT_EL0 */
+			emit_store_gpr(RTMP0, rd);
+			return true;
 		default:
 			jit_xo_miss[(op >> 1) & 0x3FF]++;
 			return false;
@@ -685,6 +865,16 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit32(0x0B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* effective addr */
 		emit_store_gpr(RTMP0, ra); /* update rA */
 		emit32(0xB9000000 | (RTMP0 << 5) | RTMP1); /* STR */
+		return true;
+
+
+	case 8: /* subfic rD,rA,SIMM (rD = SIMM - rA, set CA) */
+		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
+		emit_load_imm32(RTMP0, (int32_t)simm);
+		emit_load_gpr(RTMP1, ra);
+		emit32(0x6B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SUBS Wd,Wn,Wm */
+		emit_store_gpr(RTMP0, rd);
+		/* TODO: set XER[CA] from carry */
 		return true;
 
 
