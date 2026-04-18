@@ -1640,6 +1640,32 @@ bool VideoInit(bool classic)
 #endif
 	classic_mode = classic;
 
+	/* ROM harness: headless mode — create dummy framebuffer, skip SDL */
+	if (getenv("B2_ROM_HARNESS")) {
+		int width = 640, height = 480;
+		static uint8 dummy_fb[640 * 480 * 4];
+		memset(dummy_fb, 0, sizeof(dummy_fb));
+
+		video_mode mode;
+		mode.x = width;
+		mode.y = height;
+		mode.resolution_id = 0x80;
+		mode.depth = VDEPTH_8BIT;
+		mode.bytes_per_row = width;
+		mode.user_data = 0;
+		vector<video_mode> modes;
+		modes.push_back(mode);
+
+		static SDL_monitor_desc *dummy_monitor = new SDL_monitor_desc(modes, VDEPTH_8BIT, 0x80);
+		VideoMonitors.push_back(dummy_monitor);
+		MacFrameBaseHost = (uint8 *)dummy_fb;
+		MacFrameSize = width * height;
+		MacFrameLayout = FLAYOUT_DIRECT;
+		dummy_monitor->set_mac_frame_base(MacFrameBaseMac);
+		fprintf(stderr, "ROM_HARNESS: headless video %dx%dx%d\n", width, height, 8);
+		return true;
+	}
+
 #ifdef ENABLE_VOSF
 	// Zero the mainBuffer structure
 	mainBuffer.dirtyPages = NULL;
@@ -2775,6 +2801,60 @@ static void handle_events(void)
 				ADBKeyDown(0x7f);	// Power key
 				ADBKeyUp(0x7f);
 				break;
+			}
+		}
+	}
+
+	// Also drain SDL's internal event queue directly — catches events pushed
+	// by VNC server thread via SDL_PushEvent() which bypass the main-thread buffer
+	{
+		SDL_Event sdl_events[16];
+		int n;
+		while ((n = SDL_PeepEvents(sdl_events, 16, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT)) > 0) {
+			for (int i = 0; i < n; i++) {
+				SDL_Event &event = sdl_events[i];
+				switch (event.type) {
+				case SDL_MOUSEBUTTONDOWN: {
+					unsigned int button = event.button.button;
+					if (button == SDL_BUTTON_LEFT) ADBMouseDown(0);
+					else if (button == SDL_BUTTON_RIGHT) ADBMouseDown(1);
+					else if (button == SDL_BUTTON_MIDDLE) ADBMouseDown(2);
+					break;
+				}
+				case SDL_MOUSEBUTTONUP: {
+					unsigned int button = event.button.button;
+					if (button == SDL_BUTTON_LEFT) ADBMouseUp(0);
+					else if (button == SDL_BUTTON_RIGHT) ADBMouseUp(1);
+					else if (button == SDL_BUTTON_MIDDLE) ADBMouseUp(2);
+					break;
+				}
+				case SDL_MOUSEMOTION:
+					if (drv) {
+						if (mouse_grabbed)
+							drv->mouse_moved(event.motion.xrel, event.motion.yrel);
+						else
+							drv->mouse_moved(event.motion.x, event.motion.y);
+					}
+					break;
+				case SDL_KEYDOWN: {
+					if (event.key.repeat) break;
+					int code = event2keycode(event.key, true);
+					if (code >= 0 && !emul_suspended) {
+						code = modify_opt_cmd(code);
+						ADBKeyDown(code);
+					}
+					break;
+				}
+				case SDL_KEYUP: {
+					int code = event2keycode(event.key, false);
+					if (code >= 0) {
+						code = modify_opt_cmd(code);
+						ADBKeyUp(code);
+					}
+					break;
+				}
+				default: break;
+				}
 			}
 		}
 	}

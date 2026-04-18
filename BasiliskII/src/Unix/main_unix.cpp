@@ -227,6 +227,8 @@ static const char *gui_connection_path = NULL;	// GUI connection identifier
 static void *xpram_func(void *arg);
 static void *tick_func(void *arg);
 static void one_tick(...);
+void rom_harness_init(void);
+void rom_harness_tick(void);
 #if !EMULATED_68K
 static void sigirq_handler(int sig, int code, struct sigcontext *scp);
 static void sigill_handler(int sig, int code, struct sigcontext *scp);
@@ -1040,6 +1042,7 @@ int main(int argc, char **argv)
 	// Initialize everything
 	fprintf(stderr, "BOOT main: InitAll starting\n");
 	fflush(stderr);
+	rom_harness_init();
 	if (!InitAll(vmdir))
 		QuitEmulator();
 	fprintf(stderr, "BOOT main: InitAll complete\n");
@@ -1585,6 +1588,7 @@ static void one_second(void)
 
 static void one_tick(...)
 {
+	rom_harness_tick();
 	static int tick_counter = 0;
 	if (++tick_counter > 60) {
 		tick_counter = 0;
@@ -2083,4 +2087,41 @@ static void install_sigill_diag() {
     sa.sa_sigaction = sigill_handler_diag;
     sa.sa_flags = SA_SIGINFO;
     sigaction(SIGILL, &sa, NULL);
+}
+
+/* ROM harness progress reporting */
+static bool rom_harness_active = false;
+static uint64_t rom_harness_ticks = 0;
+static uint64_t rom_harness_max_ticks = 0;
+static uint64_t rom_harness_start_usec = 0;
+static uint32_t rom_harness_last_pc = 0;
+static uint64_t rom_harness_report_interval = 100; /* ticks between reports */
+
+void rom_harness_init(void)
+{
+    const char *env = getenv("B2_ROM_HARNESS");
+    if (!env || !*env) return;
+    rom_harness_active = true;
+    rom_harness_max_ticks = strtoull(env, NULL, 0);
+    if (rom_harness_max_ticks == 0 || rom_harness_max_ticks == 1)
+        rom_harness_max_ticks = 1000; /* default: ~10B instructions */
+    rom_harness_start_usec = GetTicks_usec();
+    fprintf(stderr, "ROM_HARNESS: started, max_ticks=%llu (~%lluM insns)\n",
+        (unsigned long long)rom_harness_max_ticks,
+        (unsigned long long)(rom_harness_max_ticks * 10));
+}
+
+void rom_harness_tick(void)
+{
+    if (!rom_harness_active) return;
+    rom_harness_ticks++;
+
+    if (rom_harness_ticks == rom_harness_max_ticks) {
+        uint64_t elapsed_usec = GetTicks_usec() - rom_harness_start_usec;
+        fprintf(stderr, "ROM_HARNESS: MAX_TICKS ticks=%llu elapsed=%.1fs\n",
+            (unsigned long long)rom_harness_ticks, elapsed_usec / 1e6);
+        fprintf(stderr, "ROM_HARNESS: result=MAX_TICKS\n");
+        quit_program = 1;
+        SPCFLAGS_SET(SPCFLAG_BRK);
+    }
 }
