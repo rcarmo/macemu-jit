@@ -2573,23 +2573,20 @@ static bool aarch64_skip_instruction(unsigned long *regs) {
 	unsigned long long *r = (unsigned long long *)regs;
 	unsigned long long pc = r[32];
 	
-	/* If PC is in JIT cache or at NULL, recover by jumping to 
-	   popall_execute_normal instead of skipping one instruction.
-	   Single-instruction skip doesn't work well for JIT code because
-	   the register state is inconsistent after the failed instruction. */
+	if (!pc) return false;
+	
+	/* For JIT code in the popallspace region: redirect to recovery.
+	   For all other code (interpreter, C code): advance PC+4. */
 	extern unsigned long long jit_recovery_address;
 	extern void *jit_popallspace_start;
 	extern size_t jit_popallspace_size;
-	if (jit_recovery_address && jit_popallspace_start) {
-		if (pc == 0 || 
-		    (pc >= (unsigned long long)jit_popallspace_start && 
-		     pc < (unsigned long long)jit_popallspace_start + jit_popallspace_size)) {
-			r[32] = jit_recovery_address;
-			return true;
-		}
+	if (jit_recovery_address && jit_popallspace_start &&
+	    pc >= (unsigned long long)jit_popallspace_start && 
+	    pc < (unsigned long long)jit_popallspace_start + jit_popallspace_size) {
+		r[32] = jit_recovery_address;
+		return true;
 	}
 	
-	if (!pc) return false;
 	r[32] += 4;
 	return true;
 }
