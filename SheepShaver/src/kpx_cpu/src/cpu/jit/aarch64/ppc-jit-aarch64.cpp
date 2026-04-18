@@ -1345,6 +1345,11 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit_store_gpr(RTMP1, rd);
 		return true;
 
+	case 2: /* tdi — 64-bit trap: treat as NOP on 32-bit PPC */
+		return true;
+	case 3: /* twi — trap word immediate: simplified as NOP (trap conditions rarely fire in normal code) */
+		return true;
+
 	case 4: /* AltiVec instructions — not implemented, treat as NOP */
 		return true;
 
