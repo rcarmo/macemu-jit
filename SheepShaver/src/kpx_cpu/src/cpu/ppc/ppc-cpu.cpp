@@ -699,7 +699,7 @@ void powerpc_cpu::execute(uint32 entry)
 				if (!jit_enabled) goto skip_jit;
 				if (!jit_init_done) { ppc_jit_aarch64_init(4096); jit_init_done = true; }
 				ppc_jit_block jblk;
-				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete && jblk.n_insns <= 4) {
+				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) {
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
 					fn((void*)regs_ptr());
 					/* Validate PC after JIT execution */
