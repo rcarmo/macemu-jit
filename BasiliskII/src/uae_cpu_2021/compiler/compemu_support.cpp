@@ -5402,9 +5402,28 @@ static void compile_block(cpu_history* pc_hist, int blocklen)
 			optlev++;
 			while (!optcount[optlev])
 				optlev++;
-			bi->count=optcount[optlev]-1;
+			/* Enforce max optlev from B2_JIT_MAX_OPTLEV env */
+			{
+				const int cap = jit_max_optlev();
+				if (optlev > cap) {
+					optlev = cap;
+					/* Stay at cap — don't recompile again */
+					bi->count = 0x7fffffff;
+				} else {
+					bi->count = optcount[optlev] - 1;
+				}
+			}
 		}
 		current_block_pc_p=(uintptr)pc_hist[0].location;
+		{
+			static int early_trace = 0;
+			if (early_trace < 3) {
+				early_trace++;
+				fprintf(stderr, "COMPILE_ENTER optlev=%d count=%d status=%d blklen=%d pc=%08lx\n",
+					optlev, bi->count, bi->status, blocklen,
+					(unsigned long)((uintptr)pc_hist[0].location - MEMBaseDiff));
+			}
+		}
 
 		remove_deps(bi); /* We are about to create new code */
 		bi->optlevel=optlev;
@@ -5482,6 +5501,12 @@ static void compile_block(cpu_history* pc_hist, int blocklen)
 			compemu_raw_jmp((uintptr)popall_exec_nostats);
 		}
 		else {
+			static int compile_trace_count = 0;
+			if (compile_trace_count < 5) {
+				compile_trace_count++;
+				uae_u32 blk_mac = (uintptr)pc_hist[0].location - MEMBaseDiff;
+				fprintf(stderr, "JITCOMPILE optlev=%d blk=%08x len=%d\n", optlev, blk_mac, blocklen);
+			}
 			reg_alloc_run=0;
 			next_pc_p=0;
 			taken_pc_p=0;
@@ -5517,7 +5542,7 @@ static void compile_block(cpu_history* pc_hist, int blocklen)
 				/* Debug: trace block 8b3442 compilation */
 				{
 					uae_u32 blk_mac = (uintptr)pc_hist[0].location - MEMBaseDiff;
-					if (optlev >= 2 && i == 0) {
+					if (i == 0) {
 						uae_u32 inst_mac = (uintptr)pc_hist[i].location - MEMBaseDiff;
 						fprintf(stderr, "COMPILE blk=%08x i=%d/%d pc=%08x op=%04x nf=%02x lf=%02x sf=%02x uf=%02x\n",
 							blk_mac, i, blocklen, inst_mac, opcode,
@@ -6006,6 +6031,8 @@ void exec_nostats(void)
 #else
 void execute_normal(void)
 {
+	{
+	}
 	if (!check_for_cache_miss()) {
 		cpu_history pc_hist[MAXRUN];
 		int blocklen = 0;

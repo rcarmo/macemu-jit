@@ -5435,6 +5435,15 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
 {
 #if defined(CPU_AARCH64)
     jit_diag_compile_block_calls++;
+    {
+        static int arm_compile_trace = 0;
+        if (arm_compile_trace < 3) {
+            arm_compile_trace++;
+            fprintf(stderr, "ARM_COMPILE_BLOCK len=%d totcyc=%d pc=%08lx\n",
+                blocklen, totcycles,
+                (unsigned long)((uintptr)pc_hist[0].location - MEMBaseDiff));
+        }
+    }
 #endif
     if (cache_enabled && compiled_code && currprefs.cpu_model >= 68020) {
 		jit_begin_write_window();
