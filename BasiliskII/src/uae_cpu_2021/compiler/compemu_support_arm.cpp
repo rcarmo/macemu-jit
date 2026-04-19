@@ -6447,6 +6447,16 @@ endblock_done:
             flush_icache_lazy(3);
 
         bi->status = BI_ACTIVE;
+#if defined(CPU_AARCH64)
+        /* RAM blocks: force checksum validation on every dispatch to detect
+           self-modifying code (ROM memclear writes over compiled RAM blocks
+           during early boot). ROM blocks stay BI_ACTIVE for speed. */
+        if (block_m68k_pc < ROMBaseMac) {
+            bi->status = BI_NEED_CHECK;
+            bi->handler_to_use = (cpuop_func*)popall_check_checksum;
+            cache_tags[cacheline(pc_hist[0].location)].handler = (cpuop_func*)popall_check_checksum;
+        }
+#endif
         if (redo_current_block)
             block_need_recompile(bi);
 
