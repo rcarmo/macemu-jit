@@ -5903,12 +5903,27 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         uintptr next_traced = (uintptr)pc_hist[i + 1].location;
                         uintptr side_exit_pc = 0;
                         int side_cond = -1;
+                        /* Translate branch_cc from x86 encoding (gencomp uses
+                           flags_x86.h) to ARM64 native condition codes */
+                        int arm_branch_cc = branch_cc;
+#if defined(CPU_AARCH64)
+                        {
+                            static const int x86_to_arm[] = {
+                                NATIVE_CC_VS, NATIVE_CC_VC, NATIVE_CC_CS, NATIVE_CC_CC,
+                                NATIVE_CC_EQ, NATIVE_CC_NE, NATIVE_CC_LS, NATIVE_CC_HI,
+                                NATIVE_CC_MI, NATIVE_CC_PL, NATIVE_CC_VS, NATIVE_CC_VC,
+                                NATIVE_CC_LT, NATIVE_CC_GE, NATIVE_CC_LE, NATIVE_CC_GT,
+                            };
+                            if (arm_branch_cc >= 0 && arm_branch_cc < 16)
+                                arm_branch_cc = x86_to_arm[arm_branch_cc];
+                        }
+#endif
                         if (next_traced == taken_pc_p) {
                             side_exit_pc = next_pc_p;
-                            side_cond = branch_cc ^ 1;
+                            side_cond = arm_branch_cc ^ 1;
                         } else if (next_traced == next_pc_p) {
                             side_exit_pc = taken_pc_p;
-                            side_cond = branch_cc;
+                            side_cond = arm_branch_cc;
                         }
                         if (side_cond >= 0) {
                             bigstate saved_live = live;
