@@ -486,10 +486,45 @@ void m68k_do_compile_execute(void)
 		_dc++;
 		{
 			static unsigned long dc_log = 0;
-			if (++dc_log % 10000 == 0)
-				fprintf(stderr, "DC[%lu] pc=%08x sr=%04x intmask=%u spc=%08x\n",
-					dc_log, m68k_getpc(), (unsigned)regs.sr, (unsigned)regs.intmask,
-					(unsigned)regs.spcflags);
+			if (++dc_log % 10000 == 0 || (dc_log <= 500)) {
+				uae_u32 _pc = m68k_getpc();
+				if (dc_log % 10000 == 0 || dc_log <= 500) {
+					fprintf(stderr, "DC[%lu] pc=%08x sr=%04x intmask=%u spc=%08x",
+						dc_log, _pc, (unsigned)regs.sr, (unsigned)regs.intmask,
+						(unsigned)regs.spcflags);
+					if (dc_log <= 30)
+						fprintf(stderr, " D0=%08x D3=%08x D7=%08x A0=%08x A7=%08x",
+							regs.regs[0], regs.regs[3], regs.regs[7],
+							regs.regs[8], regs.regs[15]);
+					fprintf(stderr, "\n");
+				}
+				static int dump_once = 0;
+				if (!dump_once && _pc < 0x00800000 && dc_log > 30000) {
+					dump_once = 1;
+					uae_u8 *p = get_real_address(_pc);
+					fprintf(stderr, "RAMDUMP pc=%08x:", _pc);
+					for (int _i = 0; _i < 32; _i++)
+						fprintf(stderr, " %02x", p[_i]);
+					fprintf(stderr, "\n");
+					fprintf(stderr, "REGDUMP2 D0=%08x D1=%08x D2=%08x D3=%08x D4=%08x D5=%08x D6=%08x D7=%08x\n",
+						regs.regs[0], regs.regs[1], regs.regs[2], regs.regs[3],
+						regs.regs[4], regs.regs[5], regs.regs[6], regs.regs[7]);
+					fprintf(stderr, "REGDUMP2 A0=%08x A1=%08x A2=%08x A3=%08x A4=%08x A5=%08x A6=%08x A7=%08x\n",
+						regs.regs[8], regs.regs[9], regs.regs[10], regs.regs[11],
+						regs.regs[12], regs.regs[13], regs.regs[14], regs.regs[15]);
+					fprintf(stderr, "REGDUMP2 pc_p=%p pc_oldp=%p pc=%08x sr=%04x isp=%08x usp=%08x msp=%08x\n",
+						(void*)regs.pc_p, (void*)regs.pc_oldp, regs.pc,
+						regs.sr, regs.isp, regs.usp, regs.msp);
+					/* Also dump what pc_p actually points to */
+					if (regs.pc_p) {
+						uae_u8 *pp = (uae_u8*)regs.pc_p;
+						fprintf(stderr, "CODEAT pc_p:");
+						for (int _i = 0; _i < 32; _i++)
+							fprintf(stderr, " %02x", pp[_i]);
+						fprintf(stderr, "\n");
+					}
+				}
+			}
 		}
 #if defined(CPU_AARCH64)
 		if (use_sync_ticks) {
@@ -5479,6 +5514,17 @@ static void compile_block(cpu_history* pc_hist, int blocklen)
 				compop_func **comptbl;
 				uae_u32 opcode=DO_GET_OPCODE(pc_hist[i].location);
 				needed_flags=(liveflags[i+1] & prop[opcode].set_flags);
+				/* Debug: trace block 8b3442 compilation */
+				{
+					uae_u32 blk_mac = (uintptr)pc_hist[0].location - MEMBaseDiff;
+					if (optlev >= 2 && i == 0) {
+						uae_u32 inst_mac = (uintptr)pc_hist[i].location - MEMBaseDiff;
+						fprintf(stderr, "COMPILE blk=%08x i=%d/%d pc=%08x op=%04x nf=%02x lf=%02x sf=%02x uf=%02x\n",
+							blk_mac, i, blocklen, inst_mac, opcode,
+							needed_flags, liveflags[i+1],
+							prop[opcode].set_flags, prop[opcode].use_flags);
+					}
+				}
 #ifdef UAE
 				special_mem=pc_hist[i].specmem;
 				if (!needed_flags && currprefs.compnf)

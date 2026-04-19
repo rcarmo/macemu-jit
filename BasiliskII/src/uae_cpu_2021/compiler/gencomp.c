@@ -1470,13 +1470,21 @@ gen_opcode (unsigned int opcode)
 
 	/* fall through */
      case 2:			/* priviledged */
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	break;
+#else
 	failure;   /* Easy ones first */
 	break;
+#endif
      case 3:			/* privileged if size == word */
 	if (curi->size == sz_byte)
 	    break;
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+	break;
+#else
 	failure;
 	break;
+#endif
     }
     switch (curi->size) {
      case sz_byte: ssize="b"; break;
@@ -1505,7 +1513,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_ORSR:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	if (curi->size == sz_byte) {
@@ -1527,7 +1534,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_EORSR:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	if (curi->size == sz_byte) {
@@ -1547,7 +1553,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_ANDSR:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	if (curi->size == sz_byte) {
@@ -1887,7 +1892,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_MV2SR:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	if (curi->size == sz_byte) {
@@ -2452,7 +2456,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
 	 case i_DIVU:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
@@ -2467,7 +2470,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_DIVS:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
@@ -2514,7 +2516,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
 	 case i_CHK:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
@@ -3094,7 +3095,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_MOVEC2:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
@@ -3107,7 +3107,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_MOVE2C:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
@@ -3154,7 +3153,6 @@ gen_opcode (unsigned int opcode)
 	break;
 
      case i_DIVL:
-	isjump;
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "extra", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);

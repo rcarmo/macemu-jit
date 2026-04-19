@@ -8220,103 +8220,91 @@ MENDFUNC(1,jff_MV2SCCR,(RR4 s))
  */
 static void inline_MakeFromSR(int sr_reg)
 {
-	/* sr_reg holds the new 16-bit SR value */
+	/* Copy sr to REG_WORK1 so we don't clobber sr_reg */
+	if (sr_reg != REG_WORK1)
+		MOV_ww(REG_WORK1, sr_reg);
 
 	/* Save old s and m for stack-swap detection */
-	LDRB_wXi(REG_WORK3, R_REGSTRUCT, 80);  /* old_s = regs.s */
-	LDRB_wXi(REG_WORK4, R_REGSTRUCT, 81);  /* old_m = regs.m */
+	LDRB_wXi(REG_WORK3, R_REGSTRUCT, 80);  /* old_s */
+	LDRB_wXi(REG_WORK4, R_REGSTRUCT, 81);  /* old_m */
 
 	/* Store new sr */
-	STRH_wXi(sr_reg, R_REGSTRUCT, 76);      /* regs.sr = new_sr */
+	STRH_wXi(REG_WORK1, R_REGSTRUCT, 76);
 
-	/* Decompose: t1 = bit15, t0 = bit14, s = bit13, m = bit12 */
-	UBFX_wwii(REG_WORK2, sr_reg, 15, 1);
-	STRB_wXi(REG_WORK2, R_REGSTRUCT, 78);   /* regs.t1 */
-	UBFX_wwii(REG_WORK2, sr_reg, 14, 1);
-	STRB_wXi(REG_WORK2, R_REGSTRUCT, 79);   /* regs.t0 */
-	UBFX_wwii(REG_WORK2, sr_reg, 13, 1);
-	STRB_wXi(REG_WORK2, R_REGSTRUCT, 80);   /* regs.s (new) */
-	UBFX_wwii(REG_WORK1, sr_reg, 12, 1);
-	STRB_wXi(REG_WORK1, R_REGSTRUCT, 81);   /* regs.m (new) */
+	/* Decompose upper bits using REG_WORK2 as scratch */
+	UBFX_wwii(REG_WORK2, REG_WORK1, 15, 1);
+	STRB_wXi(REG_WORK2, R_REGSTRUCT, 78);   /* t1 */
+	UBFX_wwii(REG_WORK2, REG_WORK1, 14, 1);
+	STRB_wXi(REG_WORK2, R_REGSTRUCT, 79);   /* t0 */
+	UBFX_wwii(REG_WORK2, REG_WORK1, 13, 1);
+	STRB_wXi(REG_WORK2, R_REGSTRUCT, 80);   /* s */
+	UBFX_wwii(REG_WORK2, REG_WORK1, 12, 1);
+	STRB_wXi(REG_WORK2, R_REGSTRUCT, 81);   /* m */
+	UBFX_wwii(REG_WORK2, REG_WORK1, 8, 3);
+	STR_wXi(REG_WORK2, R_REGSTRUCT, 84);    /* intmask */
 
-	/* intmask = bits 10-8 */
-	UBFX_wwii(REG_WORK1, sr_reg, 8, 3);
-	STR_wXi(REG_WORK1, R_REGSTRUCT, 84);    /* regs.intmask */
-
-	/* Set XNZVC flags from low 5 bits of sr.
-	   This is the same as jff_MV2SCCR but we already have the value. */
-	/* X flag (bit 4) → FLAGX */
-	int x = writereg(FLAGX);
-	UBFX_wwii(x, sr_reg, 4, 1);
-	unlock2(x);
-
-	/* NZVC → ARM NZCV: N=bit3→31, Z=bit2→30, C=bit0→29, V=bit1→28 */
-	MOV_xi(REG_WORK1, 0);
-	UBFX_wwii(REG_WORK2, sr_reg, 3, 1);
-	LSL_xxi(REG_WORK2, REG_WORK2, 31);
-	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
-	UBFX_wwii(REG_WORK2, sr_reg, 2, 1);
-	LSL_xxi(REG_WORK2, REG_WORK2, 30);
-	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
-	UBFX_wwii(REG_WORK2, sr_reg, 0, 1);
-	LSL_xxi(REG_WORK2, REG_WORK2, 29);
-	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
-	UBFX_wwii(REG_WORK2, sr_reg, 1, 1);
-	LSL_xxi(REG_WORK2, REG_WORK2, 28);
-	ORR_xxx(REG_WORK1, REG_WORK1, REG_WORK2);
-	MSR_NZCV_x(REG_WORK1);
-	flags_carry_inverted = false;
-
-	/* Stack swap: compare old_s (REG_WORK3) with new s (bit 13 of sr_reg) */
-	UBFX_wwii(REG_WORK2, sr_reg, 13, 1);  /* new_s */
-	CMP_ww(REG_WORK3, REG_WORK2);         /* old_s == new_s? */
+	/* Stack swap: old_s (REG_WORK3) vs new_s (bit 13) */
+	UBFX_wwii(REG_WORK2, REG_WORK1, 13, 1);
+	CMP_ww(REG_WORK3, REG_WORK2);
 	uae_u32 *skip_swap = (uae_u32 *)get_target();
-	B_i(0);  /* placeholder: branch if equal (no S change) → skip swap */
+	BEQ_i(0);
 
-	/* S changed: need to swap A7 with USP/ISP/MSP */
-	/* If old_s was 1 (supervisor→user): save A7 to ISP/MSP, load USP */
-	uae_u32 *else_branch = NULL;
-	TBZ_wii(REG_WORK3, 0, 0);  /* placeholder: if old_s==0 (was user) → else */
+	/* S changed */
+	LDR_wXi(REG_WORK2, R_REGSTRUCT, 60);    /* current A7 */
+
+	TBZ_wii(REG_WORK3, 0, 0);
 	uae_u32 *was_user = (uae_u32 *)get_target() - 1;
 
-	/* Was supervisor: save A7 based on old_m */
-	LDR_wXi(REG_WORK1, R_REGSTRUCT, 60);   /* A7 value */
-	TBZ_wii(REG_WORK4, 0, 3);               /* if old_m==0 → store to ISP */
-	STR_wXi(REG_WORK1, R_REGSTRUCT, 72);    /* regs.msp = A7 */
-	uae_u32 *skip_isp = (uae_u32 *)get_target();
-	B_i(0);  /* skip ISP store */
-	/* old_m==0: */
-	STR_wXi(REG_WORK1, R_REGSTRUCT, 68);    /* regs.isp = A7 */
-	write_jmp_target(skip_isp, (uintptr)get_target());
-	/* Load USP into A7 */
-	LDR_wXi(REG_WORK1, R_REGSTRUCT, 64);    /* regs.usp */
-	STR_wXi(REG_WORK1, R_REGSTRUCT, 60);    /* A7 = USP */
-	else_branch = (uae_u32 *)get_target();
-	B_i(0);  /* skip to end */
-
-	/* Was user: save A7 to USP, load ISP/MSP */
-	write_jmp_target(was_user, (uintptr)get_target());
-	LDR_wXi(REG_WORK1, R_REGSTRUCT, 60);    /* A7 value */
-	STR_wXi(REG_WORK1, R_REGSTRUCT, 64);    /* regs.usp = A7 */
-	/* Load ISP or MSP based on new_m */
-	LDRB_wXi(REG_WORK2, R_REGSTRUCT, 81);   /* new_m */
-	TBZ_wii(REG_WORK2, 0, 3);               /* if new_m==0 → load ISP */
-	LDR_wXi(REG_WORK1, R_REGSTRUCT, 72);    /* regs.msp */
-	uae_u32 *skip_isp2 = (uae_u32 *)get_target();
+	/* Was supervisor: save A7 to ISP/MSP based on old_m, load USP */
+	TBZ_wii(REG_WORK4, 0, 2);
+	STR_wXi(REG_WORK2, R_REGSTRUCT, 72);    /* msp = A7 */
+	uae_u32 *s1_done = (uae_u32 *)get_target();
 	B_i(0);
-	LDR_wXi(REG_WORK1, R_REGSTRUCT, 68);    /* regs.isp */
-	write_jmp_target(skip_isp2, (uintptr)get_target());
-	STR_wXi(REG_WORK1, R_REGSTRUCT, 60);    /* A7 = ISP/MSP */
+	STR_wXi(REG_WORK2, R_REGSTRUCT, 68);    /* isp = A7 */
+	write_jmp_target(s1_done, (uintptr)get_target());
+	LDR_wXi(REG_WORK2, R_REGSTRUCT, 64);    /* USP */
+	STR_wXi(REG_WORK2, R_REGSTRUCT, 60);    /* A7 = USP */
+	uae_u32 *swap_done = (uae_u32 *)get_target();
+	B_i(0);
 
-	if (else_branch)
-		write_jmp_target(else_branch, (uintptr)get_target());
+	/* Was user: save A7 to USP, load ISP/MSP based on new_m */
+	write_jmp_target(was_user, (uintptr)get_target());
+	STR_wXi(REG_WORK2, R_REGSTRUCT, 64);    /* USP = A7 */
+	LDRB_wXi(REG_WORK2, R_REGSTRUCT, 81);   /* new_m */
+	TBZ_wii(REG_WORK2, 0, 2);
+	LDR_wXi(REG_WORK2, R_REGSTRUCT, 72);    /* MSP */
+	uae_u32 *s0_done = (uae_u32 *)get_target();
+	B_i(0);
+	LDR_wXi(REG_WORK2, R_REGSTRUCT, 68);    /* ISP */
+	write_jmp_target(s0_done, (uintptr)get_target());
+	STR_wXi(REG_WORK2, R_REGSTRUCT, 60);    /* A7 = ISP/MSP */
+
+	write_jmp_target(swap_done, (uintptr)get_target());
 	write_jmp_target(skip_swap, (uintptr)get_target());
 
-	/* Note: M-bit change within supervisor mode (olds==news==1, oldm!=newm)
-	   is rare and handled by the same code paths above since we always
-	   check old_m/new_m when swapping. For simplicity, we handle the
-	   common case correctly and let the rare M-bit-only swap case
-	   go through the S-change path (which is correct but does extra work). */
+	/* Now safe to clobber REG_WORK3/4 — set flags from REG_WORK1 (sr) */
+
+	/* X flag (bit 4) → FLAGX */
+	int x = writereg(FLAGX);
+	UBFX_wwii(x, REG_WORK1, 4, 1);
+	unlock2(x);
+
+	/* NZVC → ARM NZCV */
+	MOV_xi(REG_WORK2, 0);
+	UBFX_xxii(REG_WORK3, REG_WORK1, 3, 1);  /* N→31 */
+	LSL_xxi(REG_WORK3, REG_WORK3, 31);
+	ORR_xxx(REG_WORK2, REG_WORK2, REG_WORK3);
+	UBFX_xxii(REG_WORK3, REG_WORK1, 2, 1);  /* Z→30 */
+	LSL_xxi(REG_WORK3, REG_WORK3, 30);
+	ORR_xxx(REG_WORK2, REG_WORK2, REG_WORK3);
+	UBFX_xxii(REG_WORK3, REG_WORK1, 0, 1);  /* C→29 */
+	LSL_xxi(REG_WORK3, REG_WORK3, 29);
+	ORR_xxx(REG_WORK2, REG_WORK2, REG_WORK3);
+	UBFX_xxii(REG_WORK3, REG_WORK1, 1, 1);  /* V→28 */
+	LSL_xxi(REG_WORK3, REG_WORK3, 28);
+	ORR_xxx(REG_WORK2, REG_WORK2, REG_WORK3);
+	MSR_NZCV_x(REG_WORK2);
+	flags_carry_inverted = false;
 }
 
 /*
