@@ -5508,11 +5508,23 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                 optlev = 0;
             } else {
                 const int max_optlev = jit_max_optlev();
-                if (optlev < max_optlev) {
+                const uae_u32 blk_pc = (uae_u32)((uintptr)pc_hist[0].location - MEMBaseDiff);
+                if (blk_pc >= ROMBaseMac) {
+                    /* ROM: immediate L2 native codegen (immutable code) */
                     optlev = max_optlev;
-                    bi->count = -2; /* Stay at this level permanently */
+                    bi->count = -2;
+                } else {
+                    /* RAM: use interpreter dispatch initially. Transient code
+                       (memclear) runs once per address and never escalates.
+                       Hot loops run many times and will escalate on the next
+                       count expiry after 10 dispatches. */
+                    if (optlev == 0) {
+                        bi->count = 9;
+                    } else if (optlev < max_optlev) {
+                        optlev = max_optlev;
+                        bi->count = -2;
+                    }
                 }
-                /* else: already at the selected cap, don't escalate further */
             }
 #else
             {
@@ -6448,13 +6460,20 @@ endblock_done:
 
         bi->status = BI_ACTIVE;
 #if defined(CPU_AARCH64)
-        /* RAM blocks: force checksum validation on every dispatch to detect
-           self-modifying code (ROM memclear writes over compiled RAM blocks
-           during early boot). ROM blocks stay BI_ACTIVE for speed. */
-        if (block_m68k_pc < ROMBaseMac) {
-            bi->status = BI_NEED_CHECK;
-            bi->handler_to_use = (cpuop_func*)popall_check_checksum;
-            cache_tags[cacheline(pc_hist[0].location)].handler = (cpuop_func*)popall_check_checksum;
+        /* RAM blocks compiled from zeroed source: keep as BI_NEED_CHECK.
+           The checksum validates (zeros) so subsequent dispatches promote
+           to BI_ACTIVE if content didn't change, or invalidate if it did.
+           This prevents infinite execution of stale zeros-compiled native code
+           when a branch accidentally targets uninitialized RAM. */
+        if (block_m68k_pc < ROMBaseMac && blocklen > 0) {
+            const uae_u16 *_w0 = (const uae_u16 *)pc_hist[0].location;
+            if (*_w0 == 0) {
+                /* First word is zero — very likely uninitialized.
+                   Use exec_nostats so interpreter re-reads current content. */
+                bi->handler_to_use = (cpuop_func*)popall_execute_normal;
+                bi->handler = (cpuop_func*)popall_execute_normal;
+                cache_tags[cacheline(pc_hist[0].location)].handler = (cpuop_func*)popall_execute_normal;
+            }
         }
 #endif
         if (redo_current_block)
