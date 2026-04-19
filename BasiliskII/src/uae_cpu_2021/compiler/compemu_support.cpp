@@ -5999,6 +5999,7 @@ void do_nothing(void)
 #else
 void exec_nostats(void)
 {
+	int _run_count = 0;
 	for (;;)  { 
 		uae_u32 opcode = GET_OPCODE;
 #if FLIGHT_RECORDER
@@ -6019,8 +6020,8 @@ void exec_nostats(void)
 #endif
 		(*cpufunctbl[opcode])(opcode);
 		cpu_check_ticks();
-		if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL)) {
-			return; /* We will deal with the spcflags in the caller */
+		if (end_block(opcode) || SPCFLAGS_TEST(SPCFLAG_ALL) || ++_run_count >= MAXRUN) {
+			return;
 		}
 	}
 }
