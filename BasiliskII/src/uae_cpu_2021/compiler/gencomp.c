@@ -3343,7 +3343,7 @@ gen_opcode (unsigned int opcode)
      case i_CINVP:
      case i_CINVA:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	/* CINVA: cache instruction — no-op in emulation */
+	failure;  /* cache ops are no-ops, let interpreter handle */
 #else
 	isjump;
 	failure;
@@ -3354,7 +3354,7 @@ gen_opcode (unsigned int opcode)
      case i_CPUSHP:
      case i_CPUSHA:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	/* CPUSHA: cache instruction — no-op in emulation */
+	failure;  /* cache ops are no-ops, let interpreter handle */
 #else
 	isjump;
 	failure;
