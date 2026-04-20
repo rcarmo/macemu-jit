@@ -5187,6 +5187,16 @@ void build_comp(void)
     compfunctbl[cft_map(0x007c)] = op_fullsr_orsr_w_comp_ff;
     compfunctbl[cft_map(0x027c)] = op_fullsr_andsr_w_comp_ff;
     compfunctbl[cft_map(0x0a7c)] = op_fullsr_eorsr_w_comp_ff;
+    nfcompfunctbl[cft_map(0x007c)] = op_fullsr_orsr_w_comp_ff;
+    nfcompfunctbl[cft_map(0x027c)] = op_fullsr_andsr_w_comp_ff;
+    nfcompfunctbl[cft_map(0x0a7c)] = op_fullsr_eorsr_w_comp_ff;
+    /* MV2SR.W (all EA modes): use runtime helper for correct stack swap */
+    for (opcode = 0x46c0; opcode <= 0x46ff; opcode++) {
+        if (compfunctbl[cft_map(opcode)]) {
+            compfunctbl[cft_map(opcode)] = op_fullsr_mv2sr_w_comp_ff;
+            nfcompfunctbl[cft_map(opcode)] = op_fullsr_mv2sr_w_comp_ff;
+        }
+    }
     /* Resolve A-line startup traps in L2 instead of exact interpreter fallback.
        They are real control-flow/trap ops: run op_illg()/Exception() through a
        runtime helper and end the block on the helper-updated regs.pc_p. */
