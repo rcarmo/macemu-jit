@@ -422,7 +422,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit_load_imm32(RTMP1, (int32_t)(uint32_t)uimm);
 		emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
 		emit_store_gpr(RTMP0, ra);
-		/* TODO: set CR0 for record form */
+		emit_update_cr0(RTMP0); /* andi. always updates CR0 */
 		return true;
 
 	case 31: { /* XO-form extended opcodes */
@@ -1570,15 +1570,19 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			if (branch_if_set) {
 				uint32_t *skip_loc = jit_code_ptr;
 				emit32(0); /* placeholder CBZ */
-				emit_epilogue_with_pc(target_pc);
+				emit_epilogue_with_pc(target_pc); /* taken path */
+				/* Not-taken path: PC = pc + 4 */
 				int32_t skip_off = (int32_t)((uint8_t *)jit_code_ptr - (uint8_t *)skip_loc);
 				*skip_loc = 0x34000000 | (((skip_off >> 2) & 0x7FFFF) << 5) | RTMP0;
+				emit_epilogue_with_pc(pc + 4); /* not-taken path */
 			} else {
 				uint32_t *skip_loc = jit_code_ptr;
 				emit32(0); /* placeholder CBNZ */
-				emit_epilogue_with_pc(target_pc);
+				emit_epilogue_with_pc(target_pc); /* taken path */
+				/* Not-taken path: PC = pc + 4 */
 				int32_t skip_off = (int32_t)((uint8_t *)jit_code_ptr - (uint8_t *)skip_loc);
 				*skip_loc = 0x35000000 | (((skip_off >> 2) & 0x7FFFF) << 5) | RTMP0;
+				emit_epilogue_with_pc(pc + 4); /* not-taken path */
 			}
 			return true;
 		}
