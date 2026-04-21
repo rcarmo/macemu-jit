@@ -2056,3 +2056,42 @@ extern "C" void jit_op_trapcc(void)
     }
 }
 
+
+/* ================================================================
+ * JIT FPU shadow register sync (MPFR ↔ double)
+ * Called at JIT block boundaries when USE_JIT_FPU is enabled.
+ * ================================================================ */
+#ifdef USE_JIT_FPU
+#include "fpu/fpu.h"
+
+/* Sync MPFR FP registers → JIT shadow doubles (block entry) */
+extern "C" void jit_fpu_sync_to_shadow(void)
+{
+#ifdef FPU_MPFR
+    for (int i = 0; i < 8; i++) {
+        regs.jit_fpregs[i] = mpfr_get_d(fpu.registers[i].f, MPFR_RNDN);
+    }
+#else
+    for (int i = 0; i < 8; i++) {
+        regs.jit_fpregs[i] = (double)fpu.registers[i];
+    }
+#endif
+}
+
+/* Sync JIT shadow doubles → MPFR FP registers (block exit) */
+extern "C" void jit_fpu_sync_from_shadow(void)
+{
+#ifdef FPU_MPFR
+    for (int i = 0; i < 8; i++) {
+        mpfr_set_d(fpu.registers[i].f, regs.jit_fpregs[i], MPFR_RNDN);
+        fpu.registers[i].nan_bits = 0xffffffffffffffffULL;
+        fpu.registers[i].nan_sign = 0;
+    }
+#else
+    for (int i = 0; i < 8; i++) {
+        fpu.registers[i] = (fpu_register)regs.jit_fpregs[i];
+    }
+#endif
+}
+
+#endif /* USE_JIT_FPU */

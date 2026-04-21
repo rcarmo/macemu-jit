@@ -72,3 +72,9 @@ void jit_op_cpusha(void);
 /* ARM_CCR_MAP: M68K NZVC→ARM NZCV flag translation table (defined in compemu_midfunc_arm64_2.cpp) */
 extern const uae_u32 ARM_CCR_MAP[];
 
+/* JIT FPU shadow register sync */
+#ifdef USE_JIT_FPU
+void jit_fpu_sync_to_shadow(void);
+void jit_fpu_sync_from_shadow(void);
+#endif
+

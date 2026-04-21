@@ -110,6 +110,13 @@ extern struct regstruct
     fpu_register scratchfregs[2];
     fpu_register fp_result;
     uae_u32 jit_exception;
+    /* Shadow FP register file for JIT FPU (64-bit double).
+     * The JIT FP register allocator loads/stores these instead of
+     * fpu.registers[] (which are mpfr_t under FPU_MPFR).
+     * Synced to/from MPFR at JIT block boundaries. */
+    double jit_fpregs[8];
+    double jit_fp_result;
+    double jit_scratchfregs[2];
     uae_u32 *raw_cputbl_count;
     uintptr_t mem_banks;
     uintptr_t cache_tags;

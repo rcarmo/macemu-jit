@@ -3945,15 +3945,28 @@ static void init_comp(void)
 
     for (i = 0; i < VFREGS; i++) {
         if (i < 8) { /* First 8 registers map to 68k FPU registers */
+#ifdef USE_JIT_FPU
+            /* Use shadow double array instead of fpu.registers[] (mpfr_t) */
+            live.fate[i].mem = (uae_u32*)&regs.jit_fpregs[i];
+#else
             live.fate[i].mem = (uae_u32*)fpu_register_address(i);
+#endif
             live.fate[i].needflush = NF_TOMEM;
             live.fate[i].status = INMEM;
         } else if (i == FP_RESULT) {
+#ifdef USE_JIT_FPU
+            live.fate[i].mem = (uae_u32*)&regs.jit_fp_result;
+#else
             live.fate[i].mem = (uae_u32*)(&regs.fp_result);
+#endif
             live.fate[i].needflush = NF_TOMEM;
             live.fate[i].status = INMEM;
         } else {
+#ifdef USE_JIT_FPU
+            live.fate[i].mem = (uae_u32*)&regs.jit_scratchfregs[i - 8 - 1];
+#else
             live.fate[i].mem = (uae_u32*)(&regs.scratchfregs[i - 8]);
+#endif
         }
     }
 

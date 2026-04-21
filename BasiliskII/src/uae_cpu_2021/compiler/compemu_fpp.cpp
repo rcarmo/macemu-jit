@@ -50,6 +50,25 @@
 #include "newcpu.h"
 #include "main.h"
 #include "compiler/compemu.h"
+/* On ARM, override MEMR/MEMW to uintptr to match compemu_support.o exports.
+ * Must come after compemu.h but we re-include midfunc declarations with
+ * corrected types by redefining MEMR before any code uses it. */
+#if defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64)
+#undef MEMR
+#undef MEMW
+#undef MEMRW
+#define MEMR uintptr
+#define MEMW uintptr
+#define MEMRW uintptr
+/* Re-declare the FP mid-layer functions with corrected MEMR type */
+extern void fmov_rm(unsigned int r, uintptr m);
+extern void fmovs_rm(unsigned int r, uintptr m);
+extern void fmov_d_rm(unsigned int r, uintptr m);
+extern void fp_from_double_mr(unsigned int adr, unsigned int s);
+extern void fp_to_double_rm(unsigned int d, unsigned int adr);
+extern void fp_from_exten_mr(unsigned int adr, unsigned int s);
+extern void fp_to_exten_rm(unsigned int d, unsigned int adr);
+#endif
 #include "fpu/fpu.h"
 #include "fpu/flags.h"
 #include "fpu/exceptions.h"
@@ -57,6 +76,10 @@
 
 #define DEBUG 0
 #include "debug.h"
+
+#if defined(CPU_aarch64) || defined(CPU_AARCH64)
+#include "compiler/compemu_fpp_arm64_compat.h"
+#endif
 
 struct jit_disable_opcodes jit_disable;
 
@@ -619,7 +642,7 @@ void comp_fscc_opp(uae_u32 opcode, uae_u16 extra)
 		return;
 	}
 
-	fflags_into_flags(S2);
+	fflags_into_flags();
 	reg = (opcode & 7);
 
 	mov_l_ri(S1, 255);
@@ -760,7 +783,7 @@ void comp_fbcc_opp(uae_u32 opcode)
 	cc = opcode & 0x0f;
 	v1 = get_const(PC_P);
 	v2 = get_const(S1);
-	fflags_into_flags(S2);
+	fflags_into_flags();
 
 	switch (cc)
 	{
@@ -1053,22 +1076,30 @@ void comp_frestore_opp(uae_u32 opcode)
 }
 
 
-#if defined(USE_LONG_DOUBLE) || defined(USE_QUAD_DOUBLE)
-static const fpu_register const_e	= LD(2.7182818284590452353); // LD(2.7182818284590452353602874713526625);
+#ifdef FPU_MPFR
+/* Under FPU_MPFR, fpu_register is a struct — use plain doubles for JIT FPU constants */
+static const double const_e           = 2.7182818284590452354;
+static const double const_log10_e     = 0.43429448190325182765;
+static const double const_loge_10     = 2.30258509299404568402;
+static const double power10[]         = {
+	1e0, 1e1, 1e2, 1e4, 1e8, 1e16, 1e32, 1e64, 1e128, 1e256
+};
+#elif defined(USE_LONG_DOUBLE) || defined(USE_QUAD_DOUBLE)
+static const fpu_register const_e	= LD(2.7182818284590452353);
 static const fpu_register const_log10_e	= LD(0.4342944819032518276511289189166051);
 static const fpu_register const_loge_10	= LD(2.3025850929940456840179914546843642);
+static const fpu_register power10[]		= {
+	LD(1e0), LD(1e1), LD(1e2), LD(1e4), LD(1e8), LD(1e16), LD(1e32), LD(1e64), LD(1e128), LD(1e256)
+,	LD(1e512), LD(1e1024), LD(1e2048), LD(1e4096)
+};
 #else
 static const fpu_register const_e	= 2.7182818284590452354;
 static const fpu_register const_log10_e	= 0.43429448190325182765;
 static const fpu_register const_loge_10	= 2.30258509299404568402;
-#endif
-
 static const fpu_register power10[]		= {
 	LD(1e0), LD(1e1), LD(1e2), LD(1e4), LD(1e8), LD(1e16), LD(1e32), LD(1e64), LD(1e128), LD(1e256)
-#if defined(USE_LONG_DOUBLE) || defined(USE_QUAD_DOUBLE)
-,	LD(1e512), LD(1e1024), LD(1e2048), LD(1e4096)
-#endif
 };
+#endif
 
 /* 128 words, indexed through the low byte of the 68k fpu control word */
 #if 0
