@@ -6,6 +6,7 @@ UNIX_DIR   := BasiliskII/src/Unix
 BIN        := $(UNIX_DIR)/BasiliskII
 ROM        := /workspace/projects/rpi-basilisk2-sdl2-nox/Quadra800.ROM
 DISK       := /workspace/fixtures/basilisk/images/HD200MB
+BENCH_DISK := /workspace/fixtures/basilisk/images/Benchmark.hda
 NPROC      := $(shell nproc)
 VNC_PORT   := 5900
 
@@ -77,6 +78,7 @@ run-vnc: build ## Run with VNC server on port $(VNC_PORT) (headless)
 	  SDL_VIDEODRIVER=x11 DISPLAY=:99 $(BIN) \
 	    --rom $(ROM) \
 	    --disk $(DISK) \
+	    --disk $(BENCH_DISK) \
 	    --ramsize 16777216 --modelid 14 --cpu 4 \
 	    --noclipconversion --nogui \
 	    --vnc true --vnc-port $(VNC_PORT)
