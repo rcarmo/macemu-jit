@@ -12,12 +12,16 @@ starting with an optimized interpreter and progressing to a direct-codegen JIT.
 | Metric | Value |
 |--------|-------|
 | Opcode test harness | **209/209** pass (score=100) |
-| ROM harness (headless) | **663/766** blocks pass (86.6%) on PowerMac 9500 OldWorld ROM |
-| Block completion rate | **62.6%** of ROM blocks fully native, rest fall back to interpreter |
+| ROM harness (10K blocks) | **1800/1825** pass (98.6%) on PowerMac 9500 OldWorld ROM |
+| Unique opcodes inlined | **285** PPC opcodes as native ARM64 |
+| JIT code paths | **321** `return true` / **11** `return false` (97% compile success) |
+| Block completion rate | **70.7%** of ROM blocks fully native |
 | JIT benchmark (addi+bdnz 100M) | **382 MIPS** (2.2x over interpreter) |
 | Interpreter benchmark | 167 MIPS |
-| FPU support | ✅ double + single precision |
-| AltiVec (NEON) | ✅ 142 opcodes via AArch64 NEON intrinsics |
+| FPU | ✅ double + single + fused multiply-add + FPSCR rounding modes |
+| AltiVec (NEON) | ✅ 140 opcodes via AArch64 NEON intrinsics |
+| XER carry/overflow | ✅ byte-level LDRB/STRB (struct-aware, not packed uint32) |
+| VNC input | ✅ keyboard + mouse via direct ADB injection |
 | Boot tested | Mac OS 7.5 to "Welcome to Mac OS" splash (JIT), desktop (interpreter) |
 
 ### Screenshots
@@ -34,9 +38,10 @@ A standalone headless tool (`rom-harness/`) loads the Mac ROM, scans for PPC
 basic blocks, JIT-compiles each, and compares outputs against a built-in
 reference interpreter. No display, no hardware, no SheepShaver runtime needed.
 
-The ROM harness found and helped fix 5 JIT bugs that the synthetic opcode
-harness missed (CR logical NOP-default, missing XER[SO] in comparisons,
-wrong NZCV→CR mapping in cmpi, bdz not implemented, bc epilogue skip-over).
+The ROM harness found and helped fix **13 JIT bugs** including the critical
+XER struct layout mismatch (XER is `{uint8 so,ov,ca,byte_count}`, not a
+packed uint32), CSET encoding error, 7 missing carry-flag writes, andi. CR0
+omission, bc not-taken epilogue, BO field decode, and FPSCR rounding mode NOPs.
 
 ## Architecture
 

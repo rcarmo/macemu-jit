@@ -214,14 +214,13 @@ The AArch64 JIT backend is under active development.
 - ✅ **Mac OS boots to "Welcome to Mac OS" with JIT** (`SS_USE_JIT=1`)
 - ✅ **Mac OS boots to desktop** in interpreter mode (VNC on port 5999)
 - ✅ **209/209** opcode test vectors pass (score=100)
-- ✅ **663/766 ROM blocks pass** (86.6%) — headless ROM harness
+- ✅ **1800/1825 ROM blocks pass** (98.6%) — headless ROM harness, 10K-block scan
+- ✅ **285 PPC opcodes** inlined as native ARM64 (integer, FPU, AltiVec/NEON, CR, branches)
 - ✅ **382 MIPS** on tight loops (2.2x over interpreter's 167 MIPS)
-- ✅ PPC → ARM64 opcode handlers: integer ALU, FPU (double+single),
-  AltiVec (NEON), CR logical ops, all branch variants
-- ✅ ROM harness (`rom-harness/`) — standalone headless JIT exerciser,
-  no display or hardware deps, found 5 JIT bugs the opcode harness missed
-- See [SheepShaver/AARCH64_JIT_PLAN.md](SheepShaver/AARCH64_JIT_PLAN.md) for full details
-- See [JIT-STATUS.md](JIT-STATUS.md) for current test results
+- ✅ Full FPU: double+single arithmetic, fused multiply-add, FPSCR rounding mode sync
+- ✅ VNC keyboard + mouse input for remote control
+- ✅ ROM harness found and fixed **13 JIT bugs** including XER struct layout mismatch
+- See [JIT-STATUS.md](JIT-STATUS.md) and [SheepShaver/AARCH64_JIT_PLAN.md](SheepShaver/AARCH64_JIT_PLAN.md) for details
 
 **Bugs fixed in BasiliskII JIT (this fork):**
 1. IRQ deliverability bug — latching pending interrupts while masked
