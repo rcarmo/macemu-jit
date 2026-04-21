@@ -2542,12 +2542,11 @@ gen_opcode (unsigned int opcode)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc, dstreg & 7);\n");
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_chk);\n");
+	if (curi->size == sz_word) {
+	    comprintf("\tjnf_CHK_w(dstreg, src);\n");
+	} else {
+	    comprintf("\tjnf_CHK_l(dstreg, src);\n");
+	}
 #else
 	failure;
 #endif

@@ -7851,6 +7851,67 @@ MIDFUNC(1,jnf_NBCD_b,(RW1 d))
 	unlock2(x);
 }
 MENDFUNC(1,jnf_NBCD_b,(RW1 d))
+
+/*
+ * CHK — Check Register Against Bounds
+ * If Dn < 0 or Dn > src: set jit_exception = 6 (trap)
+ * Otherwise: no-op
+ */
+MIDFUNC(2,jnf_CHK_w,(RR2 d, RR2 s))
+{
+	d = readreg(d);
+	s = readreg(s);
+
+	uintptr idx = (uintptr)(&regs.jit_exception) - (uintptr)(&regs);
+
+	// Sign-extend both to 32-bit for comparison
+	SXTH_ww(REG_WORK1, d);
+	SXTH_ww(REG_WORK2, s);
+
+	// Check d < 0
+	CMP_wi(REG_WORK1, 0);
+	BGE_i(3);  // skip trap if d >= 0
+	MOV_wi(REG_WORK3, 6);
+	STR_wXi(REG_WORK3, R_REGSTRUCT, idx);
+	B_i(4);    // skip to end
+
+	// Check d > src
+	CMP_ww(REG_WORK1, REG_WORK2);
+	BLE_i(3);  // skip trap if d <= src
+	MOV_wi(REG_WORK3, 6);
+	STR_wXi(REG_WORK3, R_REGSTRUCT, idx);
+
+	// end
+	unlock2(s);
+	unlock2(d);
+}
+MENDFUNC(2,jnf_CHK_w,(RR2 d, RR2 s))
+
+MIDFUNC(2,jnf_CHK_l,(RR4 d, RR4 s))
+{
+	d = readreg(d);
+	s = readreg(s);
+
+	uintptr idx = (uintptr)(&regs.jit_exception) - (uintptr)(&regs);
+
+	// Check d < 0 (signed compare)
+	CMP_wi(d, 0);
+	BGE_i(3);
+	MOV_wi(REG_WORK3, 6);
+	STR_wXi(REG_WORK3, R_REGSTRUCT, idx);
+	B_i(4);
+
+	// Check d > src
+	CMP_ww(d, s);
+	BLE_i(3);
+	MOV_wi(REG_WORK3, 6);
+	STR_wXi(REG_WORK3, R_REGSTRUCT, idx);
+
+	// end
+	unlock2(s);
+	unlock2(d);
+}
+MENDFUNC(2,jnf_CHK_l,(RR4 d, RR4 s))
 /*
  * SWAP
  * Operand Syntax: Dn
