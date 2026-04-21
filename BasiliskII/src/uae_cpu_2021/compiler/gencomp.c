@@ -3320,20 +3320,49 @@ gen_opcode (unsigned int opcode)
 	genamode (curi->smode, "srcreg", curi->size, "extra", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "dst", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, extra);\n");
 	if (curi->dmode == Dreg) {
+	    /* Dreg: inline bit field insert */
 	    comprintf("\t{\n");
-	    comprintf("\t  int ea_enc = scratchie++;\n");
-	    comprintf("\t  mov_l_ri(ea_enc, (dstreg & 7) | 0x80000000u);\n");
-	    comprintf("\t  mov_l_mr((uintptr)&regs.scratchregs[0], ea_enc);\n");
+	    comprintf("\t  int dn = (extra >> 12) & 7;\n");
+	    comprintf("\t  int Do = (extra >> 11) & 1;\n");
+	    comprintf("\t  int Dw = (extra >> 5) & 1;\n");
+	    comprintf("\t  int offset, width;\n");
+	    comprintf("\t  if (Do) { int tmp = scratchie++; mov_l_rr(tmp, (extra>>6)&7); and_l_ri(tmp,31); mov_l_mr((uintptr)&regs.scratchregs[1], tmp); offset = regs.scratchregs[1]; }\n");
+	    /* Actually, we can't read regs.scratchregs at JIT compile time for register mode.
+	       The offset/width from a register is only known at EXECUTION time.
+	       For register-specified offset/width, keep call_helper. */
+	    comprintf("\t  if (Do || Dw) {\n");
+	    comprintf("\t    mov_l_mr((uintptr)&regs.jit_exception, extra);\n");
+	    comprintf("\t    { int ea_enc = scratchie++;\n");
+	    comprintf("\t      mov_l_ri(ea_enc, (dstreg & 7) | 0x80000000u);\n");
+	    comprintf("\t      mov_l_mr((uintptr)&regs.scratchregs[0], ea_enc); }\n");
+	    comprintf("\t    flush(1);\n");
+	    comprintf("\t    call_helper((uintptr)jit_op_bfins);\n");
+	    comprintf("\t  } else {\n");
+	    comprintf("\t    /* Immediate offset and width: fully inline */\n");
+	    comprintf("\t    int off = (extra >> 6) & 31;\n");
+	    comprintf("\t    int wid = extra & 31;\n");
+	    comprintf("\t    if (!wid) wid = 32;\n");
+	    comprintf("\t    int shift = 32 - off - wid;\n");
+	    comprintf("\t    uae_u32 mask = (wid == 32) ? 0xFFFFFFFFu : ((1u << wid) - 1);\n");
+	    comprintf("\t    uae_u32 shifted_mask = mask << shift;\n");
+	    comprintf("\t    int tmp = scratchie++;\n");
+	    comprintf("\t    mov_l_rr(tmp, dn);\n");
+	    comprintf("\t    and_l_ri(tmp, mask);\n");
+	    comprintf("\t    shll_l_ri(tmp, shift);\n");
+	    comprintf("\t    and_l_ri(dstreg, ~shifted_mask);\n");
+	    comprintf("\t    or_l(dstreg, tmp);\n");
+	    comprintf("\t  }\n");
 	    comprintf("\t}\n");
 	} else {
+	    /* Memory destination: call_helper for byte-spanning access */
+	    comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, extra);\n");
 	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], dsta);\n");
-	}
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_bfins(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_bfins);\n");
+	    comprintf("\tflush(1);\n");
+	    {
+		extern void jit_op_bfins(void);
+		comprintf("\tcall_helper((uintptr)jit_op_bfins);\n");
+	    }
 	}
 #else
 	failure;

@@ -299,3 +299,5 @@ mull_s64_neg
 divl_same_dq_dr
 divl_u64
 divl_s64
+bfins_dreg_imm
+bfins_dreg_narrow
