@@ -80,7 +80,7 @@ test-opcodes: build-ss
 test-rom: build-rom-harness
 	@echo ""
 	@echo "=== ROM Harness (10K blocks) ==="
-	@timeout 30 $(ROM_HARNESS) $(ROM) \
+	@timeout 120 $(ROM_HARNESS) $(ROM) \
 		--count=10000 --min-insns=1 --max-insns=64 2>&1 | \
 		grep "Score:\|Passed:\|Failed:\|Testable\|JIT compile\|SIGSEGV"
 

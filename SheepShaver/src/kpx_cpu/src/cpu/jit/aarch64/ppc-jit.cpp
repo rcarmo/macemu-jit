@@ -415,6 +415,15 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		emit_update_cr0(RTMP0); /* andi. always updates CR0 */
 		return true;
 
+	case 29: /* andis. — rA = rS & (UIMM << 16), always updates CR0 */
+		ra = PPC_RA(op); rd = PPC_RS(op); uimm = PPC_UIMM(op);
+		emit_load_gpr(RTMP0, rd);
+		emit_load_imm32(RTMP1, (int32_t)((uint32_t)uimm << 16));
+		emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+		emit_store_gpr(RTMP0, ra);
+		emit_update_cr0(RTMP0);
+		return true;
+
 	case 31: { /* XO-form extended opcodes */
 		uint32_t xo = PPC_XO(op);
 		rd = PPC_RD(op); ra = PPC_RA(op); rb = PPC_RB(op);
@@ -1116,6 +1125,19 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			emit32(0xA9010000 | (31 << 10) | (RTMP0 << 5) | 31); /* STP XZR,XZR,[Xn,#16] */
 			return true;
 		}
+
+		/* Cache management — NOPs (no emulated cache hierarchy) */
+		case 54:   /* dcbst — data cache block store */
+		case 86:   /* dcbf  — data cache block flush */
+		case 246:  /* dcbt  — data cache block touch (prefetch hint) */
+		case 278:  /* dcbtst — data cache block touch for store */
+		case 982:  /* icbi  — instruction cache block invalidate */
+			return true;
+
+		/* Memory barriers — NOPs (single-threaded emulator) */
+		case 598:  /* sync  — synchronize */
+		case 854:  /* eieio — enforce in-order execution of I/O */
+			return true;
 		case 512: /* mcrxr crD — move XER[SO,OV,CA] to CR field, clear XER flags */
 		{
 			uint32_t crd_f = (op >> 23) & 0x7;
@@ -1608,8 +1630,45 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			return true;
 		}
 
-		/* Other combinations: decrement CTR + test condition — complex, bail */
-		return false;
+		if (!no_ctr_test && !no_cond_test) {
+			/* Decrement CTR AND test condition — branch only if BOTH pass */
+			if (lk) return false;
+
+			/* Decrement CTR */
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CTR);
+			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB Wd, Wn, #1 */
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_CTR);
+
+			/* Compute ctr_ok: 1 if CTR passes test, 0 otherwise */
+			emit32(0x7100001F | (RTMP0 << 5)); /* CMP Wn, #0 */
+			if (ctr_eq_zero)
+				emit32(0x1A9F17E0 | RTMP0); /* CSET RTMP0, EQ */
+			else
+				emit32(0x1A9F07E0 | RTMP0); /* CSET RTMP0, NE */
+
+			/* Compute cond_ok: extract CR[BI], match against BO[1] */
+			uint32_t bit_pos = 31 - bi;
+			a64_ldr_w_imm(RTMP1, RSTATE, PPCR_CR);
+			if (bit_pos) { emit_load_imm32(RTMP2, bit_pos); emit32(0x1AC02400 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1); }
+			emit32(0x12000000 | (RTMP1 << 5) | RTMP1); /* AND #1 */
+			if (!cond_bit_val) {
+				/* Invert: branch if CR[BI]=0 */
+				emit_load_imm32(RTMP2, 1);
+				emit32(0x4A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1); /* EOR #1 */
+			}
+
+			/* Branch if ctr_ok AND cond_ok */
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+			uint32_t *skip_loc = jit_code_ptr;
+			emit32(0); /* placeholder CBZ */
+			emit_epilogue_with_pc(target_pc); /* taken */
+			int32_t skip_off = (int32_t)((uint8_t *)jit_code_ptr - (uint8_t *)skip_loc);
+			*skip_loc = 0x34000000 | (((skip_off >> 2) & 0x7FFFF) << 5) | RTMP0;
+			emit_epilogue_with_pc(pc + 4); /* not taken */
+			return true;
+		}
+
+		return false; /* unhandled BO pattern */
 	}
 
 	case 19: /* CR ops, bclr, bcctr, isync */
@@ -2447,11 +2506,16 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 		case 26: /* frsqrte frD,frB — reciprocal square root estimate */
 			emit_load_fpr(0, frb);
 			emit32(0x1E61C000 | (0 << 5) | 0); /* FSQRT Dd,Dn */
-			/* Reciprocal: compute 1.0/sqrt */
-			/* Load 1.0 into D1: FMOV D1, #1.0 = 0x1E6E1000 */
 			emit32(0x1E6E1000 | 1); /* FMOV D1, #1.0 */
 			emit32(0x1E611800 | (0 << 16) | (1 << 5) | 0); /* FDIV D0, D1, D0 */
 			emit_store_fpr(0, frd);
+			return true;
+
+		case 22: /* fsqrt frD,frB — floating-point square root (double) */
+			emit_load_fpr(0, frb);
+			emit32(0x1E61C000 | (0 << 5) | 0); /* FSQRT Dd, Dn */
+			emit_store_fpr(0, frd);
+			return true;
 			return true;
 		default: break; /* fall through to 5-bit XO check */
 		}
@@ -2589,8 +2653,15 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 		case 24: /* fres frD,frB — reciprocal estimate */
 			emit_load_fpr(0, frb);
 			emit32(0x1E624000 | (0 << 5) | 0); /* FCVT Sd,Dd */
-			emit32(0x1E20F800 | (0 << 5) | 0); /* FRECPE Sd,Sn (if available, else...) */
+			emit32(0x1E20F800 | (0 << 5) | 0); /* FRECPE Sd,Sn */
 			emit32(0x1E22C000 | (0 << 5) | 0); /* FCVT Dd,Sd */
+			emit_store_fpr(0, frd); return true;
+
+		case 22: /* fsqrts frD,frB — floating-point square root (single) */
+			emit_load_fpr(0, frb);
+			emit32(0x1E61C000 | (0 << 5) | 0); /* FSQRT Dd, Dn (double precision) */
+			emit32(0x1E624000 | (0 << 5) | 0); /* FCVT Sd, Dd (round to single) */
+			emit32(0x1E22C000 | (0 << 5) | 0); /* FCVT Dd, Sd (widen back) */
 			emit_store_fpr(0, frd); return true;
 		default:
 			return false; /* unknown opcode: stop compilation */

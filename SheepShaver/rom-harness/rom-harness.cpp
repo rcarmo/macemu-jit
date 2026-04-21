@@ -1042,7 +1042,7 @@ static void seed_regs(PPCRegs *r, uint32_t seed, uint32_t rom_base_mac) {
 	/* R1 = valid stack pointer (within our allocated memory) */
 	r->gpr[1] = rom_base_mac - 0x10000; /* stack below ROM */
 	r->lr = rom_base_mac + 0x1000;  /* valid LR */
-	r->ctr = xorshift32(&s);
+	r->ctr = xorshift32(&s) % 10 + 1; /* cap to prevent infinite bdnz loops */
 	r->cr = xorshift32(&s) & 0xFFFFFFFF;
 	unpack_xer(r, xorshift32(&s) & 0xE000007F); /* valid XER bits only */
 	r->fpscr = 0;
@@ -1231,6 +1231,7 @@ int main(int argc, char **argv) {
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGSEGV, &sa, &old_sa);
 	sigaction(SIGBUS, &sa, NULL);
+	sigaction(SIGALRM, &sa, NULL);
 	
 	/* Run tests */
 	TestResult result = {};
@@ -1293,11 +1294,13 @@ int main(int argc, char **argv) {
 				continue;
 			}
 			
-			/* Run JIT with SIGSEGV protection */
+			/* Run JIT with SIGSEGV protection + timeout */
 			segv_caught = 0;
 			if (sigsetjmp(segv_jmp, 1) == 0) {
 				ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void *)jblk.code;
+				alarm(1); /* 1-second timeout per block */
 				fn((void *)&jit_regs);
+				alarm(0); /* cancel timeout */
 			}
 			if (segv_caught) {
 				result.jit_segv++;
