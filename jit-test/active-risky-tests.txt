@@ -293,3 +293,7 @@ mull_u64
 mull_s32_neg
 divl_u32_rem
 divl_s32_neg
+divl_u32_max
+divl_s32_neg_divisor
+mull_s64_neg
+divl_same_dq_dr
