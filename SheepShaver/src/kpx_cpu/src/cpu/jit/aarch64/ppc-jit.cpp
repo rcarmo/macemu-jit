@@ -1303,7 +1303,163 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			return true;
 
 
-										default:
+
+		/* === 64-bit G5/PPC970 XO31 instructions === */
+
+		case 27: /* sld rA,rS,rB */
+			emit_load_gpr64(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x9AC02000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSL Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 539: /* srd rA,rS,rB */
+			emit_load_gpr64(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x9AC02400 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSR Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 794: /* srad rA,rS,rB — shift right algebraic doubleword */
+			emit_load_gpr64(RTMP0, PPC_RS(op));
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x9AC02800 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ASR Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, ra);
+			emit_set_xer_ca(0); /* simplified — full CA needs shifted-out-bits check */
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 826: /* sradi rA,rS,SH — shift right algebraic doubleword immediate */
+		{
+			uint32_t sh = ((op >> 11) & 0x1F) | (((op >> 1) & 1) << 5);
+			emit_load_gpr64(RTMP0, PPC_RS(op));
+			if (sh) emit32(0x9340FC00 | (sh << 10) | (RTMP0 << 5) | RTMP0); /* ASR Xd,Xn,#sh */
+			emit_store_gpr64(RTMP0, ra);
+			emit_set_xer_ca(0); /* simplified */
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+		}
+
+		case 58: /* cntlzd rA,rS */
+			emit_load_gpr64(RTMP0, PPC_RS(op));
+			emit32(0xDAC01000 | (RTMP0 << 5) | RTMP0); /* CLZ Xd,Xn */
+			emit_store_gpr(RTMP0, ra);
+			a64_str_w_imm(31, RSTATE, PPCR_GPR_HI(ra));
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 986: /* extsw rA,rS — sign-extend word to doubleword */
+			emit_load_gpr(RTMP0, PPC_RS(op));
+			emit32(0x93407C00 | (RTMP0 << 5) | RTMP0); /* SXTW Xd,Wn */
+			emit_store_gpr64(RTMP0, ra);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 233: /* mulld rD,rA,rB */
+			emit_load_gpr64(RTMP0, ra);
+			emit_load_gpr64(RTMP1, rb);
+			emit32(0x9B007C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* MUL Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 9: /* mulhdu rD,rA,rB */
+			emit_load_gpr64(RTMP0, ra);
+			emit_load_gpr64(RTMP1, rb);
+			emit32(0x9BC07C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* UMULH Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 73: /* mulhd rD,rA,rB */
+			emit_load_gpr64(RTMP0, ra);
+			emit_load_gpr64(RTMP1, rb);
+			emit32(0x9B407C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SMULH Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 457: /* divdu rD,rA,rB */
+			emit_load_gpr64(RTMP0, ra);
+			emit_load_gpr64(RTMP1, rb);
+			emit32(0x9AC00800 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* UDIV Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		case 489: /* divd rD,rA,rB */
+			emit_load_gpr64(RTMP0, ra);
+			emit_load_gpr64(RTMP1, rb);
+			emit32(0x9AC00C00 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SDIV Xd,Xn,Xm */
+			emit_store_gpr64(RTMP0, rd);
+			if (op & 1) emit_update_cr0(RTMP0);
+			return true;
+
+		/* 64-bit load/store indexed */
+		case 21: /* ldx rD,rA,rB */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0xF9400000 | (RTMP0 << 5) | RTMP1); /* LDR Xt,[Xn] */
+			emit32(0xDAC00800 | (RTMP1 << 5) | RTMP1); /* REV Xt */
+			emit_store_gpr64(RTMP1, rd);
+			return true;
+
+		case 53: /* ldux rD,rA,rB */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit_store_gpr(RTMP0, ra);
+			emit32(0xF9400000 | (RTMP0 << 5) | RTMP1);
+			emit32(0xDAC00800 | (RTMP1 << 5) | RTMP1);
+			emit_store_gpr64(RTMP1, rd);
+			return true;
+
+		case 149: /* stdx rS,rA,rB */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit_load_gpr64(RTMP1, PPC_RS(op));
+			emit32(0xDAC00800 | (RTMP1 << 5) | RTMP1);
+			emit32(0xF9000000 | (RTMP0 << 5) | RTMP1);
+			return true;
+
+		case 181: /* stdux rS,rA,rB */
+			emit_load_gpr(RTMP0, ra);
+			emit_load_gpr(RTMP1, rb);
+			emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit_store_gpr(RTMP0, ra);
+			emit_load_gpr64(RTMP1, PPC_RS(op));
+			emit32(0xDAC00800 | (RTMP1 << 5) | RTMP1);
+			emit32(0xF9000000 | (RTMP0 << 5) | RTMP1);
+			return true;
+
+		case 84: /* ldarx rD,rA,rB — simplified as load */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit32(0xF9400000 | (RTMP0 << 5) | RTMP1);
+			emit32(0xDAC00800 | (RTMP1 << 5) | RTMP1);
+			emit_store_gpr64(RTMP1, rd);
+			return true;
+
+		case 214: /* stdcx. rS,rA,rB — simplified: always succeed */
+			emit_load_gpr(RTMP0, ra == 0 ? rb : ra);
+			if (ra != 0) { emit_load_gpr(RTMP1, rb); emit32(0x0B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); }
+			emit_load_gpr64(RTMP1, PPC_RS(op));
+			emit32(0xDAC00800 | (RTMP1 << 5) | RTMP1);
+			emit32(0xF9000000 | (RTMP0 << 5) | RTMP1);
+			/* CR0 = EQ (reserve succeeded) */
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
+			emit_load_imm32(RTMP1, ~(0xF << 28)); emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			emit_load_imm32(RTMP1, 0x20000000); emit32(0x2A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_CR);
+			return true;
+
+		case 4: /* tw — trap word: block terminator */
+			emit_epilogue_with_pc(pc);
+			return true;
+
+									default:
 			jit_xo_miss[(op >> 1) & 0x3FF]++;
 			return false;
 		}
@@ -2608,12 +2764,33 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 			emit_store_fpr(0, frd);
 			return true;
 
+		/* 64-bit FP conversions (G5/PPC970) */
+		case 814: /* fctid frD,frB — FP to 64-bit integer (round per FPSCR) */
+			emit_load_fpr(0, frb);
+			emit32(0x9E700000 | (0 << 5) | RTMP0); /* FCVTNS Xd, Dn (round to nearest) */
+			/* Store as 64-bit integer in FPR slot (PPC stores int result in FPR) */
+			emit32(0x9E670000 | (RTMP0 << 5) | 0); /* FMOV Dd, Xn */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 815: /* fctidz frD,frB — FP to 64-bit integer (round toward zero) */
+			emit_load_fpr(0, frb);
+			emit32(0x9E780000 | (0 << 5) | RTMP0); /* FCVTZS Xd, Dn */
+			emit32(0x9E670000 | (RTMP0 << 5) | 0); /* FMOV Dd, Xn */
+			emit_store_fpr(0, frd);
+			return true;
+
+		case 846: /* fcfid frD,frB — 64-bit integer to FP */
+			emit_load_fpr(0, frb);
+			emit32(0x9E660000 | (0 << 5) | RTMP0); /* FMOV Xn, Dd */
+			emit32(0x9E620000 | (RTMP0 << 5) | 0); /* SCVTF Dd, Xn */
+			emit_store_fpr(0, frd);
+			return true;
+
 		default:
-			return false; /* unknown opcode: stop compilation */
+			return false;
 		}
 	}
-
-	/* === 64-bit PowerPC (G5/PPC970) instructions === */
 
 		return true;
 
