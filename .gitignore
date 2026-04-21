@@ -37,3 +37,5 @@ project.xcworkspace/
 # JetBrains IDE settings
 #
 *.idea
+BasiliskII/src/Unix/compemu.cpp
+SheepShaver/rom-harness/rom-harness
