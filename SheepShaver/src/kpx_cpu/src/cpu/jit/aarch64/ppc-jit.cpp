@@ -180,6 +180,37 @@ static void emit_set_xer_ca(int val) {
 	a64_str_w_imm(RTMP0, RSTATE, PPCR_XER);
 }
 
+/* Sync PPC FPSCR rounding mode (bits 30-31) to ARM64 FPCR (bits 22-23).
+   PPC RN: 0=nearest, 1=toward zero, 2=+inf, 3=-inf
+   ARM64 RMode: 0=nearest, 3=toward zero, 1=+inf, 2=-inf
+   Called after any FPSCR write that might change the RN field. */
+static void emit_sync_fpscr_rounding(void) {
+	a64_ldr_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+	/* Extract PPC RN field: bits 30-31 (least significant 2 bits of FPSCR) */
+	emit32(0x12000400 | (RTMP0 << 5) | RTMP0); /* AND Wd, Wn, #3 */
+	/* Map PPC RN to ARM64 RMode via conditional moves */
+	a64_mov_reg(RTMP1, RTMP0); /* save PPC RN */
+	a64_movz(RTMP0, 0, 0); /* default: ARM nearest (PPC 0 → ARM 0) */
+	emit_load_imm32(RTMP2, 3);
+	emit32(0x7100043F | (RTMP1 << 5)); /* CMP Wn, #1 */
+	emit32(0x1A800000 | (RTMP0 << 16) | (0x0 << 12) | (RTMP2 << 5) | RTMP0); /* CSEL 3 if EQ (PPC zero→ARM 3) */
+	emit_load_imm32(RTMP2, 1);
+	emit32(0x7100083F | (RTMP1 << 5)); /* CMP Wn, #2 */
+	emit32(0x1A800000 | (RTMP0 << 16) | (0x0 << 12) | (RTMP2 << 5) | RTMP0); /* CSEL 1 if EQ (PPC +inf→ARM 1) */
+	emit_load_imm32(RTMP2, 2);
+	emit32(0x71000C3F | (RTMP1 << 5)); /* CMP Wn, #3 */
+	emit32(0x1A800000 | (RTMP0 << 16) | (0x0 << 12) | (RTMP2 << 5) | RTMP0); /* CSEL 2 if EQ (PPC -inf→ARM 2) */
+	/* Shift to FPCR RMode position (bits 22-23) */
+	emit_load_imm32(RTMP1, 22);
+	emit32(0x1AC02000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSL */
+	/* Read FPCR, clear RMode bits, set new value */
+	emit32(0xD53B4400 | RTMP1); /* MRS Xt, FPCR */
+	emit_load_imm32(RTMP2, ~(3 << 22));
+	emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1); /* AND: clear RMode */
+	emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1); /* ORR: set new RMode */
+	emit32(0xD51B4400 | RTMP1); /* MSR FPCR, Xt */
+}
+
 
 /* Load effective address: if rA==0, use 0; otherwise load GPR[rA].
    Always puts result in RTMP0. */
@@ -561,16 +592,47 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			/* Unknown SPR: NOP (safe for user-mode) */
 			return true;
 		}
-		case 824: /* srawi rA,rS,SH (arithmetic shift right immediate) */
+		case 824: /* srawi rA,rS,SH (arithmetic shift right immediate, set CA) */
 		{
 			uint32_t sh = (op >> 11) & 0x1F;
-			emit_load_gpr(RTMP0, PPC_RS(op));
-			if (sh) {
+			uint32_t rs = PPC_RS(op);
+			emit_load_gpr(RTMP0, rs);
+			if (sh == 0) {
+				emit_store_gpr(RTMP0, ra);
+				emit_set_xer_ca(0);
+			} else {
+				/* CA = (rS < 0) && ((rS & ((1<<sh)-1)) != 0) */
+				/* Save original for CA computation */
+				a64_mov_reg(RTMP1, RTMP0); /* RTMP1 = original rS */
 				/* ASR Wd, Wn, #sh */
 				emit32(0x13000000 | (sh << 10) | (0x1F << 16) | (RTMP0 << 5) | RTMP0);
+				emit_store_gpr(RTMP0, ra);
+				/* Compute CA: test if source negative AND shifted-out bits nonzero */
+				/* RTMP1 = original rS. Mask = (1<<sh)-1 */
+				uint32_t mask = (1u << sh) - 1;
+				emit_load_imm32(RTMP2, (int32_t)mask);
+				emit32(0x6A000000 | (RTMP2 << 16) | (RTMP1 << 5) | 0x1F); /* TST Wn, mask (= ANDS WZR) */
+				/* If Z=0 (bits nonzero) and rS < 0: CA=1 */
+				/* Use: shifted_out_nonzero = (TST result != 0) = !Z */
+				/* negative = (rS >> 31) */
+				/* CA = shifted_out_nonzero & negative */
+				a64_movz(RTMP0, 0, 0);
+				emit_load_imm32(RTMP2, 1);
+				/* CSEL RTMP0, 1, 0, NE (if shifted-out bits nonzero) */
+				emit32(0x1A800000 | (RTMP0 << 16) | (0x1 << 12) | (RTMP2 << 5) | RTMP0);
+				/* AND with sign bit of original */
+				emit32(0x13010000 | (31 << 10) | (RTMP1 << 5) | RTMP1 | (31 << 16)); /* UBFX Wd, Wn, #31, #1 */
+				emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+				/* RTMP0 = CA value (0 or 1). Write to XER */
+				a64_ldr_w_imm(RTMP1, RSTATE, PPCR_XER);
+				emit_load_imm32(RTMP2, ~(1u << 29));
+				emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1); /* clear CA bit */
+				emit_load_imm32(RTMP2, 29);
+				emit32(0x1AC02000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* LSL ca, 29 */
+				emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1); /* ORR */
+				a64_str_w_imm(RTMP1, RSTATE, PPCR_XER);
 			}
-			emit_store_gpr(RTMP0, ra);
-			/* TODO: set XER[CA] if any shifted-out bits were 1 and source was negative */
+			if (op & 1) { emit_load_gpr(RTMP0, ra); emit_update_cr0(RTMP0); }
 			return true;
 		}
 		case 24: /* slw rA,rS,rB (shift left word) */
@@ -589,12 +651,39 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			emit_store_gpr(RTMP0, ra);
 			return true;
 		}
-		case 792: /* sraw rA,rS,rB (arithmetic shift right) */
+		case 792: /* sraw rA,rS,rB (arithmetic shift right, set CA) */
 		{
-			emit_load_gpr(RTMP0, PPC_RS(op));
+			uint32_t rs = PPC_RS(op);
+			emit_load_gpr(RTMP0, rs);
 			emit_load_gpr(RTMP1, rb);
+			/* Save original for CA: RTMP2 = rS */
+			a64_mov_reg(RTMP2, RTMP0);
+			/* PPC sraw: if rB[5]=1 (shift>=32), result=sign-extend, CA=(rS<0) */
+			/* ARM64 ASR with shift>=32 already produces sign-extended result */
 			emit32(0x1AC02800 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ASR Wd,Wn,Wm */
 			emit_store_gpr(RTMP0, ra);
+			/* CA = (rS < 0) && (rS != (result << sh)) i.e. bits were shifted out */
+			/* Simplified: CA = (rS < 0) && ((rS ^ (result << sh)) != 0) */
+			/* For variable shift this is complex. Use: CA = (rS < 0) && (result << sh != rS) */
+			/* LSL RTMP0 back by shift amount, compare with original */
+			emit32(0x1AC02000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* LSL Wd,result,shift */
+			/* If (rS != result<<sh) and (rS < 0), CA=1 */
+			emit32(0x6B000000 | (RTMP2 << 16) | (RTMP0 << 5) | 0x1F); /* CMP result<<sh, rS */
+			a64_movz(RTMP0, 0, 0);
+			emit_load_imm32(RTMP1, 1);
+			emit32(0x1A800000 | (RTMP0 << 16) | (0x1 << 12) | (RTMP1 << 5) | RTMP0); /* CSEL 1 if NE */
+			/* AND with sign of original rS */
+			emit32(0x53010000 | (RTMP2 << 5) | RTMP2 | (31 << 10) | (31 << 16)); /* UBFX bit31 */
+			emit32(0x0A000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* AND */
+			/* Write CA */
+			a64_ldr_w_imm(RTMP1, RSTATE, PPCR_XER);
+			emit_load_imm32(RTMP2, ~(1u << 29));
+			emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1);
+			emit_load_imm32(RTMP2, 29);
+			emit32(0x1AC02000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0);
+			emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1);
+			a64_str_w_imm(RTMP1, RSTATE, PPCR_XER);
+			if (op & 1) { emit_load_gpr(RTMP0, ra); emit_update_cr0(RTMP0); }
 			return true;
 		}
 
@@ -685,30 +774,66 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			emit_write_xer_ca_from_carry();
 			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
-		case 234: /* addme rD,rA (rD = rA + CA - 1) — simplified */
+		case 234: /* addme rD,rA (rD = rA + CA - 1, set CA) */
+		{
 			emit_load_gpr(RTMP0, ra);
-			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB Wd,Wn,#1 */
+			emit_read_xer_ca(RTMP1); /* RTMP1 = CA (0 or 1) */
+			/* rD = rA + CA + 0xFFFFFFFF. Compute as: ADDS tmp, rA, CA; ADDS tmp, tmp, -1 */
+			emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS Wd, rA, CA */
+			emit_load_imm32(RTMP1, -1);
+			emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS Wd, Wd, -1 */
+			/* CA = carry out. The second ADDS sets C correctly for the final add. */
+			/* But we need CA = carry out of the FULL operation rA + CA_in + 0xFFFFFFFF.
+			   Since we can't chain carries with two ADDS, compute in 64-bit instead. */
+			/* Actually: use ADDS+ADCS chain. ADDS rA, CA → sets C1. ADCS rD, result, -1 → C = C1|C2 */
+			/* Simpler: just compute directly. rA + CA_in - 1. If rA + CA_in >= 1, no borrow → CA=1.
+			   CA_out = (rA != 0) || (CA_in != 0), except edge case rA=0,CA=0 → result=0xFFFFFFFF, CA=0.
+			   Actually: CA_out = carry of (~0 + rA + CA_in) = carry of (rA + CA_in + 0xFFFFFFFF). */
+			/* Cleanest: reload and use ADDS/ADCS */
+			emit_load_gpr(RTMP0, ra);
+			emit_read_xer_ca(RTMP1);
+			emit_load_imm32(RTMP2, -1); /* 0xFFFFFFFF */
+			emit32(0x2B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS Wd, rA, 0xFFFFFFFF */
+			emit32(0x3A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADCS Wd, Wd, CA_in */
 			emit_store_gpr(RTMP0, rd);
+			emit_write_xer_ca_from_carry();
 			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
-		case 202: /* addze rD,rA (rD = rA + CA) — simplified as rD = rA */
+		}
+		case 202: /* addze rD,rA (rD = rA + CA, set CA) */
+		{
 			emit_load_gpr(RTMP0, ra);
+			emit_read_xer_ca(RTMP1); /* RTMP1 = CA (0 or 1) */
+			emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS Wd, rA, CA */
 			emit_store_gpr(RTMP0, rd);
+			emit_write_xer_ca_from_carry();
 			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
-		case 232: /* subfme — simplified */
+		}
+		case 232: /* subfme rD,rA (rD = ~rA + CA - 1, set CA) */
+		{
 			emit_load_gpr(RTMP0, ra);
-			emit32(0x4B0003E0 | (RTMP0 << 16) | RTMP0); /* NEG */
-			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB #1 */
+			emit32(0x2A2003E0 | (RTMP0 << 16) | RTMP0); /* MVN Wd, Wn = ~rA */
+			emit_read_xer_ca(RTMP1);
+			emit_load_imm32(RTMP2, -1);
+			emit32(0x2B000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS Wd, ~rA, -1 */
+			emit32(0x3A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADCS Wd, Wd, CA_in */
 			emit_store_gpr(RTMP0, rd);
+			emit_write_xer_ca_from_carry();
 			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
-		case 200: /* subfze rD,rA (rD = ~rA + CA) — simplified as NEG */
+		}
+		case 200: /* subfze rD,rA (rD = ~rA + CA, set CA) */
+		{
 			emit_load_gpr(RTMP0, ra);
-			emit32(0x4B0003E0 | (RTMP0 << 16) | RTMP0);
+			emit32(0x2A2003E0 | (RTMP0 << 16) | RTMP0); /* MVN = ~rA */
+			emit_read_xer_ca(RTMP1);
+			emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS Wd, ~rA, CA */
 			emit_store_gpr(RTMP0, rd);
+			emit_write_xer_ca_from_carry();
 			if (op & 1) emit_update_cr0(RTMP0);
 			return true;
+		}
 		case 476: /* nand rA,rS,rB */
 			emit_load_gpr(RTMP0, PPC_RS(op));
 			emit_load_gpr(RTMP1, rb);
@@ -1193,16 +1318,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		/* ADDS Wd, Wn, Wm (sets NZCV — we use C for carry-out) */
 		emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
 		emit_store_gpr(RTMP0, rd);
-		/* Set XER[CA] from ARM64 carry flag */
-		/* MRS Xt, NZCV */
-		emit32(0xD53B4200 | RTMP1);
-		/* Extract C bit (bit 29) → XER bit 29 (CA) */
-		a64_ldr_w_imm(RTMP2, RSTATE, PPCR_XER);
-		emit_load_imm32(RTMP0, ~(1 << 29));
-		emit32(0x0A000000 | (RTMP0 << 16) | (RTMP2 << 5) | RTMP2); /* clear CA */
-		emit32(0x12001C00 | (RTMP1 << 5) | RTMP1); /* AND Wd,Wn, #0x20000000 (bit 29) */
-		emit32(0x2A000000 | (RTMP1 << 16) | (RTMP2 << 5) | RTMP2); /* OR in carry */
-		a64_str_w_imm(RTMP2, RSTATE, PPCR_XER);
+		emit_write_xer_ca_from_carry();
 		return true;
 
 	case 21: /* rlwinm rA,rS,SH,MB,ME */
@@ -1295,9 +1411,10 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		rd = PPC_RD(op); ra = PPC_RA(op); simm = PPC_SIMM(op);
 		emit_load_imm32(RTMP0, (int32_t)simm);
 		emit_load_gpr(RTMP1, ra);
-		emit32(0x6B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SUBS Wd,Wn,Wm */
+		/* ARM64 SUBS: Wd = SIMM - rA, sets C = !borrow = (SIMM >= rA unsigned) = PPC CA */
+		emit32(0x6B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* SUBS Wd, SIMM, rA */
 		emit_store_gpr(RTMP0, rd);
-		/* TODO: set XER[CA] from carry */
+		emit_write_xer_ca_from_carry();
 		return true;
 
 
@@ -1377,21 +1494,26 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 		bool lk = op & 1;
 		uint32_t target_pc = aa ? (uint32_t)(int32_t)bd : (pc + bd);
 
-		bool decr_ctr = !(bo & 0x10); /* BO[0]=0: decrement CTR */
-		bool ctr_zero = (bo & 0x08);  /* BO[1]=1: branch if CTR==0 (bdz); 0: CTR!=0 (bdnz) */
-		bool no_cond = (bo & 0x04);   /* BO[2]=1: don't test condition */
-		bool cond_true = (bo & 0x08); /* BO[3]=1: branch if CR[BI]=1 */
-		/* Note: BO[3] is bit 3 when BO[2]=0 (testing cond); when decr_ctr, BO[1] has different meaning */
+		/* PPC ISA BO field (5 bits, MSB-first):
+		   BO[0] (0x10): 1=don't test condition
+		   BO[1] (0x08): condition sense (branch if CR[BI]=BO[1])
+		   BO[2] (0x04): 1=don't decrement/test CTR
+		   BO[3] (0x02): CTR sense (0=CTR≠0, 1=CTR==0)
+		   BO[4] (0x01): prediction hint */
+		bool no_ctr_test = (bo & 0x04); /* BO[2]=1: skip CTR decrement+test */
+		bool ctr_eq_zero = (bo & 0x02); /* BO[3]=1: branch if CTR==0 (bdz) */
+		bool no_cond_test = (bo & 0x10); /* BO[0]=1: skip condition test */
+		bool cond_bit_val = (bo & 0x08); /* BO[1]=1: branch if CR[BI]=1 */
 
 		if (lk) return false; /* bl-type bc not supported yet */
 
-		if (decr_ctr && no_cond) {
+		if (!no_ctr_test && no_cond_test) {
 			/* bdnz or bdz (CTR-only, no condition test) */
 			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CTR);
 			emit32(0x51000400 | (RTMP0 << 5) | RTMP0); /* SUB Wd, Wn, #1 */
 			a64_str_w_imm(RTMP0, RSTATE, PPCR_CTR);
 
-			if (!ctr_zero) {
+			if (!ctr_eq_zero) {
 				/* bdnz: branch if CTR != 0 */
 				uint32_t *target_code = find_code_for_pc(target_pc);
 				if (target_code) {
@@ -1425,7 +1547,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			}
 		}
 
-		if (!decr_ctr && !no_cond) {
+		if (no_ctr_test && !no_cond_test) {
 			/* Pure conditional branch: test CR[BI] only, no CTR */
 			uint32_t bit_pos = 31 - bi;
 			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_CR);
@@ -1435,7 +1557,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			}
 			emit32(0x12000000 | (RTMP0 << 5) | RTMP0); /* AND #1 */
 			/* BO[3] (bit 1 of BO): 1=branch if set, 0=branch if clear */
-			bool branch_if_set = (bo >> 3) & 1;
+			bool branch_if_set = cond_bit_val;
 			uint32_t *target_code = find_code_for_pc(target_pc);
 			if (target_code) {
 				int32_t offset = (int32_t)((uint8_t *)target_code - (uint8_t *)jit_code_ptr);
@@ -1461,7 +1583,7 @@ static bool compile_one(uint32_t op, uint32_t pc) {
 			return true;
 		}
 
-		if (!decr_ctr && no_cond) {
+		if (no_ctr_test && no_cond_test) {
 			/* Unconditional: BO=1x1xx → always branch */
 			emit_epilogue_with_pc(target_pc);
 			return true;
@@ -1908,6 +2030,7 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 		emit_load_imm32(RTMP1, (int32_t)simm);
 		emit32(0x2B000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* ADDS */
 		emit_store_gpr(RTMP0, rd);
+		emit_write_xer_ca_from_carry();
 		emit_update_cr0(RTMP0);
 		return true;
 
@@ -2213,20 +2336,62 @@ case 782: /* vpkpx — pack pixel 32→16 bit (approximate narrow) */
 			emit_store_fpr(0, frd);
 			return true;
 
-		case 711: /* mtfsfi crD,IMM — set FPSCR field (simplified as NOP) */
+		case 711: /* mtfsfi crfD,IMM — set FPSCR field to 4-bit immediate */
+		{
+			uint32_t crfD = (op >> 23) & 0x7;
+			uint32_t imm = (op >> 12) & 0xF;
+			uint32_t shift = (7 - crfD) * 4;
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			emit_load_imm32(RTMP1, ~(0xF << shift));
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* clear field */
+			emit_load_imm32(RTMP1, imm << shift);
+			emit32(0x2A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0); /* set field */
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			if (crfD == 7) emit_sync_fpscr_rounding(); /* field 7 contains RN */
 			return true;
+		}
 
-		case 70: /* mtfsb0 bit — clear FPSCR bit (simplified) */
+		case 70: /* mtfsb0 crbD — clear FPSCR bit */
+		{
+			uint32_t crbD = (op >> 21) & 0x1F;
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			emit_load_imm32(RTMP1, ~(1u << (31 - crbD)));
+			emit32(0x0A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			if (crbD >= 30) emit_sync_fpscr_rounding(); /* RN bits */
 			return true;
+		}
 
-		case 38: /* mtfsb1 bit — set FPSCR bit (simplified) */
+		case 38: /* mtfsb1 crbD — set FPSCR bit */
+		{
+			uint32_t crbD = (op >> 21) & 0x1F;
+			a64_ldr_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			emit_load_imm32(RTMP1, 1u << (31 - crbD));
+			emit32(0x2A000000 | (RTMP1 << 16) | (RTMP0 << 5) | RTMP0);
+			a64_str_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			if (crbD >= 30) emit_sync_fpscr_rounding();
 			return true;
+		}
 
 		case 134: /* mtfsf FM,frB — move to FPSCR fields */
+		{
+			uint32_t fm = (op >> 17) & 0xFF;
 			emit_load_fpr(0, frb);
 			emit32(0x9E660000 | (0 << 5) | RTMP0); /* FMOV Xn, Dd */
-			a64_str_w_imm(RTMP0, RSTATE, PPCR_FPSCR);
+			/* Build mask from FM (each bit enables a 4-bit field) */
+			uint32_t mask = 0;
+			for (int i = 0; i < 8; i++)
+				if (fm & (1 << (7 - i))) mask |= (0xF << ((7 - i) * 4));
+			a64_ldr_w_imm(RTMP1, RSTATE, PPCR_FPSCR);
+			emit_load_imm32(RTMP2, ~mask);
+			emit32(0x0A000000 | (RTMP2 << 16) | (RTMP1 << 5) | RTMP1); /* clear target fields */
+			emit_load_imm32(RTMP2, mask);
+			emit32(0x0A000000 | (RTMP2 << 16) | (RTMP0 << 5) | RTMP0); /* mask source */
+			emit32(0x2A000000 | (RTMP0 << 16) | (RTMP1 << 5) | RTMP1); /* merge */
+			a64_str_w_imm(RTMP1, RSTATE, PPCR_FPSCR);
+			if (fm & 1) emit_sync_fpscr_rounding(); /* field 7 (RN) modified */
 			return true;
+		}
 
 		case 23: /* fsel frD,frA,frC,frB — if frA >= 0 then frC else frB */
 			emit_load_fpr(0, fra);

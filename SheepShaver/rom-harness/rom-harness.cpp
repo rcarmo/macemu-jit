@@ -828,11 +828,16 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				bool aa = (insn >> 1) & 1;
 				bool lk = insn & 1;
 				
-				/* Decrement CTR if needed */
-				if (!(BO & 4)) regs->ctr--;
+				/* PPC ISA BO field (5 bits, MSB-first):
+				   BO[0] (0x10): 1=don't test condition
+				   BO[1] (0x08): condition sense (branch if CR[BI]=BO[1])
+				   BO[2] (0x04): 1=don't decrement/test CTR
+				   BO[3] (0x02): CTR sense (0=branch if CTR≠0, 1=branch if CTR==0)
+				   BO[4] (0x01): prediction hint */
+				if (!(BO & 0x04)) regs->ctr--; /* decrement if BO[2]=0 */
 				
-				bool ctr_ok = (BO & 4) || ((regs->ctr != 0) ^ ((BO >> 1) & 1));
-				bool cond_ok = (BO & 16) || (((regs->cr >> (31 - BI)) & 1) == ((BO >> 3) & 1));
+				bool ctr_ok = (BO & 0x04) || ((regs->ctr != 0) ^ ((BO >> 1) & 1));
+				bool cond_ok = (BO & 0x10) || (((regs->cr >> (31 - BI)) & 1) == ((BO >> 3) & 1));
 				
 				if (ctr_ok && cond_ok) {
 					uint32_t target = aa ? (uint32_t)(int32_t)bd : pc + (int32_t)bd;
@@ -847,9 +852,9 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				int BI = (insn >> 16) & 0x1F;
 				bool lk = insn & 1;
 				
-				if (!(BO & 4)) regs->ctr--;
-				bool ctr_ok = (BO & 4) || ((regs->ctr != 0) ^ ((BO >> 1) & 1));
-				bool cond_ok = (BO & 16) || (((regs->cr >> (31 - BI)) & 1) == ((BO >> 3) & 1));
+				if (!(BO & 0x04)) regs->ctr--;
+				bool ctr_ok = (BO & 0x04) || ((regs->ctr != 0) ^ ((BO >> 1) & 1));
+				bool cond_ok = (BO & 0x10) || (((regs->cr >> (31 - BI)) & 1) == ((BO >> 3) & 1));
 				
 				if (ctr_ok && cond_ok) {
 					uint32_t target = (xo == 16) ? regs->lr : regs->ctr;
