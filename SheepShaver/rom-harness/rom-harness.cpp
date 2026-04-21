@@ -162,7 +162,10 @@ struct PPCRegs {
 	double   fpr[32];        /* offset 128: 32 × 8 = 256 bytes */
 	uint8_t  vr[32 * 16];    /* offset 384: 32 × 16 = 512 bytes */
 	uint32_t cr;             /* offset 896 */
-	uint32_t xer;            /* offset 900 */
+	uint8_t  xer_so;          /* offset 900 */
+	uint8_t  xer_ov;          /* offset 901 */
+	uint8_t  xer_ca;          /* offset 902 */
+	uint8_t  xer_cnt;         /* offset 903 */
 	uint32_t padding904;     /* offset 904 */
 	uint32_t padding908;     /* offset 908 */
 	uint32_t fpscr;          /* offset 912 */
@@ -175,11 +178,26 @@ struct PPCRegs {
 static_assert(offsetof(PPCRegs, gpr) == 0, "GPR offset mismatch");
 static_assert(offsetof(PPCRegs, fpr) == 128, "FPR offset mismatch");
 static_assert(offsetof(PPCRegs, cr) == 896, "CR offset mismatch");
-static_assert(offsetof(PPCRegs, xer) == 900, "XER offset mismatch");
+static_assert(offsetof(PPCRegs, xer_so) == 900, "XER offset mismatch");
 static_assert(offsetof(PPCRegs, fpscr) == 912, "FPSCR offset mismatch");
 static_assert(offsetof(PPCRegs, lr) == 916, "LR offset mismatch");
 static_assert(offsetof(PPCRegs, ctr) == 920, "CTR offset mismatch");
 static_assert(offsetof(PPCRegs, pc) == 924, "PC offset mismatch");
+
+/* Pack XER bytes into PPC 32-bit format */
+static inline uint32_t pack_xer(const PPCRegs *r) {
+	return ((uint32_t)r->xer_so << 31) | ((uint32_t)r->xer_ov << 30) |
+	       ((uint32_t)r->xer_ca << 29) | r->xer_cnt;
+}
+
+/* Unpack PPC 32-bit XER into struct bytes */
+static inline void unpack_xer(PPCRegs *r, uint32_t xer) {
+	r->xer_so = (xer >> 31) & 1;
+	r->xer_ov = (xer >> 30) & 1;
+	r->xer_ca = (xer >> 29) & 1;
+	r->xer_cnt = xer & 0x7F;
+}
+
 
 /* Bit field helpers for CR */
 static inline uint32_t cr_field(uint32_t cr, int field) {
@@ -191,20 +209,18 @@ static inline void set_cr_field(uint32_t &cr, int field, uint32_t val) {
 }
 
 /* CR0 update from result value + SO */
-static inline void update_cr0(uint32_t &cr, uint32_t xer, int32_t result) {
+static inline void update_cr0(uint32_t &cr, uint8_t xer_so, int32_t result) {
 	uint32_t bits = 0;
 	if (result < 0) bits = 8;      /* LT */
 	else if (result > 0) bits = 4;  /* GT */
 	else bits = 2;                  /* EQ */
-	if (xer & 0x80000000) bits |= 1; /* SO */
+	if (xer_so) bits |= 1; /* SO */
 	set_cr_field(cr, 0, bits);
 }
 
 /* XER carry bit (bit 29) */
-static inline bool xer_ca(uint32_t xer) { return (xer >> 29) & 1; }
-static inline void set_xer_ca(uint32_t &xer, bool ca) {
-	if (ca) xer |= (1u << 29); else xer &= ~(1u << 29);
-}
+static inline bool xer_ca(const PPCRegs *r) { return r->xer_ca; }
+static inline void set_xer_ca(PPCRegs *r, bool ca) { r->xer_ca = ca ? 1 : 0; }
 
 /* 
  * Interpret a single basic block of PPC instructions.
@@ -275,7 +291,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			int rA = (insn >> 16) & 0x1F;
 			uint16_t uimm = insn & 0xFFFF;
 			regs->gpr[rA] = regs->gpr[rS] & uimm;
-			update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+			update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 			pc += 4; break;
 		}
 		case 29: { /* andis. rA,rS,UIMM */
@@ -283,7 +299,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			int rA = (insn >> 16) & 0x1F;
 			uint16_t uimm = insn & 0xFFFF;
 			regs->gpr[rA] = regs->gpr[rS] & ((uint32_t)uimm << 16);
-			update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+			update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 			pc += 4; break;
 		}
 		
@@ -304,7 +320,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			else
 				mask = ((0xFFFFFFFF >> MB) | (0xFFFFFFFF << (31 - ME)));
 			regs->gpr[rA] = rotated & mask;
-			if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+			if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 			pc += 4; break;
 		}
 		
@@ -324,7 +340,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			else
 				mask = ((0xFFFFFFFF >> MB) | (0xFFFFFFFF << (31 - ME)));
 			regs->gpr[rA] = rotated & mask;
-			if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+			if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 			pc += 4; break;
 		}
 		
@@ -343,7 +359,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			else
 				mask = ((0xFFFFFFFF >> MB) | (0xFFFFFFFF << (31 - ME)));
 			regs->gpr[rA] = (rotated & mask) | (regs->gpr[rA] & ~mask);
-			if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+			if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 			pc += 4; break;
 		}
 		
@@ -361,7 +377,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			int16_t simm = (int16_t)(insn & 0xFFFF);
 			uint64_t result = (uint64_t)(uint32_t)(int32_t)simm + (uint64_t)(~regs->gpr[rA]) + 1ULL;
 			regs->gpr[rD] = (uint32_t)result;
-			set_xer_ca(regs->xer, result >> 32);
+			set_xer_ca(regs, result >> 32);
 			pc += 4; break;
 		}
 		
@@ -371,7 +387,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			int16_t simm = (int16_t)(insn & 0xFFFF);
 			uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)(uint32_t)(int32_t)simm;
 			regs->gpr[rD] = (uint32_t)result;
-			set_xer_ca(regs->xer, result >> 32);
+			set_xer_ca(regs, result >> 32);
 			pc += 4; break;
 		}
 		case 13: { /* addic. rD,rA,SIMM */
@@ -380,8 +396,8 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			int16_t simm = (int16_t)(insn & 0xFFFF);
 			uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)(uint32_t)(int32_t)simm;
 			regs->gpr[rD] = (uint32_t)result;
-			set_xer_ca(regs->xer, result >> 32);
-			update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+			set_xer_ca(regs, result >> 32);
+			update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 			pc += 4; break;
 		}
 		case 10: { /* cmpli crD,rA,UIMM */
@@ -394,7 +410,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			if (a < b) bits = 8;
 			else if (a > b) bits = 4;
 			else bits = 2;
-			if (regs->xer & 0x80000000) bits |= 1;
+			if (regs->xer_so) bits |= 1;
 			set_cr_field(regs->cr, crD, bits);
 			pc += 4; break;
 		}
@@ -408,7 +424,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			if (a < b) bits = 8;
 			else if (a > b) bits = 4;
 			else bits = 2;
-			if (regs->xer & 0x80000000) bits |= 1;
+			if (regs->xer_so) bits |= 1;
 			set_cr_field(regs->cr, crD, bits);
 			pc += 4; break;
 		}
@@ -431,7 +447,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				int32_t b = (int32_t)regs->gpr[rB];
 				uint32_t bits = 0;
 				if (a < b) bits = 8; else if (a > b) bits = 4; else bits = 2;
-				if (regs->xer & 0x80000000) bits |= 1;
+				if (regs->xer_so) bits |= 1;
 				set_cr_field(regs->cr, crD, bits);
 				pc += 4; break;
 			}
@@ -441,7 +457,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				uint32_t b = regs->gpr[rB];
 				uint32_t bits = 0;
 				if (a < b) bits = 8; else if (a > b) bits = 4; else bits = 2;
-				if (regs->xer & 0x80000000) bits |= 1;
+				if (regs->xer_so) bits |= 1;
 				set_cr_field(regs->cr, crD, bits);
 				pc += 4; break;
 			}
@@ -449,42 +465,42 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			/* Logical */
 			case 28: { /* and[.] rA,rS,rB */
 				regs->gpr[rA] = regs->gpr[rD] & regs->gpr[rB];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 60: { /* andc[.] rA,rS,rB */
 				regs->gpr[rA] = regs->gpr[rD] & ~regs->gpr[rB];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 444: { /* or[.] rA,rS,rB */
 				regs->gpr[rA] = regs->gpr[rD] | regs->gpr[rB];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 124: { /* nor[.] rA,rS,rB */
 				regs->gpr[rA] = ~(regs->gpr[rD] | regs->gpr[rB]);
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 316: { /* xor[.] rA,rS,rB */
 				regs->gpr[rA] = regs->gpr[rD] ^ regs->gpr[rB];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 284: { /* eqv[.] rA,rS,rB */
 				regs->gpr[rA] = ~(regs->gpr[rD] ^ regs->gpr[rB]);
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 412: { /* orc[.] rA,rS,rB */
 				regs->gpr[rA] = regs->gpr[rD] | ~regs->gpr[rB];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 476: { /* nand[.] rA,rS,rB */
 				regs->gpr[rA] = ~(regs->gpr[rD] & regs->gpr[rB]);
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			
@@ -492,13 +508,13 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			case 24: { /* slw[.] rA,rS,rB */
 				uint32_t sh = regs->gpr[rB] & 0x3F;
 				regs->gpr[rA] = (sh < 32) ? (regs->gpr[rD] << sh) : 0;
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 536: { /* srw[.] rA,rS,rB */
 				uint32_t sh = regs->gpr[rB] & 0x3F;
 				regs->gpr[rA] = (sh < 32) ? (regs->gpr[rD] >> sh) : 0;
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 792: { /* sraw[.] rA,rS,rB */
@@ -506,17 +522,17 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				int32_t val = (int32_t)regs->gpr[rD];
 				if (sh == 0) {
 					regs->gpr[rA] = val;
-					set_xer_ca(regs->xer, false);
+					set_xer_ca(regs, false);
 				} else if (sh < 32) {
 					bool ca = (val < 0) && ((val & ((1 << sh) - 1)) != 0);
 					regs->gpr[rA] = (uint32_t)(val >> sh);
-					set_xer_ca(regs->xer, ca);
+					set_xer_ca(regs, ca);
 				} else {
 					bool ca = val < 0;
 					regs->gpr[rA] = (uint32_t)(val >> 31);
-					set_xer_ca(regs->xer, ca);
+					set_xer_ca(regs, ca);
 				}
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 824: { /* srawi[.] rA,rS,SH */
@@ -524,13 +540,13 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				int32_t val = (int32_t)regs->gpr[rD];
 				if (SH == 0) {
 					regs->gpr[rA] = val;
-					set_xer_ca(regs->xer, false);
+					set_xer_ca(regs, false);
 				} else {
 					bool ca = (val < 0) && ((val & ((1 << SH) - 1)) != 0);
 					regs->gpr[rA] = (uint32_t)(val >> SH);
-					set_xer_ca(regs->xer, ca);
+					set_xer_ca(regs, ca);
 				}
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			
@@ -538,19 +554,19 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			case 26: { /* cntlzw[.] rA,rS */
 				uint32_t val = regs->gpr[rD];
 				regs->gpr[rA] = val ? __builtin_clz(val) : 32;
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			
 			/* Extend sign */
 			case 922: { /* extsh[.] rA,rS */
 				regs->gpr[rA] = (uint32_t)(int32_t)(int16_t)(uint16_t)regs->gpr[rD];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			case 954: { /* extsb[.] rA,rS */
 				regs->gpr[rA] = (uint32_t)(int32_t)(int8_t)(uint8_t)regs->gpr[rD];
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rA]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rA]);
 				pc += 4; break;
 			}
 			
@@ -558,7 +574,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			case 339: { /* mfspr rD,spr */
 				uint32_t spr = ((insn >> 16) & 0x1F) | (((insn >> 11) & 0x1F) << 5);
 				switch (spr) {
-				case 1: regs->gpr[rD] = regs->xer; break;
+				case 1: regs->gpr[rD] = pack_xer(regs); break;
 				case 8: regs->gpr[rD] = regs->lr; break;
 				case 9: regs->gpr[rD] = regs->ctr; break;
 				default: regs->gpr[rD] = 0; break; /* unknown SPR */
@@ -568,7 +584,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			case 467: { /* mtspr spr,rS */
 				uint32_t spr = ((insn >> 16) & 0x1F) | (((insn >> 11) & 0x1F) << 5);
 				switch (spr) {
-				case 1: regs->xer = regs->gpr[rD]; break;
+				case 1: unpack_xer(regs, regs->gpr[rD]); break;
 				case 8: regs->lr = regs->gpr[rD]; break;
 				case 9: regs->ctr = regs->gpr[rD]; break;
 				default: break;
@@ -586,19 +602,19 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 			case 235: { /* mullw[o][.] rD,rA,rB (xo9=235) */
 				int64_t result = (int64_t)(int32_t)regs->gpr[rA] * (int64_t)(int32_t)regs->gpr[rB];
 				regs->gpr[rD] = (uint32_t)result;
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 				pc += 4; break;
 			}
 			case 75: { /* mulhw[.] rD,rA,rB */
 				int64_t result = (int64_t)(int32_t)regs->gpr[rA] * (int64_t)(int32_t)regs->gpr[rB];
 				regs->gpr[rD] = (uint32_t)(result >> 32);
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 				pc += 4; break;
 			}
 			case 11: { /* mulhwu[.] rD,rA,rB */
 				uint64_t result = (uint64_t)regs->gpr[rA] * (uint64_t)regs->gpr[rB];
 				regs->gpr[rD] = (uint32_t)(result >> 32);
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 				pc += 4; break;
 			}
 			
@@ -610,7 +626,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 					regs->gpr[rD] = 0;
 				else
 					regs->gpr[rD] = (uint32_t)(a / b);
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 				pc += 4; break;
 			}
 			case 459: { /* divwu[o][.] rD,rA,rB */
@@ -620,7 +636,7 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 					regs->gpr[rD] = 0;
 				else
 					regs->gpr[rD] = a / b;
-				if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+				if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 				pc += 4; break;
 			}
 			
@@ -629,73 +645,73 @@ static bool interpret_block(PPCRegs *regs, const uint8_t *rom, size_t rom_size,
 				switch (xo9) {
 				case 266: { /* add[o][.] rD,rA,rB */
 					regs->gpr[rD] = regs->gpr[rA] + regs->gpr[rB];
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 10: { /* addc[o][.] rD,rA,rB */
 					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)regs->gpr[rB];
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 138: { /* adde[o][.] rD,rA,rB */
-					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)regs->gpr[rB] + (uint64_t)xer_ca(regs->xer);
+					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)regs->gpr[rB] + (uint64_t)xer_ca(regs);
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 234: { /* addme[o][.] rD,rA */
-					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)xer_ca(regs->xer) - 1ULL;
+					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)xer_ca(regs) - 1ULL;
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 202: { /* addze[o][.] rD,rA */
-					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)xer_ca(regs->xer);
+					uint64_t result = (uint64_t)regs->gpr[rA] + (uint64_t)xer_ca(regs);
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 40: { /* subf[o][.] rD,rA,rB */
 					regs->gpr[rD] = regs->gpr[rB] - regs->gpr[rA];
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 8: { /* subfc[o][.] rD,rA,rB */
 					uint64_t result = (uint64_t)regs->gpr[rB] + (uint64_t)(~regs->gpr[rA]) + 1ULL;
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 136: { /* subfe[o][.] rD,rA,rB */
-					uint64_t result = (uint64_t)regs->gpr[rB] + (uint64_t)(~regs->gpr[rA]) + (uint64_t)xer_ca(regs->xer);
+					uint64_t result = (uint64_t)regs->gpr[rB] + (uint64_t)(~regs->gpr[rA]) + (uint64_t)xer_ca(regs);
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 232: { /* subfme[o][.] rD,rA */
-					uint64_t result = (uint64_t)(~regs->gpr[rA]) + (uint64_t)xer_ca(regs->xer) - 1ULL;
+					uint64_t result = (uint64_t)(~regs->gpr[rA]) + (uint64_t)xer_ca(regs) - 1ULL;
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 200: { /* subfze[o][.] rD,rA */
-					uint64_t result = (uint64_t)(~regs->gpr[rA]) + (uint64_t)xer_ca(regs->xer);
+					uint64_t result = (uint64_t)(~regs->gpr[rA]) + (uint64_t)xer_ca(regs);
 					regs->gpr[rD] = (uint32_t)result;
-					set_xer_ca(regs->xer, result >> 32);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					set_xer_ca(regs, result >> 32);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				case 104: { /* neg[o][.] rD,rA */
 					regs->gpr[rD] = (uint32_t)(-(int32_t)regs->gpr[rA]);
-					if (rc) update_cr0(regs->cr, regs->xer, (int32_t)regs->gpr[rD]);
+					if (rc) update_cr0(regs->cr, regs->xer_so, (int32_t)regs->gpr[rD]);
 					pc += 4; break;
 				}
 				default:
@@ -961,7 +977,7 @@ struct TestResult {
 
 static void print_regs(const char *label, const PPCRegs *r) {
 	fprintf(stderr, "  %s: PC=%08x LR=%08x CTR=%08x CR=%08x XER=%08x\n",
-		label, r->pc, r->lr, r->ctr, r->cr, r->xer);
+		label, r->pc, r->lr, r->ctr, r->cr, pack_xer(r));
 	for (int i = 0; i < 32; i += 4) {
 		fprintf(stderr, "    GPR%02d-%02d: %08x %08x %08x %08x\n",
 			i, i+3, r->gpr[i], r->gpr[i+1], r->gpr[i+2], r->gpr[i+3]);
@@ -981,7 +997,7 @@ static bool compare_regs(const PPCRegs *interp, const PPCRegs *jit,
 	if (interp->lr != jit->lr) match = false;
 	if (interp->ctr != jit->ctr) match = false;
 	if (interp->cr != jit->cr) match = false;
-	if (interp->xer != jit->xer) match = false;
+	if (pack_xer(interp) != pack_xer(jit)) match = false;
 	
 	if (!match && verbose) {
 		fprintf(stderr, "MISMATCH at ROM+0x%06x:\n", rom_offset);
@@ -1001,8 +1017,8 @@ static bool compare_regs(const PPCRegs *interp, const PPCRegs *jit,
 			fprintf(stderr, "  DIFF CTR: interp=%08x jit=%08x\n", interp->ctr, jit->ctr);
 		if (interp->cr != jit->cr)
 			fprintf(stderr, "  DIFF CR: interp=%08x jit=%08x\n", interp->cr, jit->cr);
-		if (interp->xer != jit->xer)
-			fprintf(stderr, "  DIFF XER: interp=%08x jit=%08x\n", interp->xer, jit->xer);
+		if (pack_xer(interp) != pack_xer(jit))
+			fprintf(stderr, "  DIFF XER: interp=%08x jit=%08x\n", pack_xer(interp), pack_xer(jit));
 	}
 	
 	return match;
@@ -1028,7 +1044,7 @@ static void seed_regs(PPCRegs *r, uint32_t seed, uint32_t rom_base_mac) {
 	r->lr = rom_base_mac + 0x1000;  /* valid LR */
 	r->ctr = xorshift32(&s);
 	r->cr = xorshift32(&s) & 0xFFFFFFFF;
-	r->xer = xorshift32(&s) & 0xE000007F; /* valid XER bits only */
+	unpack_xer(r, xorshift32(&s) & 0xE000007F); /* valid XER bits only */
 	r->fpscr = 0;
 }
 
