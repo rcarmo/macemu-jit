@@ -2146,9 +2146,22 @@ gen_opcode (unsigned int opcode)
      case i_RTR:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	isjump;
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_rtr);\n");
+	/* RTR: pop CCR (word), pop PC (long), set flags, jump */
+	comprintf("\tint ccr_scratch = scratchie++;\n");
+	comprintf("\tint pc_scratch = scratchie++;\n");
+	comprintf("\treadword(SP_REG, ccr_scratch, scratchie);\n");
+	comprintf("\tlea_l_brr(SP_REG, SP_REG, 2);\n");
+	comprintf("\treadlong(SP_REG, pc_scratch, scratchie);\n");
+	comprintf("\tlea_l_brr(SP_REG, SP_REG, 4);\n");
+	comprintf("\tmake_flags_live();\n");
+	comprintf("\tstart_needflags();\n");
+	comprintf("\tjff_MV2SCCR(ccr_scratch);\n");
+	comprintf("\tlive_flags();\n");
+	comprintf("\tend_needflags();\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.pc, pc_scratch);\n");
+	comprintf("\tget_n_addr_jmp(pc_scratch, PC_P, scratchie);\n");
+	comprintf("\tmov_l_mr((uintptr)&regs.pc_oldp, PC_P);\n");
+	comprintf("\tm68k_pc_offset = 0;\n");
 #else
 	isjump;
 	failure;
