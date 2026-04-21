@@ -1613,12 +1613,15 @@ gen_opcode (unsigned int opcode)
      case i_SBCD:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	if (curi->smode == Apdi) {
+	    comprintf("\tint src_val = scratchie++;\n");
+	    comprintf("\tint dst_val = scratchie++;\n");
+	    comprintf("\tsub_l_ri(srcreg + 8, 1);\n");
+	    comprintf("\treadbyte(srcreg + 8, src_val, scratchie);\n");
+	    comprintf("\tsub_l_ri(dstreg + 8, 1);\n");
+	    comprintf("\treadbyte(dstreg + 8, dst_val, scratchie);\n");
 	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\t{int enc=scratchie++;\n");
-	    comprintf("\t mov_l_ri(enc,(dstreg&7)|((srcreg&7)<<3)|(1<<6));\n");
-	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception,enc);}\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_sbcd);\n");
+	    comprintf("\tjnf_SBCD_b(dst_val, src_val);\n");
+	    comprintf("\twritebyte(dstreg + 8, dst_val, scratchie);\n");
 	} else {
 	    comprintf("\tdont_care_flags();\n");
 	    comprintf("\tjnf_SBCD_b(dstreg, srcreg);\n");
@@ -1671,13 +1674,16 @@ gen_opcode (unsigned int opcode)
      case i_ABCD:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	if (curi->smode == Apdi) {
-	    /* -(An),-(An) mode: keep call_helper (needs memory access) */
+	    /* -(An),-(An) mode: inline memory access + BCD add */
+	    comprintf("\tint src_val = scratchie++;\n");
+	    comprintf("\tint dst_val = scratchie++;\n");
+	    comprintf("\tsub_l_ri(srcreg + 8, 1);\n");
+	    comprintf("\treadbyte(srcreg + 8, src_val, scratchie);\n");
+	    comprintf("\tsub_l_ri(dstreg + 8, 1);\n");
+	    comprintf("\treadbyte(dstreg + 8, dst_val, scratchie);\n");
 	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\t{int enc=scratchie++;\n");
-	    comprintf("\t mov_l_ri(enc,(dstreg&7)|((srcreg&7)<<3)|(1<<6));\n");
-	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception,enc);}\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_abcd);\n");
+	    comprintf("\tjnf_ABCD_b(dst_val, src_val);\n");
+	    comprintf("\twritebyte(dstreg + 8, dst_val, scratchie);\n");
 	} else {
 	    /* Dn,Dn mode: native inline BCD add */
 	    comprintf("\tdont_care_flags();\n");
@@ -1721,18 +1727,11 @@ gen_opcode (unsigned int opcode)
 	    /* Dn mode: native inline BCD negate */
 	    comprintf("\tjnf_NBCD_b(srcreg);\n");
 	} else {
-	    /* Memory mode: keep call_helper */
-	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
-	    comprintf("\t{\n");
-	    comprintf("\t  int enc = scratchie++;\n");
-	    comprintf("\t  mov_l_ri(enc, 8);\n");
-	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
-	    comprintf("\t}\n");
-	    comprintf("\tflush(1);\n");
-	    {
-		extern void jit_op_nbcd(void);
-		comprintf("\tcall_helper((uintptr)jit_op_nbcd);\n");
-	    }
+	    /* Memory mode: read, BCD negate, write back */
+	    comprintf("\tint val = scratchie++;\n");
+	    comprintf("\treadbyte(srca, val, scratchie);\n");
+	    comprintf("\tjnf_NBCD_b(val);\n");
+	    comprintf("\twritebyte(srca, val, scratchie);\n");
 	}
 #else
 	failure;
@@ -3182,12 +3181,12 @@ gen_opcode (unsigned int opcode)
 	comprintf("\tint dq = (extra >> 12) & 7;\n");
 	comprintf("\tint dr = extra & 7;\n");
 	comprintf("\tif (extra & 0x0400) {\n");
-	/* 64-bit dividend: keep as call_helper (no mid-layer support) */
-	comprintf("\t  dont_care_flags();\n");
-	comprintf("\t  mov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
-	comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, extra);\n");
-	comprintf("\t  flush(1);\n");
-	comprintf("\t  call_helper((uintptr)jit_op_divl);\n");
+	/* 64-bit dividend: inline ARM64 via UDIV_xxx/SDIV_xxx */
+	comprintf("\t  if (extra & 0x0800) {\n"); /* signed */
+	comprintf("\t    jnf_DIVLS64(dq, dr, src);\n");
+	comprintf("\t  } else {\n"); /* unsigned */
+	comprintf("\t    jnf_DIVLU64(dq, dr, src);\n");
+	comprintf("\t  }\n");
 	comprintf("\t} else {\n");
 	/* 32-bit dividend: use inline ARM64 mid-layer */
 	comprintf("\t  if (extra & 0x0800) {\n"); /* signed */

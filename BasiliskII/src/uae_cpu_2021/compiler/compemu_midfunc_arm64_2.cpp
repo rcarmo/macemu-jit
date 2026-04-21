@@ -3485,6 +3485,91 @@ MIDFUNC(3,jff_DIVLS32,(RW4 d, RR4 s1, W4 rem))
 MENDFUNC(3,jff_DIVLS32,(RW4 d, RR4 s1, W4 rem))
 
 /*
+ * DIVLU64 — 64-bit unsigned divide
+ * {dr:dq} / src → quotient in dq, remainder in dr
+ * Overflow if quotient > 0xFFFFFFFF → sets V=1 and does not modify dq/dr
+ */
+MIDFUNC(3,jnf_DIVLU64,(RW4 dq, RW4 dr, RR4 src))
+{
+	src = readreg(src);
+	dq = rmw(dq);
+	dr = rmw(dr);
+
+	// Division by zero check
+	CBNZ_wi(src, 4);
+	MOV_wi(REG_WORK1, 5);
+	uintptr idx = (uintptr)(&regs.jit_exception) - (uintptr)(&regs);
+	STR_wXi(REG_WORK1, R_REGSTRUCT, idx);
+	B_i(9);  // skip to end_of_op
+
+	// Combine {dr, dq} into 64-bit dividend in REG_WORK1.x
+	ORR_xxxLSLi(REG_WORK1, dq, dr, 32);
+
+	// 64-bit unsigned divide
+	UDIV_xxx(REG_WORK2, REG_WORK1, src);  // quotient in WORK2.x
+
+	// Check overflow: quotient must fit in 32 bits
+	LSR_xxi(REG_WORK3, REG_WORK2, 32);
+	CBNZ_xi(REG_WORK3, 4);  // overflow → skip store
+
+	// Remainder = dividend - quotient * divisor
+	MSUB_xxxx(REG_WORK3, src, REG_WORK2, REG_WORK1);
+	MOV_ww(dq, REG_WORK2);
+	MOV_ww(dr, REG_WORK3);
+
+	// end_of_op
+	unlock2(dr);
+	unlock2(dq);
+	unlock2(src);
+}
+MENDFUNC(3,jnf_DIVLU64,(RW4 dq, RW4 dr, RR4 src))
+
+/*
+ * DIVLS64 — 64-bit signed divide
+ * {dr:dq} / src → quotient in dq, remainder in dr
+ * Overflow if quotient doesn't fit in signed 32 bits → sets V=1
+ */
+MIDFUNC(3,jnf_DIVLS64,(RW4 dq, RW4 dr, RR4 src))
+{
+	src = readreg(src);
+	dq = rmw(dq);
+	dr = rmw(dr);
+
+	// Division by zero check
+	CBNZ_wi(src, 4);
+	MOV_wi(REG_WORK1, 5);
+	uintptr idx = (uintptr)(&regs.jit_exception) - (uintptr)(&regs);
+	STR_wXi(REG_WORK1, R_REGSTRUCT, idx);
+	B_i(12); // skip to end_of_op
+
+	// Combine {dr, dq} into 64-bit signed dividend in REG_WORK1.x
+	ORR_xxxLSLi(REG_WORK1, dq, dr, 32);
+
+	// Sign-extend src to 64 bits: SXTW
+	SXTW_xw(REG_WORK4, src);
+
+	// 64-bit signed divide
+	SDIV_xxx(REG_WORK2, REG_WORK1, REG_WORK4);  // quotient in WORK2.x
+
+	// Check overflow: quotient must fit in signed 32 bits
+	// SXTW(quotient) must equal quotient
+	SXTW_xw(REG_WORK3, REG_WORK2);  // sign-extend low 32
+	CMP_xx(REG_WORK3, REG_WORK2);    // compare with full 64
+	BNE_i(4);                         // overflow → skip store
+
+	// Remainder = dividend - quotient * divisor
+	MSUB_xxxx(REG_WORK3, REG_WORK4, REG_WORK2, REG_WORK1);
+	MOV_ww(dq, REG_WORK2);
+	MOV_ww(dr, REG_WORK3);
+
+	// end_of_op
+	unlock2(dr);
+	unlock2(dq);
+	unlock2(src);
+}
+MENDFUNC(3,jnf_DIVLS64,(RW4 dq, RW4 dr, RR4 src))
+
+/*
  * EOR
  * Operand Syntax: 	Dn, <ea>
  *
