@@ -1,107 +1,135 @@
-# Makefile for creating SheepShaver distributions
-# Written in 1999 by Christian Bauer <Christian.Bauer@uni-mainz.de>
-
-VERSION := 2.3
-VERNAME := SheepShaver-$(VERSION)
-CVSDATE := $(shell date "+%Y%m%d")
-
-SRCARCHIVE := $(VERNAME)-$(CVSDATE).tar.gz
-
-TMPDIR := $(shell date +/tmp/build%m%s)
-ISODATE := $(shell date "+%Y-%m-%d %H:%M")
-DOCS := NEWS
-SRCS := src
-
-# Where Basilisk II directory can be found
-B2_TOPDIR := ../BasiliskII
-
-default: help
-
-help:
-	@echo "This top-level Makefile is for creating SheepShaver distributions."
-	@echo "The following targets are available:"
-	@echo "  tarball  source tarball ($(SRCARCHIVE))"
-	@echo "  links    create links to Basilisk II sources"
-
-clean:
-	-rm -f $(SRCARCHIVE)
-
+# SheepShaver AArch64 JIT — Master Makefile
 #
-# Source tarball
+# Targets:
+#   make build        — build SheepShaver + ROM harness
+#   make test         — run opcode harness (209 vectors) + ROM harness (10K blocks)
+#   make test-opcodes — run JIT opcode equivalence harness only
+#   make test-rom     — run ROM harness only
+#   make run          — start SheepShaver with VNC (interpreter mode)
+#   make run-jit      — start SheepShaver with VNC (JIT mode)
+#   make screenshot   — capture VNC screenshot to tmp/
+#   make kill         — kill all SheepShaver + Xvfb processes
+#   make clean        — clean build artifacts
 #
-tarball: $(SRCARCHIVE)
+# Prerequisites:
+#   - ROM: /workspace/tmp/rpi-basilisk-assets/ppc-roms/PowerMac-9500-OldWorld.rom
+#   - Disk: /workspace/tmp/ss-test-disk.img
+#   - Xvfb, SDL2, libvncserver-dev, gtk2
 
-$(SRCARCHIVE): $(SRCS) $(DOCS)
-	-rm -rf $(TMPDIR)
-	mkdir $(TMPDIR)
-	cd $(TMPDIR); cvs export -D "$(ISODATE)" BasiliskII SheepShaver
-	cd $(TMPDIR)/SheepShaver/src/Unix && mkdir Darwin
-	cd $(TMPDIR)/SheepShaver && make links
-	cd $(TMPDIR)/SheepShaver/src/Unix && NO_CONFIGURE=1 ./autogen.sh
-	cd $(TMPDIR)/SheepShaver/src/Windows && NO_CONFIGURE=1 ../Unix/autogen.sh
-	rm $(TMPDIR)/SheepShaver/Makefile
-	cp -aL $(TMPDIR)/SheepShaver $(TMPDIR)/$(VERNAME)
-	cd $(TMPDIR); tar cfz $@ $(VERNAME)
-	mv $(TMPDIR)/$@ .
-	rm -rf $(TMPDIR)
+SHELL       := /bin/bash
+SS_DIR      := src/Unix
+SS_BIN      := $(SS_DIR)/SheepShaver
+JIT_DIR     := src/kpx_cpu/src/cpu/jit/aarch64
+ROM_HARNESS := rom-harness/rom-harness
+JIT_TEST    := jit-test/run.sh
 
-#
-# Links to Basilisk II sources
-#
-links:
-	(cd src/Windows; if [ ! -e m4 ]; then ln -s ../../../BasiliskII/src/Unix/m4; fi)
-	@list='adb.cpp audio.cpp cdrom.cpp disk.cpp extfs.cpp pict.c \
-	       prefs.cpp scsi.cpp sony.cpp timer.cpp xpram.cpp \
-	       bincue.cpp include/bincue.h \
-	       include/adb.h include/audio.h include/audio_defs.h \
-	       include/cdrom.h include/clip.h include/debug.h include/disk.h \
-	       include/extfs.h include/extfs_defs.h include/pict.h \
-	       include/prefs.h include/scsi.h include/serial.h include/prefs_editor.h \
-	       include/serial_defs.h include/sony.h include/sys.h \
-	       include/timer.h include/xpram.h include/color_scheme.h \
-	       include/my_sdl.h \
-	       BeOS/audio_beos.cpp BeOS/extfs_beos.cpp BeOS/scsi_beos.cpp \
-	       BeOS/serial_beos.cpp BeOS/sys_beos.cpp BeOS/timer_beos.cpp \
-	       BeOS/xpram_beos.cpp BeOS/SheepDriver BeOS/SheepNet \
-	       CrossPlatform/sigsegv.h CrossPlatform/vm_alloc.h CrossPlatform/vm_alloc.cpp \
-               CrossPlatform/video_vosf.h CrossPlatform/video_blit.h CrossPlatform/video_blit.cpp \
-	       Unix/audio_oss_esd.cpp \
-	       Unix/vhd_unix.cpp \
-	       Unix/extfs_unix.cpp Unix/serial_unix.cpp Unix/color_scheme.cpp \
-	       Unix/sshpty.h Unix/sshpty.c Unix/strlcpy.h Unix/strlcpy.c \
-	       Unix/sys_unix.cpp Unix/timer_unix.cpp Unix/xpram_unix.cpp Unix/prefs_unix.cpp \
-	       Unix/semaphore.h Unix/posix_sem.cpp Unix/config.sub Unix/config.guess Unix/m4 \
-	       Unix/keycodes Unix/tunconfig Unix/clip_unix.cpp Unix/Irix/audio_irix.cpp \
-	       Unix/Linux/scsi_linux.cpp Unix/Linux/NetDriver Unix/ether_unix.cpp \
-	       Unix/rpc.h Unix/rpc_unix.cpp Unix/ldscripts \
-	       Unix/tinyxml2.h Unix/tinyxml2.cpp Unix/disk_unix.h \
-	       Unix/disk_sparsebundle.cpp Unix/Darwin/mkstandalone \
-	       Unix/Darwin/pagezero.c Unix/Darwin/testlmem.sh \
-	       dummy/audio_dummy.cpp dummy/clip_dummy.cpp dummy/serial_dummy.cpp \
-	       dummy/prefs_editor_dummy.cpp dummy/scsi_dummy.cpp SDL slirp \
-	       MacOSX/sys_darwin.cpp MacOSX/clip_macosx.cpp MacOSX/clip_macosx64.mm \
-	       MacOSX/macos_util_macosx.h Unix/cpr.sh \
-	       MacOSX/extfs_macosx.cpp Windows/clip_windows.cpp \
-	       MacOSX/MacOSX_sound_if.cpp MacOSX/MacOSX_sound_if.h \
-	       MacOSX/AudioBackEnd.cpp MacOSX/AudioBackEnd.h \
-	       MacOSX/AudioDevice.cpp MacOSX/AudioDevice.h MacOSX/audio_macosx.cpp \
-	       MacOSX/utils_macosx.mm MacOSX/utils_macosx.h \
-	       Windows/cd_defs.h Windows/cdenable Windows/extfs_windows.cpp \
-	       Windows/posix_emu.cpp Windows/posix_emu.h Windows/sys_windows.cpp \
-	       Windows/timer_windows.cpp Windows/util_windows.cpp \
-	       Windows/util_windows.h Windows/xpram_windows.cpp \
-	       Windows/serial_windows.cpp Windows/router Windows/b2ether \
-	       Windows/ether_windows.h Windows/ether_windows.cpp \
-	       Windows/serial_windows.cpp Windows/prefs_editor_gtk.cpp \
-	       uae_cpu/compiler/codegen_x86.h'; \
-	PREFIX="../"; case $(B2_TOPDIR) in /*) PREFIX="";; esac; \
-	for i in $$list; do \
-	  if test "$$i" != "\\"; then \
-	    echo $$i; o=$$i; \
-	    case $$i in *codegen_x86.h) o=kpx_cpu/src/cpu/jit/x86/codegen_x86.h;; esac; \
-	    SUB=`echo $$o | sed 's;[^/]*/;../;g' | sed 's;[^/]*$$;;'` ;\
-	    cur_link=src/$$o ;\
-	    if [ -e "$$cur_link" ]; then rm -rf "$$cur_link"; fi ;\
-	    ln -sf "$$PREFIX$$SUB$(B2_TOPDIR)/src/$$i" $$cur_link; \
-	  fi; \
-	done;
+ROM         := /workspace/tmp/rpi-basilisk-assets/ppc-roms/PowerMac-9500-OldWorld.rom
+DISK        := /workspace/tmp/ss-test-disk.img
+BENCH_DISK  := /workspace/tmp/Benchmark.hda
+PREFS_DIR   := /tmp/ss-desktop
+PREFS_FILE  := $(PREFS_DIR)/.sheepshaver_prefs
+VNC_PORT    := 5999
+
+# Build flags for the JIT object (compiled separately from Makefile)
+JIT_CXX     := g++
+JIT_CXXFLAGS := -g -O2 -std=c++11 -DHAVE_CONFIG_H
+JIT_INCLUDES := -I$(JIT_DIR)
+
+.PHONY: all build build-ss build-jit-obj build-rom-harness \
+        test test-opcodes test-rom \
+        run run-jit screenshot kill clean \
+        ensure-xvfb ensure-prefs
+
+# ---- Build -------------------------------------------------------------------
+
+all: build
+
+build: build-ss build-rom-harness
+
+build-ss: build-jit-obj
+	@echo "=== Building SheepShaver ==="
+	-@cd $(SS_DIR) && $(MAKE) -j$$(nproc) 2>&1 | tail -3
+	@# Re-link with JIT object (inner Makefile doesn't know about ppc-jit.o)
+	@cd $(SS_DIR) && $(JIT_CXX) -o SheepShaver obj/*.o \
+		-lpthread -lm -lSDL2 \
+		-lgtk-x11-2.0 -lgdk-x11-2.0 -lpangocairo-1.0 -latk-1.0 -lcairo \
+		-lgdk_pixbuf-2.0 -lgio-2.0 -lpangoft2-1.0 -lpango-1.0 \
+		-lgobject-2.0 -lglib-2.0 -lharfbuzz -lvncserver -lfontconfig -lfreetype
+	@echo "Built: $(SS_BIN)"
+
+build-jit-obj:
+	@echo "=== Compiling JIT ==="
+	$(JIT_CXX) $(JIT_CXXFLAGS) $(JIT_INCLUDES) -c \
+		-o $(SS_DIR)/obj/ppc-jit.o $(JIT_DIR)/ppc-jit.cpp
+
+build-rom-harness:
+	@echo "=== Building ROM harness ==="
+	cd rom-harness && $(MAKE)
+
+# ---- Test --------------------------------------------------------------------
+
+test: test-opcodes test-rom
+	@echo ""
+	@echo "=== All tests complete ==="
+
+test-opcodes: build-ss
+	@echo ""
+	@echo "=== JIT Opcode Equivalence Harness ==="
+	@cd jit-test && bash run.sh 2>&1 | grep "METRIC\|FAIL\|ERROR" | head -20
+
+test-rom: build-rom-harness
+	@echo ""
+	@echo "=== ROM Harness (10K blocks) ==="
+	@timeout 30 $(ROM_HARNESS) $(ROM) \
+		--count=10000 --min-insns=1 --max-insns=64 2>&1 | \
+		grep "Score:\|Passed:\|Failed:\|Testable\|JIT compile\|SIGSEGV"
+
+# ---- Run ---------------------------------------------------------------------
+
+ensure-xvfb:
+	@pgrep -x Xvfb > /dev/null 2>&1 || \
+		{ Xvfb :99 -screen 0 800x600x24 & sleep 1; echo "Started Xvfb :99"; }
+
+ensure-prefs:
+	@mkdir -p $(PREFS_DIR)
+	@printf 'rom $(ROM)\ndisk $(DISK)\nramsize 134217728\nscreen win/800/600\ndisplaycolordepth 8\nnosound true\nnocdrom true\nnogui true\nignoreillegal true\nvncserver true\nvncport $(VNC_PORT)\n' > $(PREFS_FILE)
+	@if [ -f "$(BENCH_DISK)" ]; then \
+		grep -q "Benchmark" $(PREFS_FILE) || \
+		echo "disk $(BENCH_DISK)" >> $(PREFS_FILE); \
+	fi
+
+run: build-ss ensure-xvfb ensure-prefs kill
+	@echo "=== Starting SheepShaver (interpreter) on VNC port $(VNC_PORT) ==="
+	GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
+		$(SS_BIN) > /dev/null 2>/tmp/ss-stderr.log &
+	@sleep 2
+	@echo "PID: $$(pgrep -f 'SheepShaver' | head -1)"
+	@echo "VNC: vnc://localhost:$(VNC_PORT)"
+	@echo "Log: /tmp/ss-stderr.log"
+
+run-jit: build-ss ensure-xvfb ensure-prefs kill
+	@echo "=== Starting SheepShaver (JIT) on VNC port $(VNC_PORT) ==="
+	SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
+		$(SS_BIN) > /dev/null 2>/tmp/ss-jit-stderr.log &
+	@sleep 2
+	@echo "PID: $$(pgrep -f 'SheepShaver' | head -1)"
+	@echo "VNC: vnc://localhost:$(VNC_PORT)"
+	@echo "Log: /tmp/ss-jit-stderr.log"
+
+screenshot:
+	@export PATH="$$HOME/.local/bin:$$PATH"; \
+	vncdotool -s 127.0.0.1::$(VNC_PORT) capture /workspace/tmp/ss-screenshot-$$(date +%H%M%S).png 2>&1 && \
+		echo "Saved: /workspace/tmp/ss-screenshot-$$(date +%H%M%S).png" || \
+		echo "VNC not available on port $(VNC_PORT)"
+
+# ---- Cleanup -----------------------------------------------------------------
+
+kill:
+	@pkill -9 -x SheepShaver 2>/dev/null; true
+	@sleep 0.3
+	@echo "All SheepShaver processes killed"
+
+clean: kill
+	cd $(SS_DIR) && rm -f obj/ppc-jit.o SheepShaver 2>/dev/null; true
+	cd rom-harness && $(MAKE) clean 2>/dev/null; true
+	@echo "Clean complete"
