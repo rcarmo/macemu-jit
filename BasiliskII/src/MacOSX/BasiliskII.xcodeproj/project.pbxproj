@@ -97,7 +97,7 @@
 		};
 		E45769B92643A6740063BAF1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = E45769B52643A6740063BAF1 /* uae_cpu_2021.xcodeproj */;
+			containerPortal = E45769B52643A6740063BAF1 /* uae_cpu_2026.xcodeproj */;
 			proxyType = 2;
 			remoteGlobalIDString = E41D7AA12642C004005E8093;
 			remoteInfo = uae_cpu_arm64;
@@ -111,7 +111,7 @@
 		};
 		E45769BE2643A68B0063BAF1 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = E45769B52643A6740063BAF1 /* uae_cpu_2021.xcodeproj */;
+			containerPortal = E45769B52643A6740063BAF1 /* uae_cpu_2026.xcodeproj */;
 			proxyType = 1;
 			remoteGlobalIDString = E41D7AA02642C004005E8093;
 			remoteInfo = uae_cpu_arm64;
@@ -316,7 +316,7 @@
 		E416BEEC2410AE0000751E6D /* etherhelpertool */ = {isa = PBXFileReference; lastKnownFileType = text; path = etherhelpertool; sourceTree = BUILT_PRODUCTS_DIR; };
 		E447066C25D8FCB400EA2C14 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		E45769A82643A65B0063BAF1 /* uae_cpu.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = uae_cpu.xcodeproj; sourceTree = "<group>"; };
-		E45769B52643A6740063BAF1 /* uae_cpu_2021.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = uae_cpu_2021.xcodeproj; sourceTree = "<group>"; };
+		E45769B52643A6740063BAF1 /* uae_cpu_2026.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = uae_cpu_2026.xcodeproj; sourceTree = "<group>"; };
 		E490334D20D3A5890012DD5F /* clip_macosx64.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = clip_macosx64.mm; sourceTree = "<group>"; };
 		E4BF7BD32EAF173A002F2E3A /* serial_unix.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = serial_unix.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -412,7 +412,7 @@
 			isa = PBXGroup;
 			children = (
 				E45769A82643A65B0063BAF1 /* uae_cpu.xcodeproj */,
-				E45769B52643A6740063BAF1 /* uae_cpu_2021.xcodeproj */,
+				E45769B52643A6740063BAF1 /* uae_cpu_2026.xcodeproj */,
 				E4150D1320D559800077C51A /* SDL2.framework */,
 				7539E1E41F23B25E006B2DF2 /* src */,
 				753252FF1F535E5D0024025B /* generated src */,
@@ -722,7 +722,7 @@
 				},
 				{
 					ProductGroup = E45769B62643A6740063BAF1 /* Products */;
-					ProjectRef = E45769B52643A6740063BAF1 /* uae_cpu_2021.xcodeproj */;
+					ProjectRef = E45769B52643A6740063BAF1 /* uae_cpu_2026.xcodeproj */;
 				},
 			);
 			projectRoot = "";
@@ -1037,7 +1037,7 @@
 					/Library/Frameworks/SDL2.framework/Headers,
 					../MacOSX,
 					../include,
-					../uae_cpu_2021,
+					../uae_cpu_2026,
 					../Unix,
 					../slirp,
 				);
@@ -1122,7 +1122,7 @@
 					/Library/Frameworks/SDL2.framework/Headers,
 					../MacOSX,
 					../include,
-					../uae_cpu_2021,
+					../uae_cpu_2026,
 					../Unix,
 					../slirp,
 				);

@@ -58,11 +58,11 @@ Notes:
   - `autoresearch.jitinline` sets `jitinline=true` in prefs.
 
 ## Files in Scope
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_support.cpp`
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_support_arm.cpp`
-- `BasiliskII/src/uae_cpu_2021/compiler/codegen_arm64.cpp`
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_arm.h`
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_legacy_arm64_compat.cpp`
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu_support.cpp`
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu_support_arm.cpp`
+- `BasiliskII/src/uae_cpu_2026/compiler/codegen_arm64.cpp`
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu_arm.h`
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu_legacy_arm64_compat.cpp`
 - `autoresearch.sh`
 - `autoresearch.md`
 - `autoresearch.ideas.md`

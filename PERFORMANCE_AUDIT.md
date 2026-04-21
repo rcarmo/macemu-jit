@@ -473,9 +473,9 @@ Sorted by estimated impact on Raspberry Pi performance:
 |------|--------|
 | `BasiliskII/src/Unix/sysdeps.h` | ARM byte-swap + `CPU_CAN_ACCESS_UNALIGNED` |
 | `BasiliskII/src/Unix/configure.ac` | ARM/AArch64 CPU detection, optimization defines, `-O3`, `-flto=auto`, `-fno-rtti` |
-| `BasiliskII/src/uae_cpu_2021/m68k.h` | ~200 lines aarch64 flag assembly |
-| `BasiliskII/src/uae_cpu_2021/spcflags.h` | Atomic `SPCFLAGS_SET`/`SPCFLAGS_CLEAR` |
-| `BasiliskII/src/uae_cpu_2021/newcpu.cpp` | Re-enabled `SleepAndWait()` for STOP |
+| `BasiliskII/src/uae_cpu_2026/m68k.h` | ~200 lines aarch64 flag assembly |
+| `BasiliskII/src/uae_cpu_2026/spcflags.h` | Atomic `SPCFLAGS_SET`/`SPCFLAGS_CLEAR` |
+| `BasiliskII/src/uae_cpu_2026/newcpu.cpp` | Re-enabled `SleepAndWait()` for STOP |
 | `BasiliskII/src/SDL/video_sdl2.cpp` | memcmp guard on double-buffer memcpy; removed empty-rect VNC call |
 | `BasiliskII/src/SDL/vnc_server.cpp` | Background thread, scanline snapshot, fast-path ARGB conversion |
 | `BasiliskII/src/SDL/vnc_server.h` | Added `VNCServerProcessEvents` declaration |

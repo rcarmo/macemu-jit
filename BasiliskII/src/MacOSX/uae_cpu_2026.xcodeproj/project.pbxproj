@@ -40,31 +40,31 @@
 
 /* Begin PBXFileReference section */
 		E41D7AA12642C004005E8093 /* libuae_cpu_arm64.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libuae_cpu_arm64.a; sourceTree = BUILT_PRODUCTS_DIR; };
-		E41D7AA82642C070005E8093 /* basilisk_glue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = basilisk_glue.cpp; path = ../uae_cpu_2021/basilisk_glue.cpp; sourceTree = "<group>"; };
-		E41D7AAC2642C07C005E8093 /* cpu_emulation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = cpu_emulation.h; path = ../uae_cpu_2021/cpu_emulation.h; sourceTree = "<group>"; };
-		E41D7AAD2642C07C005E8093 /* cpummu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = cpummu.h; path = ../uae_cpu_2021/cpummu.h; sourceTree = "<group>"; };
-		E41D7AB12642C087005E8093 /* m68k.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = m68k.h; path = ../uae_cpu_2021/m68k.h; sourceTree = "<group>"; };
-		E41D7AB22642C087005E8093 /* memory.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = memory.h; path = ../uae_cpu_2021/memory.h; sourceTree = "<group>"; };
-		E41D7AB32642C087005E8093 /* newcpu.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = newcpu.cpp; path = ../uae_cpu_2021/newcpu.cpp; sourceTree = "<group>"; };
-		E41D7AB42642C087005E8093 /* newcpu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = newcpu.h; path = ../uae_cpu_2021/newcpu.h; sourceTree = "<group>"; };
-		E41D7AB52642C087005E8093 /* readcpu.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = readcpu.cpp; path = ../uae_cpu_2021/readcpu.cpp; sourceTree = "<group>"; };
-		E41D7AB62642C087005E8093 /* readcpu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = readcpu.h; path = ../uae_cpu_2021/readcpu.h; sourceTree = "<group>"; };
-		E41D7AB72642C087005E8093 /* registers.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = registers.h; path = ../uae_cpu_2021/registers.h; sourceTree = "<group>"; };
-		E41D7AB82642C087005E8093 /* spcflags.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = spcflags.h; path = ../uae_cpu_2021/spcflags.h; sourceTree = "<group>"; };
-		E41D7AB92642C087005E8093 /* table68k */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = table68k; path = ../uae_cpu_2021/table68k; sourceTree = "<group>"; };
-		E41D7AC42642C0A4005E8093 /* core.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = core.h; path = ../uae_cpu_2021/fpu/core.h; sourceTree = "<group>"; };
-		E41D7AC52642C0A4005E8093 /* exceptions.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = exceptions.cpp; path = ../uae_cpu_2021/fpu/exceptions.cpp; sourceTree = "<group>"; };
-		E41D7AC62642C0A4005E8093 /* exceptions.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = exceptions.h; path = ../uae_cpu_2021/fpu/exceptions.h; sourceTree = "<group>"; };
-		E41D7AC72642C0A4005E8093 /* flags.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = flags.cpp; path = ../uae_cpu_2021/fpu/flags.cpp; sourceTree = "<group>"; };
-		E41D7AC82642C0A4005E8093 /* flags.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = flags.h; path = ../uae_cpu_2021/fpu/flags.h; sourceTree = "<group>"; };
-		E41D7ACB2642C0A4005E8093 /* fpu_mpfr.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = fpu_mpfr.cpp; path = ../uae_cpu_2021/fpu/fpu_mpfr.cpp; sourceTree = "<group>"; };
-		E41D7AD12642C0A4005E8093 /* fpu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = fpu.h; path = ../uae_cpu_2021/fpu/fpu.h; sourceTree = "<group>"; };
-		E41D7AD22642C0A4005E8093 /* impl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = impl.h; path = ../uae_cpu_2021/fpu/impl.h; sourceTree = "<group>"; };
-		E41D7AD32642C0A4005E8093 /* mathlib.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = mathlib.cpp; path = ../uae_cpu_2021/fpu/mathlib.cpp; sourceTree = "<group>"; };
-		E41D7AD42642C0A4005E8093 /* mathlib.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mathlib.h; path = ../uae_cpu_2021/fpu/mathlib.h; sourceTree = "<group>"; };
-		E41D7AD52642C0A4005E8093 /* rounding.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = rounding.cpp; path = ../uae_cpu_2021/fpu/rounding.cpp; sourceTree = "<group>"; };
-		E41D7AD62642C0A4005E8093 /* rounding.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = rounding.h; path = ../uae_cpu_2021/fpu/rounding.h; sourceTree = "<group>"; };
-		E41D7AD72642C0A4005E8093 /* types.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = types.h; path = ../uae_cpu_2021/fpu/types.h; sourceTree = "<group>"; };
+		E41D7AA82642C070005E8093 /* basilisk_glue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = basilisk_glue.cpp; path = ../uae_cpu_2026/basilisk_glue.cpp; sourceTree = "<group>"; };
+		E41D7AAC2642C07C005E8093 /* cpu_emulation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = cpu_emulation.h; path = ../uae_cpu_2026/cpu_emulation.h; sourceTree = "<group>"; };
+		E41D7AAD2642C07C005E8093 /* cpummu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = cpummu.h; path = ../uae_cpu_2026/cpummu.h; sourceTree = "<group>"; };
+		E41D7AB12642C087005E8093 /* m68k.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = m68k.h; path = ../uae_cpu_2026/m68k.h; sourceTree = "<group>"; };
+		E41D7AB22642C087005E8093 /* memory.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = memory.h; path = ../uae_cpu_2026/memory.h; sourceTree = "<group>"; };
+		E41D7AB32642C087005E8093 /* newcpu.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = newcpu.cpp; path = ../uae_cpu_2026/newcpu.cpp; sourceTree = "<group>"; };
+		E41D7AB42642C087005E8093 /* newcpu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = newcpu.h; path = ../uae_cpu_2026/newcpu.h; sourceTree = "<group>"; };
+		E41D7AB52642C087005E8093 /* readcpu.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = readcpu.cpp; path = ../uae_cpu_2026/readcpu.cpp; sourceTree = "<group>"; };
+		E41D7AB62642C087005E8093 /* readcpu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = readcpu.h; path = ../uae_cpu_2026/readcpu.h; sourceTree = "<group>"; };
+		E41D7AB72642C087005E8093 /* registers.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = registers.h; path = ../uae_cpu_2026/registers.h; sourceTree = "<group>"; };
+		E41D7AB82642C087005E8093 /* spcflags.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = spcflags.h; path = ../uae_cpu_2026/spcflags.h; sourceTree = "<group>"; };
+		E41D7AB92642C087005E8093 /* table68k */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = table68k; path = ../uae_cpu_2026/table68k; sourceTree = "<group>"; };
+		E41D7AC42642C0A4005E8093 /* core.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = core.h; path = ../uae_cpu_2026/fpu/core.h; sourceTree = "<group>"; };
+		E41D7AC52642C0A4005E8093 /* exceptions.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = exceptions.cpp; path = ../uae_cpu_2026/fpu/exceptions.cpp; sourceTree = "<group>"; };
+		E41D7AC62642C0A4005E8093 /* exceptions.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = exceptions.h; path = ../uae_cpu_2026/fpu/exceptions.h; sourceTree = "<group>"; };
+		E41D7AC72642C0A4005E8093 /* flags.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = flags.cpp; path = ../uae_cpu_2026/fpu/flags.cpp; sourceTree = "<group>"; };
+		E41D7AC82642C0A4005E8093 /* flags.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = flags.h; path = ../uae_cpu_2026/fpu/flags.h; sourceTree = "<group>"; };
+		E41D7ACB2642C0A4005E8093 /* fpu_mpfr.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = fpu_mpfr.cpp; path = ../uae_cpu_2026/fpu/fpu_mpfr.cpp; sourceTree = "<group>"; };
+		E41D7AD12642C0A4005E8093 /* fpu.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = fpu.h; path = ../uae_cpu_2026/fpu/fpu.h; sourceTree = "<group>"; };
+		E41D7AD22642C0A4005E8093 /* impl.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = impl.h; path = ../uae_cpu_2026/fpu/impl.h; sourceTree = "<group>"; };
+		E41D7AD32642C0A4005E8093 /* mathlib.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = mathlib.cpp; path = ../uae_cpu_2026/fpu/mathlib.cpp; sourceTree = "<group>"; };
+		E41D7AD42642C0A4005E8093 /* mathlib.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = mathlib.h; path = ../uae_cpu_2026/fpu/mathlib.h; sourceTree = "<group>"; };
+		E41D7AD52642C0A4005E8093 /* rounding.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = rounding.cpp; path = ../uae_cpu_2026/fpu/rounding.cpp; sourceTree = "<group>"; };
+		E41D7AD62642C0A4005E8093 /* rounding.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = rounding.h; path = ../uae_cpu_2026/fpu/rounding.h; sourceTree = "<group>"; };
+		E41D7AD72642C0A4005E8093 /* types.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = types.h; path = ../uae_cpu_2026/fpu/types.h; sourceTree = "<group>"; };
 		E4FC274C2642C45E00C64E21 /* cpufunctbl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = cpufunctbl.cpp; path = gencpu_output_2021/cpufunctbl.cpp; sourceTree = BUILT_PRODUCTS_DIR; };
 		E4FC274D2642C45E00C64E21 /* cpuemu.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = cpuemu.cpp; path = gencpu_output_2021/cpuemu.cpp; sourceTree = BUILT_PRODUCTS_DIR; };
 		E4FC274E2642C45E00C64E21 /* cpustbl.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = cpustbl.cpp; path = gencpu_output_2021/cpustbl.cpp; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -188,7 +188,7 @@
 			dependencies = (
 			);
 			name = uae_cpu_arm64;
-			productName = uae_cpu_2021;
+			productName = uae_cpu_2026;
 			productReference = E41D7AA12642C004005E8093 /* libuae_cpu_arm64.a */;
 			productType = "com.apple.product-type.library.static";
 		};
@@ -206,7 +206,7 @@
 					};
 				};
 			};
-			buildConfigurationList = E41D7A9C2642C004005E8093 /* Build configuration list for PBXProject "uae_cpu_2021" */;
+			buildConfigurationList = E41D7A9C2642C004005E8093 /* Build configuration list for PBXProject "uae_cpu_2026" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = English;
 			hasScannedForEncodings = 0;
@@ -373,7 +373,7 @@
 					../CrossPlatform,
 					../include,
 					../MacOSX,
-					../uae_cpu_2021,
+					../uae_cpu_2026,
 					../Unix,
 				);
 				OTHER_CFLAGS = "-fwrapv";
@@ -393,7 +393,7 @@
 					../CrossPlatform,
 					../include,
 					../MacOSX,
-					../uae_cpu_2021,
+					../uae_cpu_2026,
 					../Unix,
 				);
 				OTHER_CFLAGS = "-fwrapv";
@@ -405,7 +405,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		E41D7A9C2642C004005E8093 /* Build configuration list for PBXProject "uae_cpu_2021" */ = {
+		E41D7A9C2642C004005E8093 /* Build configuration list for PBXProject "uae_cpu_2026" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				E41D7AA32642C004005E8093 /* Debug */,

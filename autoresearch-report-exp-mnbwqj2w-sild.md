@@ -58,11 +58,11 @@ Goal: score=100 = boot + 120s uptime + 0 segfaults + native JIT blocks compiled.
 `./autoresearch.sh`
 
 ## Files in Scope
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_support_arm.cpp` — compile_block, prepare_block, get_handler, get_blockinfo_addr_new, invalidate_block, create_popalls, build_comp
-- `BasiliskII/src/uae_cpu_2021/compiler/codegen_arm64.cpp` — endblock dispatch codegen (compemu_raw_endblock_pc_isconst, compemu_raw_endblock_pc_inreg, compemu_raw_jmp_pc_tag)
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu_midfunc_arm64.cpp` — native opcode implementations, write_jmp_target
-- `BasiliskII/src/uae_cpu_2021/compemu_prefs.cpp` — cpu_compatible setting
-- `BasiliskII/src/uae_cpu_2021/compiler/compemu.h` — blockinfo struct, cacheline definitions
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu_support_arm.cpp` — compile_block, prepare_block, get_handler, get_blockinfo_addr_new, invalidate_block, create_popalls, build_comp
+- `BasiliskII/src/uae_cpu_2026/compiler/codegen_arm64.cpp` — endblock dispatch codegen (compemu_raw_endblock_pc_isconst, compemu_raw_endblock_pc_inreg, compemu_raw_jmp_pc_tag)
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu_midfunc_arm64.cpp` — native opcode implementations, write_jmp_target
+- `BasiliskII/src/uae_cpu_2026/compemu_prefs.cpp` — cpu_compatible setting
+- `BasiliskII/src/uae_cpu_2026/compiler/compemu.h` — blockinfo struct, cacheline definitions
 - `autoresearch.sh` — benchmark harness
 
 ## Off Limits

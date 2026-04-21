@@ -6,7 +6,7 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
 ## Current status
 - `master` has x86/x86_64 JIT enabled.
 - ARM/AArch64 builds are currently non-JIT by policy/configuration.
-- `uae_cpu_2021/compiler/compemu_support.cpp` already contains ARM code paths, but key ARM backend files were missing from this tree.
+- `uae_cpu_2026/compiler/compemu_support.cpp` already contains ARM code paths, but key ARM backend files were missing from this tree.
 - Experimental configure toggles now exist in-tree:
   - `--enable-arm-jit-experimental`
   - `--enable-aarch64-jit-experimental`
@@ -37,7 +37,7 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
   - This indicates a **generator/backend API mismatch** (current generator vs
     imported ARM backend design), now the primary blocker.
   - Added interim compatibility fixes for earlier build breaks:
-    - `uae_cpu_2021/noflags.h` added (copied/adapted for noflags build path)
+    - `uae_cpu_2026/noflags.h` added (copied/adapted for noflags build path)
     - AArch64 flag asm macros in `m68k.h` adjusted to avoid non-lvalue asm
       constraints in generated opcode code
     - JIT defines adjusted so `JIT` is explicitly on when `USE_JIT` is enabled
@@ -53,7 +53,7 @@ Enable BasiliskII 68k JIT on ARM hosts in `macemu`, prioritizing ARM64 while kee
 
 ### High-confidence direct borrow (already started)
 Import backend support files from Amiberry’s `src/jit/arm/` into:
-`BasiliskII/src/uae_cpu_2021/compiler/`
+`BasiliskII/src/uae_cpu_2026/compiler/`
 
 Imported files:
 - `codegen_arm.cpp`

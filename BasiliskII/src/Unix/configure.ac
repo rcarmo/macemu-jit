@@ -1787,7 +1787,7 @@ fi
 case "$WANT_UAE_CORE" in
   auto)
     if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
-      UAE_PATH="../uae_cpu_2021"
+      UAE_PATH="../uae_cpu_2026"
     else
       UAE_PATH="../uae_cpu"
     fi
@@ -1796,7 +1796,7 @@ case "$WANT_UAE_CORE" in
     UAE_PATH="../uae_cpu"
     ;;
   2021)
-    UAE_PATH="../uae_cpu_2021"
+    UAE_PATH="../uae_cpu_2026"
     ;;
   *)
     AC_MSG_ERROR([--with-uae-core takes one of: auto, legacy, 2021])
@@ -1993,7 +1993,7 @@ for fpe in $FPE_CORE_TEST_ORDER; do
   ieee)
     case $ac_cv_c_float_format in
     IEEE*)
-      if [[ "$UAE_PATH" = "../uae_cpu_2021" ]]; then
+      if [[ "$UAE_PATH" = "../uae_cpu_2026" ]]; then
         if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
           FPE_CORE="IEEE fpu core (MPFR)"
           DEFINES="$DEFINES -DFPU_MPFR"
@@ -2053,7 +2053,7 @@ dnl UAE CPU sources for all non-m68k-native architectures.
 if [[ "x$WANT_NATIVE_M68K" = "xno" ]]; then
   CPUINCLUDES="-I$UAE_PATH"
   CPUSRCS="$UAE_PATH/basilisk_glue.cpp $UAE_PATH/memory.cpp $UAE_PATH/newcpu.cpp $UAE_PATH/readcpu.cpp $FPUSRCS cpustbl.cpp cpudefs.cpp $CPUSRCS $JITSRCS"
-  if [[ "$UAE_PATH" = "../uae_cpu_2021" ]]; then
+  if [[ "$UAE_PATH" = "../uae_cpu_2026" ]]; then
     if [[ "$target_cpu" = "arm" -o "$target_cpu" = "aarch64" ]]; then
       CPUSRCS="$CPUSRCS cpufunctbl.cpp"
 	  DEFINES="$DEFINES -DUPDATE_UAE"

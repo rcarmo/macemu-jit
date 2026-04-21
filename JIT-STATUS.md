@@ -78,7 +78,7 @@ opc 29, opc 56, opc 60, opc 61, opc 63 (some FP), XO31:538
 **JIT optlev=2:** ⚠️ SEGVs during early init from block handoff bug
 **JIT harness:** 26/28 vectors pass (2 SR-only flag mismatches)
 
-See `BasiliskII/src/uae_cpu_2021/compiler/` for the 68K → AArch64 JIT.
+See `BasiliskII/src/uae_cpu_2026/compiler/` for the 68K → AArch64 JIT.
 
 Full 68K opcode test coverage documented below.
 
