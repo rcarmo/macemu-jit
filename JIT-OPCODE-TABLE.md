@@ -1,7 +1,6 @@
 # M68K JIT Opcode Coverage — ARM64
 
-Generated: 2026-04-21T10:52:47Z
-
+Generated: 2026-04-21T15:43:04Z
 
 | Mnemonic | Variants | Inline | Mixed | C Helper | Interp | Status |
 |----------|----------|--------|-------|----------|--------|--------|
@@ -35,9 +34,9 @@ Generated: 2026-04-21T10:52:47Z
 | EORSR        |        2 |      2 |     0 |        0 |      0 | ✅ inline |
 | EXG          |        3 |      3 |     0 |        0 |      0 | ✅ inline |
 | EXT          |        3 |      3 |     0 |        0 |      0 | ✅ inline |
-| FBcc         |        2 |      0 |     0 |        0 |      2 | 🐢 interpreter |
-| FPP          |       12 |      0 |     0 |        0 |     12 | 🐢 interpreter |
-| FScc         |        8 |      0 |     0 |        0 |      8 | 🐢 interpreter |
+| FBcc         |        2 |      2 |     0 |        0 |      0 | ✅ inline |
+| FPP          |       12 |     12 |     0 |        0 |      0 | ✅ inline |
+| FScc         |        8 |      8 |     0 |        0 |      0 | ✅ inline |
 | JMP          |        7 |      7 |     0 |        0 |      0 | ✅ inline |
 | JSR          |        7 |      7 |     0 |        0 |      0 | ✅ inline |
 | LEA          |        7 |      7 |     0 |        0 |      0 | ✅ inline |
@@ -91,20 +90,18 @@ Generated: 2026-04-21T10:52:47Z
 | TRAPV        |        1 |      1 |     0 |        0 |      0 | ✅ inline |
 | TST          |       35 |     35 |     0 |        0 |      0 | ✅ inline |
 | UNLK         |        1 |      1 |     0 |        0 |      0 | ✅ inline |
-| **TOTAL** | **1605** | **1581** | | **0** | **24** | |
+| **TOTAL** | **1605** | **1603** | | **0** | **2** | |
 
 ## Summary
 
-- **Inline ARM64**: 1581/1605 variants (98.5%) — 81 mnemonics
-- **Mixed inline + C helper**: 0 mnemonics — 
-- **C helper only**: 0 variants — none
-- **Interpreter fallback**: 24 variants — FBcc, FPP, FScc
-- **No-op (correct)**: NOP, RESET
+- **Compiled**: 1603/1605 variants (99.9%)
+- **Inline ARM64**: 1603 variants
+- **C helper**: 0 variants
+- **Interpreter**: 2 variants (NOP + RESET — correct empty bodies)
 
 ### Status key
 
-- ✅ **inline**: All variants emit ARM64 instructions directly into compiled blocks
-- ⚡ **mixed**: Some variants inline, others use flush+call_helper for complex cases
-- 🔧 **C helper**: All variants use flush+call_helper (native speed, function call overhead)
-- 🐢 **interpreter**: Falls back to interpretive execution (block split)
-- ⬜ **no-op**: Correct empty function body (NOP, RESET)
+- ✅ **inline** — ARM64 instructions emitted directly into compiled blocks
+- ⚡ **mixed** — inline for common paths, conditional call_helper for edge cases
+- 🔧 **C helper** — flush + call to C function (native speed, call overhead)
+- ⬜ **no-op** — correct empty function body
