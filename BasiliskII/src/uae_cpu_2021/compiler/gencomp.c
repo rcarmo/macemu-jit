@@ -3156,11 +3156,39 @@ gen_opcode (unsigned int opcode)
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
 	genamode (curi->dmode, "dstreg", curi->size, "extra", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
-	comprintf("\tmov_l_mr((uintptr)&regs.jit_exception, extra);\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_divl);\n");
+	comprintf("\tint dq = (extra >> 12) & 7;\n");
+	comprintf("\tint dr = extra & 7;\n");
+	comprintf("\tif (extra & 0x0400) {\n");
+	/* 64-bit dividend: keep as call_helper (no mid-layer support) */
+	comprintf("\t  dont_care_flags();\n");
+	comprintf("\t  mov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
+	comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, extra);\n");
+	comprintf("\t  flush(1);\n");
+	comprintf("\t  call_helper((uintptr)jit_op_divl);\n");
+	comprintf("\t} else {\n");
+	/* 32-bit dividend: use inline ARM64 mid-layer */
+	comprintf("\t  if (extra & 0x0800) {\n"); /* signed */
+	if (noflags) {
+	    comprintf("\t    jnf_DIVLS32(dq, src, dr);\n");
+	} else {
+	    comprintf("\t    make_flags_live();\n");
+	    comprintf("\t    start_needflags();\n");
+	    comprintf("\t    jff_DIVLS32(dq, src, dr);\n");
+	    comprintf("\t    live_flags();\n");
+	    comprintf("\t    end_needflags();\n");
+	}
+	comprintf("\t  } else {\n"); /* unsigned */
+	if (noflags) {
+	    comprintf("\t    jnf_DIVLU32(dq, src, dr);\n");
+	} else {
+	    comprintf("\t    make_flags_live();\n");
+	    comprintf("\t    start_needflags();\n");
+	    comprintf("\t    jff_DIVLU32(dq, src, dr);\n");
+	    comprintf("\t    live_flags();\n");
+	    comprintf("\t    end_needflags();\n");
+	}
+	comprintf("\t  }\n");
+	comprintf("\t}\n");
 #else
 	failure;
 #endif
@@ -3172,16 +3200,59 @@ gen_opcode (unsigned int opcode)
 #endif
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
 	{
-	    /* Native: handle all MULL variants via helper */
+	    /* Native inline ARM64 MULL with full flag support */
 	    comprintf("\tuae_u16 extra=%s;\n", gen_nextiword());
 	    genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH, GENA_MOVEM_DO_INC);
-	    comprintf("\tdont_care_flags();\n");
-	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], src);\n");
-	    comprintf("\t{int enc=scratchie++;\n");
-	    comprintf("\t mov_l_ri(enc, extra);\n");
-	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception, enc);}\n");
-	    comprintf("\tflush(1);\n");
-	    comprintf("\tcall_helper((uintptr)jit_op_mull);\n");
+	    comprintf("\tint dl = (extra >> 12) & 7;\n");
+	    comprintf("\tint dh = extra & 7;\n");
+	    comprintf("\tif (extra & 0x0400) {\n");  /* 64-bit result */
+	    comprintf("\t  if (extra & 0x0800) {\n"); /* signed */
+	    if (noflags) {
+		comprintf("\t    jnf_MULS64(dl, src);\n");
+	    } else {
+		comprintf("\t    make_flags_live();\n");
+		comprintf("\t    start_needflags();\n");
+		comprintf("\t    jff_MULS64(dl, src);\n");
+		comprintf("\t    live_flags();\n");
+		comprintf("\t    end_needflags();\n");
+	    }
+	    comprintf("\t    /* src now has high 32 bits, dl has low 32 */\n");
+	    comprintf("\t    mov_l_rr(dh, src);\n");
+	    comprintf("\t  } else {\n"); /* unsigned */
+	    if (noflags) {
+		comprintf("\t    jnf_MULU64(dl, src);\n");
+	    } else {
+		comprintf("\t    make_flags_live();\n");
+		comprintf("\t    start_needflags();\n");
+		comprintf("\t    jff_MULU64(dl, src);\n");
+		comprintf("\t    live_flags();\n");
+		comprintf("\t    end_needflags();\n");
+	    }
+	    comprintf("\t    mov_l_rr(dh, src);\n");
+	    comprintf("\t  }\n");
+	    comprintf("\t} else {\n");  /* 32-bit result */
+	    comprintf("\t  if (extra & 0x0800) {\n"); /* signed */
+	    if (noflags) {
+		comprintf("\t    jnf_MULS32(dl, src);\n");
+	    } else {
+		comprintf("\t    make_flags_live();\n");
+		comprintf("\t    start_needflags();\n");
+		comprintf("\t    jff_MULS32(dl, src);\n");
+		comprintf("\t    live_flags();\n");
+		comprintf("\t    end_needflags();\n");
+	    }
+	    comprintf("\t  } else {\n"); /* unsigned */
+	    if (noflags) {
+		comprintf("\t    jnf_MULU32(dl, src);\n");
+	    } else {
+		comprintf("\t    make_flags_live();\n");
+		comprintf("\t    start_needflags();\n");
+		comprintf("\t    jff_MULU32(dl, src);\n");
+		comprintf("\t    live_flags();\n");
+		comprintf("\t    end_needflags();\n");
+	    }
+	    comprintf("\t  }\n");
+	    comprintf("\t}\n");
 	    break;
 	}
 #endif
