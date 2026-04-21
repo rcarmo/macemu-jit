@@ -1612,12 +1612,17 @@ gen_opcode (unsigned int opcode)
 
      case i_SBCD:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc,(dstreg&7)|((srcreg&7)<<3)|(%d<<6));\n", curi->smode == Apdi ? 1 : 0);
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception,enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_sbcd);\n");
+	if (curi->smode == Apdi) {
+	    comprintf("\tdont_care_flags();\n");
+	    comprintf("\t{int enc=scratchie++;\n");
+	    comprintf("\t mov_l_ri(enc,(dstreg&7)|((srcreg&7)<<3)|(1<<6));\n");
+	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception,enc);}\n");
+	    comprintf("\tflush(1);\n");
+	    comprintf("\tcall_helper((uintptr)jit_op_sbcd);\n");
+	} else {
+	    comprintf("\tdont_care_flags();\n");
+	    comprintf("\tjnf_SBCD_b(dstreg, srcreg);\n");
+	}
 #else
 	failure;
 #endif
@@ -1665,12 +1670,19 @@ gen_opcode (unsigned int opcode)
 
      case i_ABCD:
 #if defined(CPU_aarch64) || defined(CPU_AARCH64)
-	comprintf("\tdont_care_flags();\n");
-	comprintf("\t{int enc=scratchie++;\n");
-	comprintf("\t mov_l_ri(enc,(dstreg&7)|((srcreg&7)<<3)|(%d<<6));\n", curi->smode == Apdi ? 1 : 0);
-	comprintf("\t mov_l_mr((uintptr)&regs.jit_exception,enc);}\n");
-	comprintf("\tflush(1);\n");
-	comprintf("\tcall_helper((uintptr)jit_op_abcd);\n");
+	if (curi->smode == Apdi) {
+	    /* -(An),-(An) mode: keep call_helper (needs memory access) */
+	    comprintf("\tdont_care_flags();\n");
+	    comprintf("\t{int enc=scratchie++;\n");
+	    comprintf("\t mov_l_ri(enc,(dstreg&7)|((srcreg&7)<<3)|(1<<6));\n");
+	    comprintf("\t mov_l_mr((uintptr)&regs.jit_exception,enc);}\n");
+	    comprintf("\tflush(1);\n");
+	    comprintf("\tcall_helper((uintptr)jit_op_abcd);\n");
+	} else {
+	    /* Dn,Dn mode: native inline BCD add */
+	    comprintf("\tdont_care_flags();\n");
+	    comprintf("\tjnf_ABCD_b(dstreg, srcreg);\n");
+	}
 #else
 	failure;
 #endif
@@ -1706,23 +1718,21 @@ gen_opcode (unsigned int opcode)
 	genamode (curi->smode, "srcreg", curi->size, "src", GENA_GETV_FETCH_ALIGN, GENA_MOVEM_DO_INC);
 	comprintf("\tdont_care_flags();\n");
 	if (curi->smode == Dreg) {
-	    comprintf("\t{\n");
-	    comprintf("\t  int enc = scratchie++;\n");
-	    comprintf("\t  mov_l_ri(enc, srcreg & 7);\n");
-	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
-	    comprintf("\t}\n");
+	    /* Dn mode: native inline BCD negate */
+	    comprintf("\tjnf_NBCD_b(srcreg);\n");
 	} else {
+	    /* Memory mode: keep call_helper */
 	    comprintf("\tmov_l_mr((uintptr)&regs.scratchregs[0], srca);\n");
 	    comprintf("\t{\n");
 	    comprintf("\t  int enc = scratchie++;\n");
 	    comprintf("\t  mov_l_ri(enc, 8);\n");
 	    comprintf("\t  mov_l_mr((uintptr)&regs.jit_exception, enc);\n");
 	    comprintf("\t}\n");
-	}
-	comprintf("\tflush(1);\n");
-	{
-	    extern void jit_op_nbcd(void);
-	    comprintf("\tcall_helper((uintptr)jit_op_nbcd);\n");
+	    comprintf("\tflush(1);\n");
+	    {
+		extern void jit_op_nbcd(void);
+		comprintf("\tcall_helper((uintptr)jit_op_nbcd);\n");
+	    }
 	}
 #else
 	failure;

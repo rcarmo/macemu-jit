@@ -7624,6 +7624,149 @@ MIDFUNC(2,jff_SUBX_l,(RW4 d, RR4 s))
 MENDFUNC(2,jff_SUBX_l,(RW4 d, RR4 s))
 
 /*
+ * ABCD
+ * Binary Coded Decimal Add with Extend
+ * dst = dst + src + X (BCD)
+ * Flags: X=C=decimal carry, Z only cleared (never set)
+ */
+MIDFUNC(2,jnf_ABCD_b,(RW1 d, RR1 s))
+{
+	int x = readreg(FLAGX);
+	INIT_REGS_b(d, s);
+
+	// lo = (d & 0xF) + (s & 0xF) + X
+	UBFX_wwii(REG_WORK1, d, 0, 4);
+	UBFX_wwii(REG_WORK2, s, 0, 4);
+	ADD_www(REG_WORK1, REG_WORK1, REG_WORK2);
+	ADD_www(REG_WORK1, REG_WORK1, x);    // lo in WORK1
+
+	// if (lo > 9) { lo -= 10; carry = 1; } else { carry = 0; }
+	MOV_wi(REG_WORK3, 0);                 // carry = 0
+	CMP_wi(REG_WORK1, 9);
+	BLE_i(2);                              // skip if lo <= 9
+	SUB_wwi(REG_WORK1, REG_WORK1, 10);
+	MOV_wi(REG_WORK3, 1);                 // carry = 1
+
+	// hi = (d >> 4 & 0xF) + (s >> 4 & 0xF) + carry
+	UBFX_wwii(REG_WORK2, d, 4, 4);
+	UBFX_wwii(REG_WORK4, s, 4, 4);
+	ADD_www(REG_WORK2, REG_WORK2, REG_WORK4);
+	ADD_www(REG_WORK2, REG_WORK2, REG_WORK3); // hi in WORK2
+
+	// if (hi > 9) { hi -= 10; carry = 1; } else { carry = 0; }
+	MOV_wi(REG_WORK3, 0);
+	CMP_wi(REG_WORK2, 9);
+	BLE_i(2);
+	SUB_wwi(REG_WORK2, REG_WORK2, 10);
+	MOV_wi(REG_WORK3, 1);
+
+	// result = (hi << 4) | (lo & 0xF)
+	UBFX_wwii(REG_WORK1, REG_WORK1, 0, 4);
+	ORR_wwwLSLi(REG_WORK1, REG_WORK1, REG_WORK2, 4);
+	BFI_wwii(d, REG_WORK1, 0, 8);
+
+	// FLAGX = carry
+	int xr = writereg(FLAGX);
+	MOV_ww(xr, REG_WORK3);
+	unlock2(xr);
+
+	EXIT_REGS(d, s);
+	unlock2(x);
+}
+MENDFUNC(2,jnf_ABCD_b,(RW1 d, RR1 s))
+
+MIDFUNC(2,jnf_SBCD_b,(RW1 d, RR1 s))
+{
+	int x = readreg(FLAGX);
+	INIT_REGS_b(d, s);
+
+	// lo = (d & 0xF) - (s & 0xF) - X
+	UBFX_wwii(REG_WORK1, d, 0, 4);
+	UBFX_wwii(REG_WORK2, s, 0, 4);
+	SUB_www(REG_WORK1, REG_WORK1, REG_WORK2);
+	SUB_www(REG_WORK1, REG_WORK1, x);    // lo in WORK1 (signed)
+
+	// if (lo < 0) { lo += 10; borrow = 1; } else { borrow = 0; }
+	MOV_wi(REG_WORK3, 0);
+	CMP_wi(REG_WORK1, 0);
+	BGE_i(2);
+	ADD_wwi(REG_WORK1, REG_WORK1, 10);
+	MOV_wi(REG_WORK3, 1);
+
+	// hi = (d >> 4 & 0xF) - (s >> 4 & 0xF) - borrow
+	UBFX_wwii(REG_WORK2, d, 4, 4);
+	UBFX_wwii(REG_WORK4, s, 4, 4);
+	SUB_www(REG_WORK2, REG_WORK2, REG_WORK4);
+	SUB_www(REG_WORK2, REG_WORK2, REG_WORK3);
+
+	// if (hi < 0) { hi += 10; borrow = 1; } else { borrow = 0; }
+	MOV_wi(REG_WORK3, 0);
+	CMP_wi(REG_WORK2, 0);
+	BGE_i(2);
+	ADD_wwi(REG_WORK2, REG_WORK2, 10);
+	MOV_wi(REG_WORK3, 1);
+
+	// result = (hi << 4) | (lo & 0xF)
+	UBFX_wwii(REG_WORK1, REG_WORK1, 0, 4);
+	ORR_wwwLSLi(REG_WORK1, REG_WORK1, REG_WORK2, 4);
+	BFI_wwii(d, REG_WORK1, 0, 8);
+
+	// FLAGX = borrow
+	int xr = writereg(FLAGX);
+	MOV_ww(xr, REG_WORK3);
+	unlock2(xr);
+
+	EXIT_REGS(d, s);
+	unlock2(x);
+}
+MENDFUNC(2,jnf_SBCD_b,(RW1 d, RR1 s))
+
+MIDFUNC(1,jnf_NBCD_b,(RW1 d))
+{
+	int x = readreg(FLAGX);
+	d = rmw(d);
+
+	// lo = 0 - (d & 0xF) - X
+	UBFX_wwii(REG_WORK1, d, 0, 4);
+	MOV_wi(REG_WORK2, 0);
+	SUB_www(REG_WORK1, REG_WORK2, REG_WORK1);
+	SUB_www(REG_WORK1, REG_WORK1, x);
+
+	// if (lo < 0) { lo += 10; borrow = 1; } else { borrow = 0; }
+	MOV_wi(REG_WORK3, 0);
+	CMP_wi(REG_WORK1, 0);
+	BGE_i(2);
+	ADD_wwi(REG_WORK1, REG_WORK1, 10);
+	MOV_wi(REG_WORK3, 1);
+
+	// hi = 0 - (d >> 4 & 0xF) - borrow
+	UBFX_wwii(REG_WORK2, d, 4, 4);
+	MOV_wi(REG_WORK4, 0);
+	SUB_www(REG_WORK2, REG_WORK4, REG_WORK2);
+	SUB_www(REG_WORK2, REG_WORK2, REG_WORK3);
+
+	// if (hi < 0) { hi += 10; borrow = 1; } else { borrow = 0; }
+	MOV_wi(REG_WORK3, 0);
+	CMP_wi(REG_WORK2, 0);
+	BGE_i(2);
+	ADD_wwi(REG_WORK2, REG_WORK2, 10);
+	MOV_wi(REG_WORK3, 1);
+
+	// result = (hi << 4) | (lo & 0xF)
+	UBFX_wwii(REG_WORK1, REG_WORK1, 0, 4);
+	ORR_wwwLSLi(REG_WORK1, REG_WORK1, REG_WORK2, 4);
+	BFI_wwii(d, REG_WORK1, 0, 8);
+
+	// FLAGX = borrow
+	int xr = writereg(FLAGX);
+	MOV_ww(xr, REG_WORK3);
+	unlock2(xr);
+
+	unlock2(d);
+	unlock2(x);
+}
+MENDFUNC(1,jnf_NBCD_b,(RW1 d))
+/*
  * SWAP
  * Operand Syntax: Dn
  *
