@@ -159,7 +159,8 @@ static bool reads_link_regs(uint32_t insn) {
 
 struct PPCRegs {
 	uint32_t gpr[32];        /* offset 0: 32 × 4 = 128 bytes */
-	double   fpr[32];        /* offset 128: 32 × 8 = 256 bytes */
+	uint32_t gpr_hi[32];     /* offset 128: upper 32 bits for G5 64-bit mode */
+	double   fpr[32];        /* offset 256: 32 × 8 = 256 bytes */
 	uint8_t  vr[32 * 16];    /* offset 384: 32 × 16 = 512 bytes */
 	uint32_t cr;             /* offset 896 */
 	uint8_t  xer_so;          /* offset 900 */
@@ -176,13 +177,13 @@ struct PPCRegs {
 
 /* Register field offsets — must match ppc-jit.cpp PPCR_* */
 static_assert(offsetof(PPCRegs, gpr) == 0, "GPR offset mismatch");
-static_assert(offsetof(PPCRegs, fpr) == 128, "FPR offset mismatch");
-static_assert(offsetof(PPCRegs, cr) == 896, "CR offset mismatch");
-static_assert(offsetof(PPCRegs, xer_so) == 900, "XER offset mismatch");
-static_assert(offsetof(PPCRegs, fpscr) == 912, "FPSCR offset mismatch");
-static_assert(offsetof(PPCRegs, lr) == 916, "LR offset mismatch");
-static_assert(offsetof(PPCRegs, ctr) == 920, "CTR offset mismatch");
-static_assert(offsetof(PPCRegs, pc) == 924, "PC offset mismatch");
+static_assert(offsetof(PPCRegs, fpr) == 256, "FPR offset mismatch");
+static_assert(offsetof(PPCRegs, cr) == 1024, "CR offset mismatch");
+static_assert(offsetof(PPCRegs, xer_so) == 1028, "XER offset mismatch");
+static_assert(offsetof(PPCRegs, fpscr) == 1040, "FPSCR offset mismatch");
+static_assert(offsetof(PPCRegs, lr) == 1044, "LR offset mismatch");
+static_assert(offsetof(PPCRegs, ctr) == 1048, "CTR offset mismatch");
+static_assert(offsetof(PPCRegs, pc) == 1052, "PC offset mismatch");
 
 /* Pack XER bytes into PPC 32-bit format */
 static inline uint32_t pack_xer(const PPCRegs *r) {

@@ -227,6 +227,7 @@ struct powerpc_registers
 	static void interrupt_copy(powerpc_registers &oregs, powerpc_registers const &iregs);
 	
 	uint32 gpr[32];				// General-Purpose Registers
+	uint32 gpr_hi[32];			// Upper 32 bits for 64-bit GPR mode (G5)
 	powerpc_fpr fpr[32];		// Floating-Point Registers
 	powerpc_vr vr[32];			// Vector Registers
 	powerpc_cr_register cr;		// Condition Register
