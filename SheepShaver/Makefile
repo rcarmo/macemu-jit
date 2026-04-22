@@ -64,7 +64,7 @@ ensure-xvfb:
 
 ensure-prefs:
 	@mkdir -p $(PREFS_DIR)
-	@printf 'rom $(ROM)\ndisk $(DISK)\nramsize 134217728\nscreen win/800/600\ndisplaycolordepth 8\nnosound true\nnocdrom true\nnogui true\nignoreillegal true\nvncserver true\nvncport $(VNC_PORT)\n' > $(PREFS_FILE)
+	@printf 'rom $(ROM)\ndisk $(DISK)\nramsize 134217728\nscreen win/640/480\ndisplaycolordepth 8\nnosound true\nnocdrom true\nnogui true\nignoreillegal true\nvncserver true\nvncport $(VNC_PORT)\n' > $(PREFS_FILE)
 	@if [ -f "$(BENCH_DISK)" ]; then \
 		grep -q "Benchmark" $(PREFS_FILE) || \
 		echo "disk $(BENCH_DISK)" >> $(PREFS_FILE); \
