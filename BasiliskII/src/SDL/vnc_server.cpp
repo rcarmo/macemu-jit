@@ -198,20 +198,10 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 {
 	/* VNC sends coordinates in framebuffer space (Mac logical resolution).
 	   Save original coords for ADB (Mac screen coords = VNC coords). */
-	const int mac_x = x, mac_y = y;
-
-	/* Scale for SDL events (window space may differ from logical size) */
-	SDL_Window *win = SDL_GetWindowFromID(1);
-	if (win && vnc_width > 0 && vnc_height > 0) {
-		int ww, wh;
-		SDL_GetWindowSize(win, &ww, &wh);
-		x = x * ww / vnc_width;
-		y = y * wh / vnc_height;
-	}
+	/* VNC coordinates = Mac screen coordinates.
+	   The VNC framebuffer IS the Mac framebuffer, same resolution. */
 	vnc_push_pointer_motion(x, y);
-
-	/* Direct ADB injection with ORIGINAL Mac coordinates */
-	ADBMouseMoved(mac_x, mac_y);
+	ADBMouseMoved(x, y);
 
 	const int previous = vnc_pointer_buttons;
 	vnc_pointer_buttons = button_mask;
@@ -224,7 +214,7 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 		const bool now_down = (button_mask & transitions[i]) != 0;
 		if (was_down != now_down) {
 			fprintf(stderr, "VNC-MOUSE: btn=%zu %s at (%d,%d) mask=%d->%d\n",
-				i, now_down ? "DOWN" : "UP", mac_x, mac_y, previous, button_mask);
+				i, now_down ? "DOWN" : "UP", x, y, previous, button_mask);
 			vnc_push_pointer_button(mapped[i], now_down, x, y);
 			if (now_down)
 				ADBMouseDown(adb_buttons[i]);
