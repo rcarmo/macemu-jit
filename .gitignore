@@ -39,3 +39,6 @@ project.xcworkspace/
 *.idea
 BasiliskII/src/Unix/compemu.cpp
 SheepShaver/rom-harness/rom-harness
+SheepShaver/rom-harness/rom-harness
+SheepShaver/rom-harness/*.o
+*.log
