@@ -1,27 +1,9 @@
 # SheepShaver AArch64 JIT — Master Makefile
-#
-# Targets:
-#   make build        — build SheepShaver + ROM harness
-#   make test         — run opcode harness (209 vectors) + ROM harness (10K blocks)
-#   make test-opcodes — run JIT opcode equivalence harness only
-#   make test-rom     — run ROM harness only
-#   make run          — start SheepShaver with VNC (interpreter mode)
-#   make run-jit      — start SheepShaver with VNC (JIT mode)
-#   make screenshot   — capture VNC screenshot to tmp/
-#   make kill         — kill all SheepShaver + Xvfb processes
-#   make clean        — clean build artifacts
-#
-# Prerequisites:
-#   - ROM: /workspace/tmp/rpi-basilisk-assets/ppc-roms/PowerMac-9500-OldWorld.rom
-#   - Disk: /workspace/tmp/ss-test-disk.img
-#   - Xvfb, SDL2, libvncserver-dev, gtk2
-
 SHELL       := /bin/bash
 SS_DIR      := src/Unix
 SS_BIN      := $(SS_DIR)/SheepShaver
 JIT_DIR     := src/kpx_cpu/src/cpu/jit/aarch64
 ROM_HARNESS := rom-harness/rom-harness
-JIT_TEST    := jit-test/run.sh
 
 ROM         := /workspace/tmp/rpi-basilisk-assets/ppc-roms/PowerMac-9500-OldWorld.rom
 DISK        := /workspace/tmp/ss-test-disk.img
@@ -30,26 +12,25 @@ PREFS_DIR   := /tmp/ss-desktop
 PREFS_FILE  := $(PREFS_DIR)/.sheepshaver_prefs
 VNC_PORT    := 5999
 
-# Build flags for the JIT object (compiled separately from Makefile)
 JIT_CXX     := g++
 JIT_CXXFLAGS := -g -O2 -std=c++11 -DHAVE_CONFIG_H
 JIT_INCLUDES := -I$(JIT_DIR)
 
-.PHONY: all build build-ss build-jit-obj build-rom-harness \
+.PHONY: all build build-ss build-rom-harness \
         test test-opcodes test-rom \
         run run-jit screenshot kill clean \
         ensure-xvfb ensure-prefs
-
-# ---- Build -------------------------------------------------------------------
 
 all: build
 
 build: build-ss build-rom-harness
 
-build-ss: build-jit-obj
+build-ss:
 	@echo "=== Building SheepShaver ==="
-	-@cd $(SS_DIR) && $(MAKE) -j$$(nproc) 2>&1 | tail -3
-	@# Re-link with JIT object (inner Makefile doesn't know about ppc-jit.o)
+	@cd $(SS_DIR) && $(MAKE) -j$$(nproc) 2>&1 | tail -3 || true
+	@echo "=== Compiling JIT ==="
+	@$(JIT_CXX) $(JIT_CXXFLAGS) $(JIT_INCLUDES) -c \
+		-o $(SS_DIR)/obj/ppc-jit.o $(JIT_DIR)/ppc-jit.cpp
 	@cd $(SS_DIR) && $(JIT_CXX) -o SheepShaver obj/*.o \
 		-lpthread -lm -lSDL2 \
 		-lgtk-x11-2.0 -lgdk-x11-2.0 -lpangocairo-1.0 -latk-1.0 -lcairo \
@@ -57,16 +38,9 @@ build-ss: build-jit-obj
 		-lgobject-2.0 -lglib-2.0 -lharfbuzz -lvncserver -lfontconfig -lfreetype
 	@echo "Built: $(SS_BIN)"
 
-build-jit-obj:
-	@echo "=== Compiling JIT ==="
-	$(JIT_CXX) $(JIT_CXXFLAGS) $(JIT_INCLUDES) -c \
-		-o $(SS_DIR)/obj/ppc-jit.o $(JIT_DIR)/ppc-jit.cpp
-
 build-rom-harness:
 	@echo "=== Building ROM harness ==="
-	cd rom-harness && $(MAKE)
-
-# ---- Test --------------------------------------------------------------------
+	@cd rom-harness && $(MAKE)
 
 test: test-opcodes test-rom
 	@echo ""
@@ -84,8 +58,6 @@ test-rom: build-rom-harness
 		--count=10000 --min-insns=1 --max-insns=64 2>&1 | \
 		grep "Score:\|Passed:\|Failed:\|Testable\|JIT compile\|SIGSEGV"
 
-# ---- Run ---------------------------------------------------------------------
-
 ensure-xvfb:
 	@pgrep -x Xvfb > /dev/null 2>&1 || \
 		{ Xvfb :99 -screen 0 800x600x24 & sleep 1; echo "Started Xvfb :99"; }
@@ -100,21 +72,19 @@ ensure-prefs:
 
 run: build-ss ensure-xvfb ensure-prefs kill
 	@echo "=== Starting SheepShaver (interpreter) on VNC port $(VNC_PORT) ==="
-	GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
+	@GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
 		$(SS_BIN) > /dev/null 2>/tmp/ss-stderr.log &
 	@sleep 2
-	@echo "PID: $$(pgrep -f 'SheepShaver' | head -1)"
+	@echo "PID: $$(pgrep -x SheepShaver | head -1)"
 	@echo "VNC: vnc://localhost:$(VNC_PORT)"
-	@echo "Log: /tmp/ss-stderr.log"
 
 run-jit: build-ss ensure-xvfb ensure-prefs kill
 	@echo "=== Starting SheepShaver (JIT) on VNC port $(VNC_PORT) ==="
-	SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
+	@SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
 		$(SS_BIN) > /dev/null 2>/tmp/ss-jit-stderr.log &
 	@sleep 2
-	@echo "PID: $$(pgrep -f 'SheepShaver' | head -1)"
+	@echo "PID: $$(pgrep -x SheepShaver | head -1)"
 	@echo "VNC: vnc://localhost:$(VNC_PORT)"
-	@echo "Log: /tmp/ss-jit-stderr.log"
 
 screenshot:
 	@export PATH="$$HOME/.local/bin:$$PATH"; \
@@ -122,14 +92,12 @@ screenshot:
 		echo "Saved: /workspace/tmp/ss-screenshot-$$(date +%H%M%S).png" || \
 		echo "VNC not available on port $(VNC_PORT)"
 
-# ---- Cleanup -----------------------------------------------------------------
-
 kill:
 	@pkill -9 -x SheepShaver 2>/dev/null; true
 	@sleep 0.3
 	@echo "All SheepShaver processes killed"
 
 clean: kill
-	cd $(SS_DIR) && rm -f obj/ppc-jit.o SheepShaver 2>/dev/null; true
-	cd rom-harness && $(MAKE) clean 2>/dev/null; true
+	@cd $(SS_DIR) && rm -f obj/ppc-jit.o SheepShaver 2>/dev/null; true
+	@cd rom-harness && $(MAKE) clean 2>/dev/null; true
 	@echo "Clean complete"
