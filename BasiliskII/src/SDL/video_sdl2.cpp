@@ -2816,10 +2816,22 @@ static void handle_events(void)
 			for (int i = 0; i < n; i++) {
 				SDL_Event &event = sdl_events[i];
 				switch (event.type) {
-				case SDL_MOUSEBUTTONDOWN:
-				case SDL_MOUSEBUTTONUP:
+				case SDL_MOUSEBUTTONDOWN: {
+					unsigned int button = event.button.button;
+					if (button == SDL_BUTTON_LEFT) ADBMouseDown(0);
+					else if (button == SDL_BUTTON_RIGHT) ADBMouseDown(1);
+					else if (button == SDL_BUTTON_MIDDLE) ADBMouseDown(2);
+					break;
+				}
+				case SDL_MOUSEBUTTONUP: {
+					unsigned int button = event.button.button;
+					if (button == SDL_BUTTON_LEFT) ADBMouseUp(0);
+					else if (button == SDL_BUTTON_RIGHT) ADBMouseUp(1);
+					else if (button == SDL_BUTTON_MIDDLE) ADBMouseUp(2);
+					break;
+				}
 				case SDL_MOUSEMOTION:
-					/* Mouse events handled directly in vnc_pointer_callback via ADB */
+					ADBMouseMoved(event.motion.x, event.motion.y);
 					break;
 				case SDL_KEYDOWN: {
 					if (event.key.repeat) break;

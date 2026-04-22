@@ -251,28 +251,18 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 	   The VNC framebuffer IS the Mac framebuffer, same resolution. */
 	vnc_push_pointer_motion(x, y);
 	fprintf(stderr, "ADB: move(%d,%d)\n", x, y);
-	ADBMouseMoved(x, y);
+	/* Mouse events handled via SDL event queue (vnc_push_pointer_motion above) */
 
 	const int previous = vnc_pointer_buttons;
 	vnc_pointer_buttons = button_mask;
 
 	const int transitions[] = {1, 2, 4};
 	const Uint8 mapped[] = {SDL_BUTTON_LEFT, SDL_BUTTON_MIDDLE, SDL_BUTTON_RIGHT};
-	const int adb_buttons[] = {0, 2, 1}; /* SDL left/middle/right → ADB 0/2/1 */
 	for (size_t i = 0; i < 3; ++i) {
 		const bool was_down = (previous & transitions[i]) != 0;
 		const bool now_down = (button_mask & transitions[i]) != 0;
 		if (was_down != now_down) {
-			fprintf(stderr, "VNC-MOUSE: btn=%zu %s at (%d,%d) mask=%d->%d\n",
-				i, now_down ? "DOWN" : "UP", x, y, previous, button_mask);
 			vnc_push_pointer_button(mapped[i], now_down, x, y);
-			if (now_down) {
-				fprintf(stderr, "ADB: down(%d)\n", adb_buttons[i]);
-				ADBMouseDown(adb_buttons[i]);
-			} else {
-				fprintf(stderr, "ADB: up(%d)\n", adb_buttons[i]);
-				ADBMouseUp(adb_buttons[i]);
-			}
 		}
 	}
 
