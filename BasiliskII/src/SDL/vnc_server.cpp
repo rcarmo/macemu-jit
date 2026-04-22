@@ -250,6 +250,7 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 	/* VNC coordinates = Mac screen coordinates.
 	   The VNC framebuffer IS the Mac framebuffer, same resolution. */
 	vnc_push_pointer_motion(x, y);
+	fprintf(stderr, "ADB: move(%d,%d)\n", x, y);
 	ADBMouseMoved(x, y);
 
 	const int previous = vnc_pointer_buttons;
@@ -265,10 +266,13 @@ static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
 			fprintf(stderr, "VNC-MOUSE: btn=%zu %s at (%d,%d) mask=%d->%d\n",
 				i, now_down ? "DOWN" : "UP", x, y, previous, button_mask);
 			vnc_push_pointer_button(mapped[i], now_down, x, y);
-			if (now_down)
+			if (now_down) {
+				fprintf(stderr, "ADB: down(%d)\n", adb_buttons[i]);
 				ADBMouseDown(adb_buttons[i]);
-			else
+			} else {
+				fprintf(stderr, "ADB: up(%d)\n", adb_buttons[i]);
 				ADBMouseUp(adb_buttons[i]);
+			}
 		}
 	}
 

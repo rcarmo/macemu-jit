@@ -2821,10 +2821,29 @@ static void handle_events(void)
 				case SDL_MOUSEMOTION:
 					/* Mouse events handled directly in vnc_pointer_callback via ADB */
 					break;
-				case SDL_KEYDOWN:
-				case SDL_KEYUP:
-					/* Keyboard events handled directly in vnc_keyboard_callback via ADB */
+				case SDL_KEYDOWN: {
+					if (event.key.repeat) break;
+					int code = event2keycode(event.key, true);
+					if (code >= 0 && !emul_suspended) {
+						code = modify_opt_cmd(code);
+						if (code == 0x37) cmd_down = true;
+						if (code == 0x3a) opt_down = true;
+						if (code == 0x36) ctrl_down = true;
+						ADBKeyDown(code);
+					}
 					break;
+				}
+				case SDL_KEYUP: {
+					int code = event2keycode(event.key, false);
+					if (code >= 0) {
+						code = modify_opt_cmd(code);
+						if (code == 0x37) cmd_down = false;
+						if (code == 0x3a) opt_down = false;
+						if (code == 0x36) ctrl_down = false;
+						ADBKeyUp(code);
+					}
+					break;
+				}
 				}
 			}
 		}
