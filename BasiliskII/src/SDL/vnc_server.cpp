@@ -412,7 +412,7 @@ static int vnc_thread_func(void *)
 
 		SDL_LockMutex(vnc_mutex);
 		if (!vnc_pending_frame && !vnc_thread_quit.load(std::memory_order_relaxed))
-			SDL_CondWaitTimeout(vnc_cond, vnc_mutex, 50);  // Wake every 50ms for rfbProcessEvents
+			SDL_CondWaitTimeout(vnc_cond, vnc_mutex, 16);  // Wake every 50ms for rfbProcessEvents
 
 		if (vnc_thread_quit.load(std::memory_order_relaxed)) {
 			SDL_UnlockMutex(vnc_mutex);
@@ -576,11 +576,8 @@ void VNCServerUpdate(SDL_Surface *surface, const SDL_Rect &updated_rect)
 	if (updated_rect.w <= 0 || updated_rect.h <= 0)
 		return;
 
-	// Use full surface for VNC snapshot instead of partial dirty rect.
-	// The host_surface is correct (verified via PNG dump), but partial
-	// dirty rects leave stale palette-converted pixels in the VNC
-	// framebuffer for regions drawn once (scrollbar backgrounds etc).
-	SDL_Rect clipped = { 0, 0, surface->w, surface->h };
+	// Use the actual dirty rect for VNC snapshot (not full surface).
+	SDL_Rect clipped = updated_rect;
 	if (clipped.x < 0) {
 		clipped.w += clipped.x;
 		clipped.x = 0;
