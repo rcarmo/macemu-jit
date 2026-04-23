@@ -3200,6 +3200,10 @@ static void video_refresh_window_vosf(void)
 
 static void video_refresh_window_static(void)
 {
+	// Skip refresh during video mode switch (buffers may be freed)
+	if (video_mode_changing.load(std::memory_order_acquire))
+		return;
+
 	// Ungrab mouse if requested
 	possibly_ungrab_mouse();
 
@@ -3207,6 +3211,8 @@ static void video_refresh_window_static(void)
 	static uint32 tick_counter = 0;
 	if (++tick_counter >= frame_skip) {
 		tick_counter = 0;
+		if (!drv || !the_buffer || !the_buffer_copy)
+			return;
 		const VIDEO_MODE &mode = drv->mode;
 		if ((int)VIDEO_MODE_DEPTH >= VIDEO_DEPTH_8BIT)
 			update_display_static_bbox(drv);
