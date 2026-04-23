@@ -125,6 +125,7 @@ static bool mouse_wheel_reverse;
 static volatile sig_atomic_t sdl_png_dump_requested = 0;
 static bool sdl_png_dump_unavailable_warned = false;
 static bool sdl_startup_dump_done = false;
+std::atomic<bool> video_mode_changing{false};  // Guard: prevents VNC/redraw during mode switch
 
 static uint8 *the_buffer = NULL;					// Mac frame buffer (where MacOS draws into)
 static uint8 *the_buffer_copy = NULL;				// Copy of Mac frame buffer (for refreshed modes)
@@ -1182,7 +1183,8 @@ static int present_sdl_video()
 		}
 	}
 	maybe_dump_surface_png(host_surface);
-	VNCServerUpdate(host_surface, updated_rect);
+	if (!video_mode_changing.load(std::memory_order_acquire))
+		VNCServerUpdate(host_surface, updated_rect);
     
     // Indicate success to the caller!
     return 0;
@@ -2312,11 +2314,16 @@ static bool is_cursor_in_mac_screen()
 	
 void SDL_monitor_desc::switch_to_current_mode(void)
 {
+	// Guard: block VNC/redraw access to surfaces during mode switch
+	video_mode_changing.store(true, std::memory_order_release);
+
 	// Close and reopen display
 	LOCK_EVENTS;
 	video_close();
 	video_open();
 	UNLOCK_EVENTS;
+
+	video_mode_changing.store(false, std::memory_order_release);
 
 	if (drv == NULL) {
 		ErrorAlert(STR_OPEN_WINDOW_ERR);

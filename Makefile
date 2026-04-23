@@ -9,8 +9,9 @@ DISK       := /workspace/fixtures/basilisk/images/HD200MB
 BENCH_DISK := /workspace/fixtures/basilisk/images/Benchmark.hda
 NPROC      := $(shell nproc)
 VNC_PORT   := 5900
+TMX        := emu
 
-.PHONY: build clean test test-jit test-headless run-vnc kill screenshot help
+.PHONY: build clean test test-jit test-headless run run-vnc start stop kill screenshot status help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -52,46 +53,62 @@ test-headless: build ## Headless boot test (no display, no disk, 60s timeout)
 	  tail -5 "$$W/stderr.log"; \
 	  rm -rf "$$W"
 
-test-boot: build ## Full boot test with Xvfb + screenshot (45s)
-	@echo "=== Full boot test (Xvfb, 45s) ==="
-	@pkill -9 Xvfb 2>/dev/null; sleep 0.3; \
-	  Xvfb :99 -screen 0 640x480x24 & XPID=$$!; sleep 1; \
-	  W=$$(mktemp -d /tmp/b2-boot-XXXXXX); \
-	  printf 'rom $(ROM)\ndisk $(DISK)\nramsize 16777216\nmodelid 14\ncpu 4\nnogui true\n' > "$$W/prefs"; \
-	  SDL_VIDEODRIVER=x11 DISPLAY=:99 \
-	    timeout --kill-after=5s 45s $(BIN) --config "$$W/prefs" \
-	    > "$$W/stdout.log" 2> "$$W/stderr.log" & B2PID=$$!; \
-	  sleep 40; \
-	  DISPLAY=:99 import -window root /tmp/b2-boot-screenshot.png 2>/dev/null; \
-	  wait $$B2PID 2>/dev/null; rc=$$?; \
-	  insn=$$(grep -oP 'insn=\K[0-9]+' "$$W/stderr.log" | tail -1); \
-	  echo "Exit: $$rc  Instructions: $${insn:-0}"; \
-	  echo "Screenshot: /tmp/b2-boot-screenshot.png"; \
-	  kill $$XPID 2>/dev/null; rm -rf "$$W"
+# ── Run (tmux) ────────────────────────────────────────────────────
 
-# ── Run ───────────────────────────────────────────────────────────
+start: build ## Start emulator in tmux session '$(TMX)' with Xvfb + VNC
+	@if tmux has-session -t $(TMX) 2>/dev/null; then \
+	  echo "Session '$(TMX)' already exists. Use 'make stop' first."; exit 1; fi
+	@pkill -9 -x BasiliskII 2>/dev/null; pkill -9 Xvfb 2>/dev/null; sleep 0.3
+	tmux new-session -d -s $(TMX) -x 200 -y 50
+	tmux send-keys -t $(TMX) 'Xvfb :99 -screen 0 640x480x24 -ac & sleep 1 && \
+	  cd /workspace/projects/macemu && \
+	  SDL_VIDEODRIVER=x11 DISPLAY=:99 $(BIN) \
+	    --rom $(ROM) --disk $(DISK) --disk $(BENCH_DISK) \
+	    --ramsize 16777216 --modelid 14 --cpu 4 \
+	    --noclipconversion --nogui \
+	    --vnc true --vnc-port $(VNC_PORT) \
+	    2>/tmp/b2.stderr' Enter
+	@echo "Emulator starting in tmux session '$(TMX)'"
+	@echo "  VNC: port $(VNC_PORT)"
+	@echo "  Logs: /tmp/b2.stderr"
+	@echo "  Attach: tmux attach -t $(TMX)"
+	@echo "  Screenshot: make screenshot"
 
-run-vnc: build ## Run with VNC server on port $(VNC_PORT) (headless)
+stop: ## Stop emulator tmux session
+	@pkill -9 -x BasiliskII 2>/dev/null || true
+	@pkill -9 Xvfb 2>/dev/null || true
+	@tmux kill-session -t $(TMX) 2>/dev/null || true
+	@echo "Stopped."
+
+status: ## Show emulator status
+	@if pgrep -x BasiliskII >/dev/null; then \
+	  pid=$$(pgrep -x BasiliskII); \
+	  insn=$$(grep -oP 'insn=\K[0-9]+' /tmp/b2.stderr 2>/dev/null | tail -1); \
+	  echo "Running (PID=$$pid, insn=$${insn:-?})"; \
+	else echo "Not running"; fi
+	@tmux has-session -t $(TMX) 2>/dev/null && echo "tmux session '$(TMX)': active" || echo "tmux session '$(TMX)': none"
+
+screenshot: ## Take a screenshot of the running emulator
+	@if ! pgrep Xvfb >/dev/null; then echo "No Xvfb"; exit 1; fi
+	@f=/tmp/b2-screenshot-$$(date +%Y%m%d-%H%M%S).png; \
+	  DISPLAY=:99 import -window root "$$f" && echo "Saved: $$f" || echo "Failed"
+
+# ── Legacy (blocking) ─────────────────────────────────────────────
+
+run-vnc: build ## Run with VNC (blocking, no tmux)
 	@echo "=== BasiliskII + VNC on port $(VNC_PORT) ==="
 	@pkill -9 Xvfb 2>/dev/null; sleep 0.3; \
 	  Xvfb :99 -screen 0 640x480x24 & sleep 1; \
 	  SDL_VIDEODRIVER=x11 DISPLAY=:99 $(BIN) \
-	    --rom $(ROM) \
-	    --disk $(DISK) \
-	    --disk $(BENCH_DISK) \
+	    --rom $(ROM) --disk $(DISK) --disk $(BENCH_DISK) \
 	    --ramsize 16777216 --modelid 14 --cpu 4 \
 	    --noclipconversion --nogui \
 	    --vnc true --vnc-port $(VNC_PORT)
 
 # ── Cleanup ───────────────────────────────────────────────────────
 
-kill: ## Kill all BasiliskII and Xvfb processes
-	@echo "Killing BasiliskII and Xvfb..."
+kill: ## Kill all BasiliskII, Xvfb, and tmux emu session
 	@pkill -9 -x BasiliskII 2>/dev/null || true
 	@pkill -9 Xvfb 2>/dev/null || true
+	@tmux kill-session -t $(TMX) 2>/dev/null || true
 	@echo "Done."
-
-screenshot: ## Take a screenshot of the running emulator (DISPLAY=:99)
-	@DISPLAY=:99 import -window root /tmp/b2-screenshot-$$(date +%H%M%S).png 2>/dev/null && \
-	  echo "Saved: /tmp/b2-screenshot-$$(date +%H%M%S).png" || \
-	  echo "No display on :99"

@@ -1,6 +1,8 @@
 #include "sysdeps.h"
 
 #include "vnc_server.h"
+#include <atomic>
+extern std::atomic<bool> video_mode_changing;
 #include "prefs.h"
 #include "adb.h"
 
@@ -567,6 +569,10 @@ void VNCServerUpdate(SDL_Surface *surface, const SDL_Rect &updated_rect)
 {
 #ifdef HAVE_LIBVNCSERVER
 	if (!vnc_enabled || !surface)
+		return;
+
+	// Don't access surfaces during video mode switch (prevents double-free/UAF)
+	if (video_mode_changing.load(std::memory_order_acquire))
 		return;
 
 	if (!vnc_ensure_server(surface->w, surface->h,
