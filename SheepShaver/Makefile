@@ -11,6 +11,8 @@ BENCH_DISK  := /workspace/tmp/Benchmark.hda
 PREFS_DIR   := /tmp/ss-desktop
 PREFS_FILE  := $(PREFS_DIR)/.sheepshaver_prefs
 VNC_PORT    := 5999
+TMUX_SESSION ?= ss-repro
+TMUX_LOG     ?= /tmp/$(TMUX_SESSION).log
 
 JIT_CXX     := g++
 JIT_CXXFLAGS := -g -O2 -std=c++11 -DHAVE_CONFIG_H
@@ -18,7 +20,9 @@ JIT_INCLUDES := -I$(JIT_DIR)
 
 .PHONY: all build build-ss build-rom-harness \
         test test-opcodes test-rom \
-        run run-jit screenshot kill clean \
+        run run-jit run-tmux run-jit-tmux \
+        tmux-attach tmux-log tmux-stop \
+        screenshot kill clean \
         ensure-xvfb ensure-prefs
 
 all: build
@@ -85,6 +89,46 @@ run-jit: build-ss ensure-xvfb ensure-prefs kill
 	@sleep 2
 	@echo "PID: $$(pgrep -x SheepShaver | head -1)"
 	@echo "VNC: vnc://localhost:$(VNC_PORT)"
+
+run-tmux: build-ss ensure-xvfb ensure-prefs
+	@echo "=== Starting SheepShaver in tmux session $(TMUX_SESSION) ==="
+	@tmux has-session -t $(TMUX_SESSION) 2>/dev/null && tmux kill-session -t $(TMUX_SESSION) || true
+	@rm -f $(TMUX_LOG)
+	@tmux new-session -d -s $(TMUX_SESSION) \
+		"cd '$(CURDIR)/$(SS_DIR)' && \
+		echo '[start '$$(date -Is)'] interpreter' >> '$(TMUX_LOG)' && \
+		env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME='$(PREFS_DIR)' ./SheepShaver >> '$(TMUX_LOG)' 2>&1; \
+		rc=\$$?; echo '[exit '\$$rc' '$$(date -Is)']' >> '$(TMUX_LOG)'; exec bash"
+	@sleep 2
+	@echo "tmux: $(TMUX_SESSION)"
+	@echo "log:  $(TMUX_LOG)"
+	@echo "VNC:  vnc://localhost:$(VNC_PORT)"
+	@tmux has-session -t $(TMUX_SESSION) >/dev/null 2>&1 && echo "session alive" || echo "session exited"
+
+run-jit-tmux: build-ss ensure-xvfb ensure-prefs
+	@echo "=== Starting SheepShaver (JIT) in tmux session $(TMUX_SESSION) ==="
+	@tmux has-session -t $(TMUX_SESSION) 2>/dev/null && tmux kill-session -t $(TMUX_SESSION) || true
+	@rm -f $(TMUX_LOG)
+	@tmux new-session -d -s $(TMUX_SESSION) \
+		"cd '$(CURDIR)/$(SS_DIR)' && \
+		echo '[start '$$(date -Is)'] jit' >> '$(TMUX_LOG)' && \
+		env SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME='$(PREFS_DIR)' ./SheepShaver >> '$(TMUX_LOG)' 2>&1; \
+		rc=\$$?; echo '[exit '\$$rc' '$$(date -Is)']' >> '$(TMUX_LOG)'; exec bash"
+	@sleep 2
+	@echo "tmux: $(TMUX_SESSION)"
+	@echo "log:  $(TMUX_LOG)"
+	@echo "VNC:  vnc://localhost:$(VNC_PORT)"
+	@tmux has-session -t $(TMUX_SESSION) >/dev/null 2>&1 && echo "session alive" || echo "session exited"
+
+tmux-attach:
+	@tmux attach -t $(TMUX_SESSION)
+
+tmux-log:
+	@cat $(TMUX_LOG)
+
+tmux-stop:
+	@tmux has-session -t $(TMUX_SESSION) 2>/dev/null && tmux kill-session -t $(TMUX_SESSION) || true
+	@echo "Stopped tmux session: $(TMUX_SESSION)"
 
 screenshot:
 	@export PATH="$$HOME/.local/bin:$$PATH"; \

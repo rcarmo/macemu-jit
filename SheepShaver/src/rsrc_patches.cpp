@@ -1014,37 +1014,13 @@ void PatchNativeResourceManager(void)
 #endif
 #endif
 
-	// Patch native GetNamedResource()
-	upp = ReadMacInt32(0x1484);
-	tvec = ReadMacInt32(upp + 5 * 4);
-	D(bug(" GetNamedResource() entry %08x, TOC %08x\n", ReadMacInt32(tvec), ReadMacInt32(tvec + 4)));
-	WriteMacInt32(XLM_GET_NAMED_RESOURCE, ReadMacInt32(tvec));
-#if EMULATED_PPC
-	WriteMacInt32(tvec, NativeFunction(NATIVE_GET_NAMED_RESOURCE));
-#else
-#ifdef __BEOS__
-	tvec2 = (uint32 *)get_named_resource;
-	WriteMacInt32(tvec, tvec2[0]);
-	WriteMacInt32(tvec + 4, tvec2[1]);
-#else
-	WriteMacInt32(tvec, (uint32)get_named_resource);
-#endif
-#endif
-
-	// Patch native Get1NamedResource()
-	upp = ReadMacInt32(0x0e80);
-	tvec = ReadMacInt32(upp + 5 * 4);
-	D(bug(" Get1NamedResource() entry %08x, TOC %08x\n", ReadMacInt32(tvec), ReadMacInt32(tvec + 4)));
-	WriteMacInt32(XLM_GET_1_NAMED_RESOURCE, ReadMacInt32(tvec));
-#if EMULATED_PPC
-	WriteMacInt32(tvec, NativeFunction(NATIVE_GET_1_NAMED_RESOURCE));
-#else
-#ifdef __BEOS__
-	tvec2 = (uint32 *)get_1_named_resource;
-	WriteMacInt32(tvec, tvec2[0]);
-	WriteMacInt32(tvec + 4, tvec2[1]);
-#else
-	WriteMacInt32(tvec, (uint32)get_1_named_resource);
-#endif
-#endif
+	// GetNamedResource()/Get1NamedResource() are not patched here.
+	//
+	// Audit note (2026-04-22): Prince of Persia crashes reproducibly while
+	// this function is dereferencing the GetNamedResource transition vector.
+	// The faulting native PC lands on the ReadMacInt32(tvec) load in this
+	// block, so keep the older GetResource/Get1Resource/GetIndResource/
+	// Get1IndResource/RGetResource hooks, but leave the named-resource
+	// variants untouched until we have a verified Mixed Mode layout for the
+	// low-memory globals at 0x1484 and 0x0e80 on this ROM/OS path.
 }
