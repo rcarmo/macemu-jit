@@ -102,6 +102,9 @@ size_t jit_popallspace_size = 0;
 #include "vm_alloc.h"
 #include "sigsegv.h"
 #include "rpc.h"
+#if defined(__linux__) && defined(__aarch64__)
+#include <sys/personality.h>
+#endif
 
 #if USE_JIT
 #ifdef UPDATE_UAE
@@ -483,6 +486,19 @@ static void gui_activate (GtkApplication *app)
 
 int main(int argc, char **argv)
 {
+#if defined(__linux__) && defined(__aarch64__)
+	/* Disable ASLR for this process. BasiliskII uses fixed-address mmap for
+	 * NuBus and I/O regions (0x0A-0x70000000). ASLR can place libraries in
+	 * these ranges, causing mprotect failures. If ASLR is still active,
+	 * set ADDR_NO_RANDOMIZE and re-exec ourselves. */
+	{
+		int pers = personality(0xffffffff);
+		if (!(pers & ADDR_NO_RANDOMIZE)) {
+			personality(pers | ADDR_NO_RANDOMIZE);
+			execvp(argv[0], argv);
+		}
+	}
+#endif
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
 #ifdef ENABLE_GTK3
