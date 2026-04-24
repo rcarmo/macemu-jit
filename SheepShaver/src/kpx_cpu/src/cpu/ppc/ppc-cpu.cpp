@@ -692,21 +692,37 @@ void powerpc_cpu::execute(uint32 entry)
 			// Execute all cached blocks
 		  pdi_execute:
 #if defined(__aarch64__) && defined(USE_AARCH64_JIT)
-			/* AArch64 direct-codegen JIT: try compiling block natively */
+			/* AArch64 direct-codegen JIT: try to execute block natively.
+			 *
+			 * Gates in this block — see SheepShaver/docs/AARCH64_JIT_RUNTIME_CONTRACT.md:
+			 *
+			 * GATE 1 (SS_USE_JIT): CONTAINMENT — JIT disabled by default.
+			 *   Expiry: remove when JIT is contract-clean and Speedometer is green.
+			 *   Proof: boot-to-desktop + opcode harness both green without this gate.
+			 *
+			 * GATE 2 (jblk.complete): CONTAINMENT — only execute fully compiled blocks.
+			 *   Status: overcautious; partial blocks are safe (truncation epilogue writes
+			 *   valid PPCR_PC and interpreter can resume from there). Candidate for removal.
+			 *   Expiry: remove when parity harness confirms partial-block execution is correct.
+			 *
+			 * GATE 3 (PC range check): DIAGNOSTIC — detects JIT compiler bugs that produce
+			 *   out-of-range PCs.  Should log before skipping, not silently continue.
+			 */
 			{
 				static bool jit_init_done = false;
 				static bool jit_enabled = getenv("SS_USE_JIT") && *getenv("SS_USE_JIT");
-				if (!jit_enabled) goto skip_jit;
+				if (!jit_enabled) goto skip_jit; /* GATE 1: SS_USE_JIT containment */
 				if (!jit_init_done) { ppc_jit_aarch64_init(4096); jit_init_done = true; }
 				ppc_jit_block jblk;
-				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) {
+				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) { /* GATE 2: complete-only */
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
 					fn((void*)regs_ptr());
-					/* Validate PC after JIT execution */
+					/* GATE 3: PC range check — detect compiler bugs (log + skip rather than silent skip) */
 					uint32 jit_pc = pc();
 					if (jit_pc >= (uint32)(uintptr_t)RAMBaseHost + RAMSize &&
 					    !(jit_pc >= (uint32)ROMBase && jit_pc < (uint32)ROMBase + 0x500000)) {
-						/* PC outside RAM/ROM — JIT produced invalid target, skip to interpreter */
+						fprintf(stderr, "PPC-JIT-A64: GATE3: out-of-range PC 0x%08x after block at 0x%08x\n",
+						        jit_pc, jblk.ppc_start_pc);
 						continue;
 					}
 					if (!spcflags().empty()) {

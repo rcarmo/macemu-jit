@@ -24,6 +24,45 @@ static size_t    jit_cache_size = 0;
 static uint32_t *jit_cache_wp   = NULL;
 static uint32_t *jit_cache_end  = NULL;
 
+/* ---- Block address cache (PC → compiled code) ----
+ *
+ * CONTRACT (see SheepShaver/docs/AARCH64_JIT_RUNTIME_CONTRACT.md):
+ *   Compiled blocks are stored here by PPC entry PC so they are not
+ *   recompiled on every execution.  The cache is direct-mapped:
+ *   bucket = pc & JIT_BC_MASK.  An entry is valid when .pc == the
+ *   lookup pc and .code != NULL.
+ *
+ *   Flush discipline: the entire cache must be invalidated whenever
+ *   Mac OS invalidates any region of PPC code (icbi/isync) or when
+ *   the JIT code-cache write-pointer is reset (ppc_jit_aarch64_flush).
+ */
+#define JIT_BC_SIZE  4096                  /* must be power of 2 */
+#define JIT_BC_MASK  (JIT_BC_SIZE - 1)
+
+struct jit_bc_entry {
+	uint32_t  pc;      /* PPC address this block was compiled from */
+	uint32_t *code;    /* pointer into jit_cache_base; NULL = empty */
+	bool      complete;/* true iff every instruction in block is native */
+};
+
+static struct jit_bc_entry jit_bc[JIT_BC_SIZE];
+
+static void jit_bc_flush(void) {
+	for (int i = 0; i < JIT_BC_SIZE; i++) jit_bc[i].code = NULL;
+}
+
+static const struct jit_bc_entry *jit_bc_lookup(uint32_t pc) {
+	const struct jit_bc_entry *e = &jit_bc[pc & JIT_BC_MASK];
+	return (e->code && e->pc == pc) ? e : NULL;
+}
+
+static void jit_bc_insert(uint32_t pc, uint32_t *code, bool complete) {
+	struct jit_bc_entry *e = &jit_bc[pc & JIT_BC_MASK];
+	e->pc       = pc;
+	e->code     = code;
+	e->complete = complete;
+}
+
 /* ---- Register offsets in powerpc_registers ----
    Determined from compiled struct layout on aarch64. */
 #define PPCR_GPR(n) ((uint32_t)((n) * 4))
@@ -2996,11 +3035,13 @@ bool ppc_jit_aarch64_init(size_t cache_size_kb)
 	jit_cache_base = (uint8_t *)jit_cache_alloc(jit_cache_size);
 	if (!jit_cache_base) {
 		fprintf(stderr, "PPC-JIT-A64: failed to allocate %zu KB code cache\n", cache_size_kb);
-		return false; /* unknown opcode: stop compilation */
+		return false;
 	}
 	jit_cache_wp = (uint32_t *)jit_cache_base;
 	jit_cache_end = (uint32_t *)(jit_cache_base + jit_cache_size);
-	fprintf(stderr, "PPC-JIT-A64: code cache %zu KB at %p\n", cache_size_kb, jit_cache_base);
+	jit_bc_flush();
+	fprintf(stderr, "PPC-JIT-A64: code cache %zu KB at %p, block cache %d entries\n",
+	        cache_size_kb, jit_cache_base, JIT_BC_SIZE);
 	return true;
 }
 
@@ -3015,7 +3056,11 @@ void ppc_jit_aarch64_exit(void)
 
 void ppc_jit_aarch64_flush(void)
 {
+	/* Reset code cache write pointer and invalidate block address cache.
+	 * Called on Mac OS icbi/isync events or when the JIT must start fresh.
+	 * Contract: see SheepShaver/docs/AARCH64_JIT_RUNTIME_CONTRACT.md — flush discipline. */
 	jit_cache_wp = (uint32_t *)jit_cache_base;
+	jit_bc_flush();
 }
 
 bool ppc_jit_aarch64_compile(
@@ -3024,8 +3069,27 @@ bool ppc_jit_aarch64_compile(
 	size_t ramsize,
 	ppc_jit_block *out)
 {
-	if (!jit_cache_wp || jit_cache_wp >= jit_cache_end - 256)
-		return false; /* unknown opcode: stop compilation */
+	/* Block address cache lookup — return cached block without recompiling.
+	 * Contract: see AARCH64_JIT_RUNTIME_CONTRACT.md — block lifecycle. */
+	const struct jit_bc_entry *cached = jit_bc_lookup(pc);
+	if (cached) {
+		out->code         = cached->code;
+		out->code_size    = 0; /* not tracked for cached entries */
+		out->ppc_start_pc = pc;
+		out->ppc_end_pc   = pc; /* not tracked for cached entries */
+		out->n_insns      = 0; /* not tracked for cached entries */
+		out->complete     = cached->complete;
+		return true;
+	}
+
+	if (!jit_cache_wp || jit_cache_wp >= jit_cache_end - 256) {
+		/* Code cache full — flush everything and start over.
+		 * This invalidates all cached blocks, which is safe because
+		 * the code they point to is about to be overwritten. */
+		fprintf(stderr, "PPC-JIT-A64: code cache full, flushing\n");
+		ppc_jit_aarch64_flush();
+		if (!jit_cache_wp) return false;
+	}
 
 	uint32_t *code_start = jit_cache_wp;
 	jit_code_ptr = jit_cache_wp;
@@ -3184,6 +3248,11 @@ bool ppc_jit_aarch64_compile(
 
 	out->complete = complete;
 	if (complete && n_compiled > 0) jit_blocks_complete++;
+
+	/* Insert into block address cache so future executions skip recompilation.
+	 * Contract: see AARCH64_JIT_RUNTIME_CONTRACT.md — block lifecycle. */
+	if (n_compiled > 0)
+		jit_bc_insert(pc, code_start, complete);
 
 	return n_compiled > 0;
 }
