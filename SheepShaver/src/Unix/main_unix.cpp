@@ -114,6 +114,9 @@
 #include "sigsegv.h"
 #include "sigregs.h"
 #include "rpc.h"
+#if defined(__linux__) && defined(__aarch64__)
+#include <sys/personality.h>
+#endif
 
 #define DEBUG 0
 #include "debug.h"
@@ -788,6 +791,20 @@ static void gui_activate (GtkApplication *app)
 
 int main(int argc, char **argv)
 {
+#if defined(__linux__) && defined(__aarch64__)
+	/* Disable ASLR for this process so fixed-address Mac mappings and host-side
+	 * JIT/cache debugging stay reproducible on AArch64 Linux. If ASLR is still
+	 * active, set ADDR_NO_RANDOMIZE and re-exec ourselves once. */
+	{
+		int pers = personality(0xffffffff);
+		if (pers != -1 && !(pers & ADDR_NO_RANDOMIZE)) {
+			if (personality(pers | ADDR_NO_RANDOMIZE) != -1) {
+				execvp(argv[0], argv);
+				perror("execvp");
+			}
+		}
+	}
+#endif
 	/* Early opcode test mode: bypass all SheepShaver init if SS_TEST_HEX is set */
 	if (getenv("SS_TEST_HEX") && *getenv("SS_TEST_HEX")) {
 		extern bool ss_run_opcode_test(void);
