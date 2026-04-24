@@ -140,6 +140,7 @@ EOF
         env_vars+=(B2_TEST_INIT="$init_regs")
     fi
     if ! env "${env_vars[@]}" \
+      setarch $(uname -m) -R \
       timeout -k 5s 30s "$UNIX_DIR/BasiliskII" --config "$td/prefs" \
       > "$td/emu.log" 2>&1; then
         emu_rc=$?
