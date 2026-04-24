@@ -114,3 +114,55 @@ See `BasiliskII/src/uae_cpu_2021/compiler/` for the 68K → AArch64 JIT.
 | Branch | Bcc, BSR/JSR, DBcc, Scc |
 | SR/CCR | MOVE to/from SR, ORI/ANDI/EORI to SR/CCR, RTR |
 | Control | MOVEC, MOVES, CINVA, CPUSHA |
+
+## Platform Notes — AArch64 Linux
+
+### ASLR and Fixed-Address Memory Mapping
+
+BasiliskII uses fixed-address `mmap()` calls to place emulated Mac hardware
+regions at specific virtual addresses:
+
+| Region | Host Address Range | Mac Address | Purpose |
+|--------|-------------------|-------------|---------|
+| RAM | `0x10000000` | `0x00000000` | Main memory (16MB) |
+| ROM | `0x11000000` | `0x01000000` | Quadra 800 ROM (1MB) |
+| I/O | `0x60000000–0x6F000000` | `0x50000000–0x5F000000` | Hardware registers |
+| NuBus | `0x100000000–0x110000000` | `0xF0000000–0x100000000` | NuBus slots |
+| NuBus-lo | `0x0A815000–0x0FFFFFFF` | `0x0A815000–0x0FFFFFFF` | NuBus low (slot space) |
+| Frame buffer | `0x12010000` | via `MacFrameBaseMac` | Video memory |
+
+On AArch64 Linux with ASLR enabled, shared libraries, the heap, and anonymous
+mappings can land anywhere in the 48-bit virtual address space. This causes
+**random collisions** with BasiliskII's fixed-address regions — particularly
+the NuBus-lo range (`0x0A–0x10`), which overlaps with common ASLR placement
+for shared libraries on aarch64.
+
+**Symptoms:**
+- `MEM: NuBus-lo mprotect failed: Cannot allocate memory`
+- Silent `SIGSEGV` on startup
+- Intermittent failures (~30% of launches)
+
+**Fix (commit `5d9637d9`):**
+
+BasiliskII now self-disables ASLR at startup using the Linux `personality()`
+system call:
+
+```c
+#include <sys/personality.h>
+
+int pers = personality(0xffffffff);       // query current personality
+if (!(pers & ADDR_NO_RANDOMIZE)) {
+    personality(pers | ADDR_NO_RANDOMIZE); // disable ASLR
+    execvp(argv[0], argv);                 // re-exec with new personality
+}
+```
+
+This is the same technique used by QEMU, Wine, and other emulators that
+depend on fixed-address memory mappings. The re-exec happens before any
+other initialization, so there's no visible effect — the process simply
+restarts itself once with ASLR disabled.
+
+**Impact:** The JIT test harness (301 vectors × 2 runs each = 602 emulator
+launches) previously saw ~30% failure rate from address collisions. With the
+fix, it achieves **100% reliability without external wrappers** like
+`setarch -R`.
