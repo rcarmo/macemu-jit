@@ -857,8 +857,10 @@ TEST_ORDER+=(extsh_zero)
 TESTS[extsb_ff]="386000FF 7C650774"
 TEST_ORDER+=(extsb_ff)
 
-# --- bdnz with count=0 (should NOT loop, fall through) ---
-TESTS[bdnz_zero]="38600000 38800000 7C8903A6 38630001 4200FFFC"
+# --- bdnz with CTR=0: branch IS taken (CTR wraps 0→0xFFFFFFFF, ≠0) ---
+# li r3,0; li r4,0; mtctr r4; bdnz +8 (taken→skip next); li r3,0xFF (skipped); li r3,1; mfctr r4
+# Expected: r3=1 (branch was taken), r4=0xFFFFFFFF (CTR after wrap)
+TESTS[bdnz_zero]="38600000 38800000 7C8903A6 42000008 386000FF 38600001 7C8902A6"
 TEST_ORDER+=(bdnz_zero)
 
 # --- b (unconditional forward branch) ---
@@ -972,9 +974,10 @@ TEST_ORDER+=(fuzz_cmplwi_max)
 TESTS[fuzz_cmplw_max]="38600000 3880FFFF 7C032040"
 TEST_ORDER+=(fuzz_cmplw_max)
 
-# --- Branch edge cases ---
-# bdnz with CTR=0 initially → should NOT decrement below 0, fall through
-TESTS[fuzz_bdnz_ctr0]="38600000 7C0903A6 38630001 4200FFFC"
+# --- bdnz with CTR=0: branch IS taken, CTR wraps to 0xFFFFFFFF ---
+# li r3,0; mtctr r3; bdnz +8 (taken→skip addi); addi r3,r3,1 (skipped); mfctr r3
+# Expected: r3=0xFFFFFFFF (mfctr after wrap, addi skipped)
+TESTS[fuzz_bdnz_ctr0]="38600000 7C0903A6 42000008 38630001 7C6902A6"
 TEST_ORDER+=(fuzz_bdnz_ctr0)
 
 # --- Logical op edge cases ---
