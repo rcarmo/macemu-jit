@@ -708,7 +708,15 @@ static bool init_sdl()
 	sdl_flags |= SDL_INIT_VIDEO;
 #endif
 #ifdef USE_SDL_AUDIO
-	sdl_flags |= SDL_INIT_AUDIO;
+	// Only init SDL audio if sound is actually wanted.
+	// SDL 2.32+ introduced an ALSA device scan (controlC0..C31) that loops
+	// indefinitely when no sound cards are present, hanging headless boots.
+	// If nosound=true, set the dummy driver before SDL_Init to skip the scan.
+	if (PrefsFindBool("nosound")) {
+		setenv("SDL_AUDIODRIVER", "dummy", 0); /* don't override if already set */
+	} else {
+		sdl_flags |= SDL_INIT_AUDIO;
+	}
 #endif
 	assert(sdl_flags != 0);
 

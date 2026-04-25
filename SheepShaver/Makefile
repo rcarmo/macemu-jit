@@ -76,7 +76,7 @@ ensure-prefs:
 
 run: build-ss ensure-xvfb ensure-prefs kill
 	@echo "=== Starting SheepShaver (interpreter) on VNC port $(VNC_PORT) ==="
-	@GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy DISPLAY=:99 HOME=$(PREFS_DIR) \
+	@GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
 		$(SS_BIN) > /dev/null 2>/tmp/ss-stderr.log &
 	@sleep 2
 	@echo "PID: $$(pgrep -x SheepShaver | head -1)"
@@ -84,7 +84,7 @@ run: build-ss ensure-xvfb ensure-prefs kill
 
 run-jit: build-ss ensure-xvfb ensure-prefs kill
 	@echo "=== Starting SheepShaver (JIT) on VNC port $(VNC_PORT) ==="
-	@SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy DISPLAY=:99 HOME=$(PREFS_DIR) \
+	@SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME=$(PREFS_DIR) \
 		$(SS_BIN) > /dev/null 2>/tmp/ss-jit-stderr.log &
 	@sleep 2
 	@echo "PID: $$(pgrep -x SheepShaver | head -1)"
@@ -97,7 +97,7 @@ run-tmux: build-ss ensure-xvfb ensure-prefs
 	@tmux new-session -d -s $(TMUX_SESSION) \
 		"cd '$(CURDIR)/$(SS_DIR)' && \
 		echo '[start '$$(date -Is)'] interpreter' >> '$(TMUX_LOG)' && \
-		env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy DISPLAY=:99 HOME='$(PREFS_DIR)' ./SheepShaver >> '$(TMUX_LOG)' 2>&1; \
+		env GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME='$(PREFS_DIR)' ./SheepShaver >> '$(TMUX_LOG)' 2>&1; \
 		rc=\$$?; echo '[exit '\$$rc' '$$(date -Is)']' >> '$(TMUX_LOG)'; exec bash"
 	@sleep 2
 	@echo "tmux: $(TMUX_SESSION)"
@@ -112,7 +112,7 @@ run-jit-tmux: build-ss ensure-xvfb ensure-prefs
 	@tmux new-session -d -s $(TMUX_SESSION) \
 		"cd '$(CURDIR)/$(SS_DIR)' && \
 		echo '[start '$$(date -Is)'] jit' >> '$(TMUX_LOG)' && \
-		env SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy DISPLAY=:99 HOME='$(PREFS_DIR)' ./SheepShaver >> '$(TMUX_LOG)' 2>&1; \
+		env SS_USE_JIT=1 GDK_BACKEND=x11 SDL_VIDEODRIVER=x11 DISPLAY=:99 HOME='$(PREFS_DIR)' ./SheepShaver >> '$(TMUX_LOG)' 2>&1; \
 		rc=\$$?; echo '[exit '\$$rc' '$$(date -Is)']' >> '$(TMUX_LOG)'; exec bash"
 	@sleep 2
 	@echo "tmux: $(TMUX_SESSION)"
