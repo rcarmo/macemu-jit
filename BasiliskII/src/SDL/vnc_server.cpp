@@ -194,55 +194,10 @@ static void vnc_keyboard_callback(rfbBool down, rfbKeySym key, rfbClientPtr)
 	const SDL_Keycode sdl_key = vnc_keysym_to_sdl(key);
 	vnc_update_mod_state(sdl_key, down != 0);
 	vnc_push_key_event(down != 0, sdl_key);
-
-	/* Direct ADB keyboard injection — thread-safe inline keymap */
-	int adb_code = -1;
-	switch (sdl_key) {
-	case SDLK_a: adb_code=0x00; break; case SDLK_b: adb_code=0x0b; break;
-	case SDLK_c: adb_code=0x08; break; case SDLK_d: adb_code=0x02; break;
-	case SDLK_e: adb_code=0x0e; break; case SDLK_f: adb_code=0x03; break;
-	case SDLK_g: adb_code=0x05; break; case SDLK_h: adb_code=0x04; break;
-	case SDLK_i: adb_code=0x22; break; case SDLK_j: adb_code=0x26; break;
-	case SDLK_k: adb_code=0x28; break; case SDLK_l: adb_code=0x25; break;
-	case SDLK_m: adb_code=0x2e; break; case SDLK_n: adb_code=0x2d; break;
-	case SDLK_o: adb_code=0x1f; break; case SDLK_p: adb_code=0x23; break;
-	case SDLK_q: adb_code=0x0c; break; case SDLK_r: adb_code=0x0f; break;
-	case SDLK_s: adb_code=0x01; break; case SDLK_t: adb_code=0x11; break;
-	case SDLK_u: adb_code=0x20; break; case SDLK_v: adb_code=0x09; break;
-	case SDLK_w: adb_code=0x0d; break; case SDLK_x: adb_code=0x07; break;
-	case SDLK_y: adb_code=0x10; break; case SDLK_z: adb_code=0x06; break;
-	case SDLK_0: adb_code=0x1d; break; case SDLK_1: adb_code=0x12; break;
-	case SDLK_2: adb_code=0x13; break; case SDLK_3: adb_code=0x14; break;
-	case SDLK_4: adb_code=0x15; break; case SDLK_5: adb_code=0x17; break;
-	case SDLK_6: adb_code=0x16; break; case SDLK_7: adb_code=0x1a; break;
-	case SDLK_8: adb_code=0x1c; break; case SDLK_9: adb_code=0x19; break;
-	case SDLK_RETURN: adb_code=0x24; break;
-	case SDLK_ESCAPE: adb_code=0x35; break;
-	case SDLK_BACKSPACE: adb_code=0x33; break;
-	case SDLK_TAB: adb_code=0x30; break;
-	case SDLK_SPACE: adb_code=0x31; break;
-	case SDLK_DELETE: adb_code=0x75; break;
-	case SDLK_UP: adb_code=0x3e; break; case SDLK_DOWN: adb_code=0x3d; break;
-	case SDLK_LEFT: adb_code=0x3b; break; case SDLK_RIGHT: adb_code=0x3c; break;
-	case SDLK_LSHIFT: case SDLK_RSHIFT: adb_code=0x38; break;
-	case SDLK_LCTRL: case SDLK_RCTRL: adb_code=0x36; break;
-	case SDLK_LALT: case SDLK_RALT: adb_code=0x3a; break;
-	case SDLK_LGUI: case SDLK_RGUI: adb_code=0x37; break;
-	case SDLK_CAPSLOCK: adb_code=0x39; break;
-	case SDLK_MINUS: adb_code=0x1b; break; case SDLK_EQUALS: adb_code=0x18; break;
-	case SDLK_LEFTBRACKET: adb_code=0x21; break; case SDLK_RIGHTBRACKET: adb_code=0x1e; break;
-	case SDLK_BACKSLASH: adb_code=0x2a; break;
-	case SDLK_SEMICOLON: adb_code=0x29; break; case SDLK_QUOTE: adb_code=0x27; break;
-	case SDLK_COMMA: adb_code=0x2b; break; case SDLK_PERIOD: adb_code=0x2f; break;
-	case SDLK_SLASH: adb_code=0x2c; break; case SDLK_BACKQUOTE: adb_code=0x32; break;
-	default: break;
-	}
-	if (adb_code >= 0) {
-		if (down)
-			ADBKeyDown(adb_code);
-		else
-			ADBKeyUp(adb_code);
-	}
+	/* Key events are handled via SDL drain in handle_events() → ADBKeyDown/Up.
+	 * The direct ADB injection block below has been removed — it was the root
+	 * cause of double keystrokes: every key was delivered twice, once via SDL
+	 * drain and once via the inline ADBKeyDown call here. */
 }
 
 static void vnc_pointer_callback(int button_mask, int x, int y, rfbClientPtr)
