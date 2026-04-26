@@ -1329,6 +1329,14 @@ void driver_base::init()
 	SDL_SetSurfacePalette(s, sdl_palette);
 
 	if (PrefsFindBool("init_grab") && !PrefsFindBool("hardcursor")) grab_mouse();
+
+	// When VNC is active the SDL window cursor is irrelevant and SDL must never
+	// warp the host (Xvfb) cursor — that causes the VNC client to snap to center.
+	if (PrefsFindBool("vncserver")) {
+		SDL_SetRelativeMouseMode(SDL_FALSE);
+		SDL_ShowCursor(SDL_DISABLE);
+		SDL_SetWindowGrab(sdl_window, SDL_FALSE);
+	}
 }
 
 void driver_base::adapt_to_video_mode() {
@@ -2351,6 +2359,11 @@ bool video_can_change_cursor(void)
 #ifdef SHEEPSHAVER
 void video_set_cursor(void)
 {
+	// In VNC mode the SDL cursor is irrelevant; skip cursor management
+	// entirely to prevent SDL from calling ShowCursor/WarpMouse which
+	// causes the VNC client cursor to snap.
+	if (PrefsFindBool("vncserver")) return;
+
 	// Set new cursor image if it was changed
 	if (sdl_cursor) {
 		SDL_FreeCursor(sdl_cursor);
