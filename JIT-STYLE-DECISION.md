@@ -310,6 +310,47 @@ The decision is:
 
 ---
 
+## Long-term performance note
+
+The preferred engineering style and the highest ultimate performance ceiling are not the same thing.
+
+### Preferred engineering style now
+
+- SheepShaver-style is preferred because it is easier to reason about, easier to validate, and less likely to hide semantic debt.
+
+### Higher ultimate performance ceiling
+
+- Basilisk-style machinery still has the higher ceiling **if** its contracts are made explicit and stable.
+
+Why?
+
+Because the more complex style supports:
+
+- longer-lived virtual register state
+- lazier flag materialization
+- richer block caching and reuse
+- more aggressive block chaining
+- more optimization surface inside and across blocks
+
+Those features can outperform a simpler direct-materialization design in the long run.
+
+### Repository stance
+
+So the rule is:
+
+> **simple by default, complexity by proof, performance by earned sophistication.**
+
+That means:
+
+1. use the simpler style as the default engineering bias
+2. keep BasiliskII’s existing machinery where it already exists
+3. only rely on the more complex performance features after the boundary contract is explicit and validated
+
+In other words:
+
+- the **better default approach** is SheepShaver-style
+- the **better eventual performance architecture** is Basilisk-style, but only after contract cleanup
+
 ## Final statement
 
 The repository should treat the SheepShaver-style JIT approach as the preferred default model for future work.

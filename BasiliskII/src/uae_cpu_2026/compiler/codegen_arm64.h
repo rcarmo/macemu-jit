@@ -38,7 +38,11 @@
 #define ARM_CV_FLAGS      (ARM_C_FLAG|ARM_V_FLAG)
 
 
-#define _W(c) emit_long(c)
+/* AArch64 instructions are always 32-bit words. Force the final encoding
+ * back to uae_u32 before emission so signed intermediate literals in the
+ * macro encoders do not get sign-extended to uintptr-sized temporaries when
+ * combined with 64-bit offsets/operands on AArch64 builds. */
+#define _W(c) emit_long((uae_u32)(c))
 
 
 #define MIN_EL0           0b011

@@ -1196,6 +1196,18 @@ static inline bool jit_force_execute_normal_target_env(uintptr hostpc)
     return jit_target_pc_in_env_ranges("B2_JIT_FORCE_EXECUTE_NORMAL_TARGET_PCS", hostpc);
 }
 
+static inline bool jit_prefer_validated_successor_handler(void)
+{
+    static int prefer_validated = -1;
+    if (prefer_validated < 0) {
+        const char *env = getenv("B2_JIT_PREFER_DIRECT_SUCCESSOR_HANDLER");
+        /* Contract-first default on ARM64: validated successor entry unless
+           explicitly overridden for direct-handler experiments. */
+        prefer_validated = (env && *env && strcmp(env, "0") != 0) ? 0 : 1;
+    }
+    return prefer_validated != 0;
+}
+
 static inline bool jit_verify_block_target_pc(uae_u32 pc)
 {
     static int initialized = 0;
@@ -1264,6 +1276,8 @@ static const char *jit_setpc_kind_name(uae_u32 kind)
         kind == 7 ? "mov_l_mi_pcptr" :
         kind == 8 ? "mov_l_mr_pcptr" :
         kind == 9 ? "raw_set_pc_i" :
+        kind == 10 ? "raw_set_pc_from_reg" :
+        kind == 11 ? "raw_set_pc_full_i" :
         "unknown";
 }
 
@@ -3657,14 +3671,12 @@ static void op_emulop_comp_ff(uae_u32 opcode)
 
     compemu_raw_mov_l_ri(REG_PAR1, (uae_u32)cft_map(opcode));
     compemu_raw_mov_l_rr(REG_PAR2, R_REGSTRUCT);
-    compemu_raw_mov_l_mi((uintptr)&regs.pc, this_m68k_pc);
-    compemu_raw_set_pc_i((uintptr)this_pc_p);
-    compemu_raw_mov_l_rm(REG_WORK1, (uintptr)&regs.pc_p);
-    compemu_raw_mov_l_mr((uintptr)&regs.pc_oldp, REG_WORK1);
+    compemu_raw_set_pc_full_i(this_m68k_pc, (uintptr)this_pc_p);
     compemu_raw_call((uintptr)cpufunctbl[cft_map(opcode)]);
 
-    /* Advance past the 2-byte EMUL_OP opcode */
-    compemu_raw_set_pc_i((uintptr)(this_pc_p + 2));
+    /* Advance past the 2-byte EMUL_OP opcode and leave a fully coherent
+       architectural PC triple for the mandatory endblock handoff. */
+    compemu_raw_set_pc_full_i(this_m68k_pc + 2, (uintptr)(this_pc_p + 2));
     live.state[PC_P].realreg = -1;
     live.state[PC_P].val = 0;
     set_status(PC_P, INMEM);
@@ -3684,11 +3696,15 @@ static void op_aline_trap_comp_ff(uae_u32 opcode)
 
 static inline void jit_emit_runtime_helper_barrier(uintptr helper, uintptr pc, uae_u32 arg1, uae_u32 arg2, bool has_arg2)
 {
+    /* B2 helper barrier contract: flush() materializes lazy registers/flags,
+       then rebuild the full PC triple before entering C helper code. Some of
+       these helpers use m68k_getpc(), MakeSR()/MakeFromSR(), or exception
+       paths that must not observe a stale regs.pc/regs.pc_oldp pair. */
     flush(1);
     compemu_raw_mov_l_ri(REG_PAR1, arg1);
     if (has_arg2)
         compemu_raw_mov_l_ri(REG_PAR2, arg2);
-    compemu_raw_set_pc_i(pc);
+    compemu_raw_set_pc_full_i(jit_hostpc_to_macpc(pc), pc);
     compemu_raw_call(helper);
     live.state[PC_P].realreg = -1;
     live.state[PC_P].val = 0;
@@ -4160,7 +4176,14 @@ static uintptr get_handler(uintptr addr)
     if (jit_force_execute_normal_successor_env() || jit_force_execute_normal_target_env(addr))
         return (uintptr)popall_execute_normal;
     blockinfo* bi = get_blockinfo_addr_new((void*)(uintptr)addr);
+#if defined(CPU_AARCH64)
+    const bool use_validated = jit_prefer_validated_successor_handler() ||
+        jit_force_nondirect_handler_env() ||
+        jit_force_nondirect_target_env(addr);
+    uintptr h = (uintptr)(use_validated ? bi->handler_to_use : bi->direct_handler_to_use);
+#else
     uintptr h = (uintptr)(jit_force_nondirect_handler_env() ? bi->handler_to_use : bi->direct_handler_to_use);
+#endif
     return h ? h : (uintptr)popall_execute_normal;
 }
 
@@ -4882,25 +4905,10 @@ STATIC_INLINE void create_popalls(void)
     popall_execute_normal_setpc = get_target();
     uintptr idx = (uintptr)&(regs.pc_p) - (uintptr)&regs;
 #if defined(CPU_AARCH64)
-    if (jit_trace_setpc_env()) {
-        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
-        MOV_xx(REG_PAR1, REG_WORK1);
-        LOAD_U32(REG_PAR2, 1);
-        compemu_raw_call((uintptr)jit_trace_setpc_value);
-        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
-    }
-    {
-        const uintptr idx_pc = (uintptr)&(regs.pc) - (uintptr)&regs;
-        const uintptr idx_oldp = (uintptr)&(regs.pc_oldp) - (uintptr)&regs;
-        /* Match m68k_setpc(): pc_p = pc_oldp = get_real_address(newpc), pc = newpc.
-           REG_WORK1 already holds the host PC for the target block. */
-        STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
-        LOAD_U64(REG_WORK2, (uintptr)&MEMBaseDiff);
-        LDR_xXi(REG_WORK2, REG_WORK2, 0);
-        SUB_xxx(REG_WORK3, REG_WORK1, REG_WORK2);
-        STR_wXi(REG_WORK3, R_REGSTRUCT, idx_pc);
-        STR_xXi(REG_WORK1, R_REGSTRUCT, idx_oldp);
-    }
+    /* Match m68k_setpc(): pc_p = pc_oldp = get_real_address(newpc),
+       pc = newpc. Centralize this instead of open-coding the triple
+       at every dispatcher-entry stub. */
+    compemu_raw_set_pc_from_reg(REG_WORK1);
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
@@ -4914,23 +4922,7 @@ STATIC_INLINE void create_popalls(void)
 
     popall_check_checksum_setpc = get_target();
 #if defined(CPU_AARCH64)
-    if (jit_trace_setpc_env()) {
-        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
-        MOV_xx(REG_PAR1, REG_WORK1);
-        LOAD_U32(REG_PAR2, 2);
-        compemu_raw_call((uintptr)jit_trace_setpc_value);
-        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
-    }
-    {
-        const uintptr idx_pc = (uintptr)&(regs.pc) - (uintptr)&regs;
-        const uintptr idx_oldp = (uintptr)&(regs.pc_oldp) - (uintptr)&regs;
-        STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
-        LOAD_U64(REG_WORK2, (uintptr)&MEMBaseDiff);
-        LDR_xXi(REG_WORK2, REG_WORK2, 0);
-        SUB_xxx(REG_WORK3, REG_WORK1, REG_WORK2);
-        STR_wXi(REG_WORK3, R_REGSTRUCT, idx_pc);
-        STR_xXi(REG_WORK1, R_REGSTRUCT, idx_oldp);
-    }
+    compemu_raw_set_pc_from_reg(REG_WORK1);
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
@@ -4940,23 +4932,7 @@ STATIC_INLINE void create_popalls(void)
 
     popall_exec_nostats_setpc = get_target();
 #if defined(CPU_AARCH64)
-    if (jit_trace_setpc_env()) {
-        STR_xXpre(REG_WORK1, RSP_INDEX, -16);
-        MOV_xx(REG_PAR1, REG_WORK1);
-        LOAD_U32(REG_PAR2, 3);
-        compemu_raw_call((uintptr)jit_trace_setpc_value);
-        LDR_xXpost(REG_WORK1, RSP_INDEX, 16);
-    }
-    {
-        const uintptr idx_pc = (uintptr)&(regs.pc) - (uintptr)&regs;
-        const uintptr idx_oldp = (uintptr)&(regs.pc_oldp) - (uintptr)&regs;
-        STR_xXi(REG_WORK1, R_REGSTRUCT, idx);
-        LOAD_U64(REG_WORK2, (uintptr)&MEMBaseDiff);
-        LDR_xXi(REG_WORK2, REG_WORK2, 0);
-        SUB_xxx(REG_WORK3, REG_WORK1, REG_WORK2);
-        STR_wXi(REG_WORK3, R_REGSTRUCT, idx_pc);
-        STR_xXi(REG_WORK1, R_REGSTRUCT, idx_oldp);
-    }
+    compemu_raw_set_pc_from_reg(REG_WORK1);
 #else
     STR_rRI(REG_WORK1, R_REGSTRUCT, idx);
 #endif
@@ -5702,8 +5678,10 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
             was_comp = 1;
 
 #if defined(CPU_AARCH64)
-            /* ARM64: reload hardware NZCV from regflags.nzcv at block entry. */
-            {
+            /* Selective materialization: only restore incoming hardware NZCV
+               when this block actually consumes incoming CZNV state.
+               FLAGX remains separately architectural via regflags.x/FLAGX. */
+            if (bi->needed_flags & FLAG_CZNV) {
                 LOAD_U64(REG_WORK1, (uintptr)&regflags.nzcv);
                 LDR_wXi(REG_WORK2, REG_WORK1, 0);
                 MSR_NZCV_x(REG_WORK2);
@@ -5995,13 +5973,9 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                         uae_u32* branch_skip_tick = (uae_u32*)get_target();
                         CBZ_wi(REG_WORK1, 0);
                         /* Cold: spcflags set → exit block */
-                        compemu_raw_set_pc_i((uintptr)pc_hist[i + 1].location);
                         {
                             uae_u32 next_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i + 1].location - (uintptr)pc_hist[0].location);
-                            compemu_raw_mov_l_mi((uintptr)&regs.pc, next_m68k_pc);
-                            LOAD_U64(REG_WORK1, (uintptr)pc_hist[i + 1].location);
-                            uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
-                            STR_xXi(REG_WORK1, R_REGSTRUCT, offs_oldp);
+                            compemu_raw_set_pc_full_i(next_m68k_pc, (uintptr)pc_hist[i + 1].location);
                         }
                         LOAD_U64(REG_WORK3, (uintptr)&countdown);
                         LDR_wXi(REG_WORK2, REG_WORK3, 0);
@@ -6051,21 +6025,11 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                             LOAD_U64(REG_WORK3, (uintptr)&(regflags.nzcv));
                             STR_wXi(REG_WORK2, REG_WORK3, 0);
                         }
-                        /* Sync PC to the NEXT instruction — full triple */
-                        compemu_raw_set_pc_i((uintptr)pc_hist[i + 1].location);
-#if defined(CPU_AARCH64)
-                        /* ARM64: also store regs.pc and regs.pc_oldp so that
-                           m68k_getpc() in m68k_do_specialties() returns the
-                           correct guest PC. Without this, the stale triple
-                           from block entry causes wrong interrupt delivery. */
+                        /* Sync PC to the NEXT instruction — full triple. */
                         {
                             uae_u32 next_m68k_pc = block_m68k_pc + (uae_u32)((uintptr)pc_hist[i + 1].location - (uintptr)pc_hist[0].location);
-                            compemu_raw_mov_l_mi((uintptr)&regs.pc, next_m68k_pc);
-                            LOAD_U64(REG_WORK1, (uintptr)pc_hist[i + 1].location);
-                            uintptr offs_oldp = (uintptr)&regs.pc_oldp - (uintptr)&regs;
-                            STR_xXi(REG_WORK1, R_REGSTRUCT, offs_oldp);
+                            compemu_raw_set_pc_full_i(next_m68k_pc, (uintptr)pc_hist[i + 1].location);
                         }
-#endif
                         /* Subtract only the cycles retired up to this point. */
                         LOAD_U64(REG_WORK3, (uintptr)&countdown);
                         LDR_wXi(REG_WORK2, REG_WORK3, 0);
@@ -6147,10 +6111,7 @@ void compile_block(cpu_history* pc_hist, int blocklen, int totcycles)
                        triple regs.pc + (regs.pc_p - regs.pc_oldp). Rebuild a
                        self-consistent triple for the current opcode before the
                        fallback call. */
-                    compemu_raw_mov_l_mi((uintptr)&regs.pc, op_m68k_pc);
-                    compemu_raw_set_pc_i((uintptr)pc_hist[i].location);
-                    compemu_raw_mov_l_rm(REG_WORK1, (uintptr)&regs.pc_p);
-                    compemu_raw_mov_l_mr((uintptr)&regs.pc_oldp, REG_WORK1);
+                    compemu_raw_set_pc_full_i(op_m68k_pc, (uintptr)pc_hist[i].location);
                     if (jit_trace_target_pc(op_m68k_pc)) {
                         compemu_raw_mov_l_ri(REG_PAR1, op_m68k_pc);
                         compemu_raw_mov_l_ri(REG_PAR2, (2u << 16) | (opcode & 0xffff));
@@ -6462,13 +6423,21 @@ endblock_done:
 
         compemu_raw_jmp((uintptr)bi->direct_handler);
 
-        /* Structural diagnostic mode: route all successor handoffs through the
-           non-direct wrapper so every chained entry revalidates pc/cache state.
-           This also covers the existing optlev=0 case, where exec_nostats()
-           requires fully canonical in-memory guest state. */
+        /* Contract-first default on ARM64: route successor handoffs through
+           the validated/non-direct wrapper unless explicitly overridden.
+           This keeps constant-successor branch chains aligned with block
+           lifecycle validation while hot-chain PC/state transfer is still
+           being normalized. It also covers the existing optlev=0 case, where
+           exec_nostats() requires fully canonical in-memory guest state. */
+#if defined(CPU_AARCH64)
+        if (!was_comp || jit_prefer_validated_successor_handler() || jit_force_nondirect_handler_env() || jit_force_nondirect_target_env((uintptr)bi->pc_p)) {
+            set_dhtu(bi, bi->handler);
+        }
+#else
         if (!was_comp || jit_force_nondirect_handler_env() || jit_force_nondirect_target_env((uintptr)bi->pc_p)) {
             set_dhtu(bi, bi->handler);
         }
+#endif
 
 
 
