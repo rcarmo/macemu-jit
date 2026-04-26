@@ -292,8 +292,12 @@ void DoPatchNameRegistry(void)
 					// G4 backside L2 cache: 512 KB at CPU/2 speed
 					u32.set_value((uint32)(CPUClockSpeed / 2));
 					RegistryPropertyCreate(power_pc.addr(), "backside-cache-frequency", u32.addr(), 4);
+					u32.set_value((uint32)(CPUClockSpeed / 2));
+					RegistryPropertyCreate(power_pc.addr(), "cache-frequency", u32.addr(), 4);
 					u32.set_value(512 * 1024);
 					RegistryPropertyCreate(power_pc.addr(), "backside-cache-size", u32.addr(), 4);
+					u32.set_value(512 * 1024);
+					RegistryPropertyCreate(power_pc.addr(), "l2-cache-size", u32.addr(), 4);
 					break;
 				case 0x39:	// 970
 					u32.set_value(128);
