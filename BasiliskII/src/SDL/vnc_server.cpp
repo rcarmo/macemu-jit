@@ -621,7 +621,8 @@ void VNCServerUpdate(SDL_Surface *surface, const SDL_Rect &updated_rect)
 					   surface->format->Bmask,
 					   vnc_snapshot.data());
 		rfbMarkRectAsModified(vnc_server, clipped.x, clipped.y, clipped.x + clipped.w, clipped.y + clipped.h);
-		rfbProcessEvents(vnc_server, 0);
+		/* Do NOT call rfbProcessEvents here — the background thread handles it.
+		 * Calling it from the main thread too causes double-delivery of keyboard events. */
 		return;
 	}
 
