@@ -717,13 +717,25 @@ void powerpc_cpu::execute(uint32 entry)
 				if (ppc_jit_aarch64_compile(pc(), RAMBaseHost, RAMSize, &jblk) && jblk.complete) { /* GATE 2: complete-only */
 					ppc_jit_entry_fn fn = (ppc_jit_entry_fn)(void*)jblk.code;
 					fn((void*)regs_ptr());
-					/* GATE 3: PC range check — detect compiler bugs (log + skip rather than silent skip) */
+					/* GATE 3: PC range check.
+					 * If the JIT produced an out-of-range PC, the block branched to
+					 * hardware-mapped Mac OS space (e.g. NuBus/MMIO) that SheepShaver
+					 * doesn't map. The interpreter handles these gracefully via the
+					 * SIGSEGV skip path (ignoresegv). So:
+					 *   1. Restore PC to block entry (safe interpreter start)
+					 *   2. Invalidate this block from JIT cache
+					 *   3. Fall through to interpreter (goto skip_jit)
+					 * Contract: see AARCH64_JIT_RUNTIME_CONTRACT.md */
 					uint32 jit_pc = pc();
 					if (jit_pc >= (uint32)(uintptr_t)RAMBaseHost + RAMSize &&
 					    !(jit_pc >= (uint32)ROMBase && jit_pc < (uint32)ROMBase + 0x500000)) {
-						fprintf(stderr, "PPC-JIT-A64: GATE3: out-of-range PC 0x%08x after block at 0x%08x\n",
+						fprintf(stderr, "PPC-JIT-A64: GATE3: out-of-range PC 0x%08x after block at 0x%08x — handing to interpreter\n",
 						        jit_pc, jblk.ppc_start_pc);
-						continue;
+						/* Reset to block entry so interpreter starts from a known-good PC */
+						set_register(powerpc_registers::PC, any_register(jblk.ppc_start_pc));
+						/* Evict from block cache so this block always goes to interpreter */
+						ppc_jit_aarch64_invalidate_pc(jblk.ppc_start_pc);
+						goto skip_jit;
 					}
 					if (!spcflags().empty()) {
 						if (!check_spcflags()) goto return_site;

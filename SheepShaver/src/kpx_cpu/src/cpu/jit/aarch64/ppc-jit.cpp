@@ -51,6 +51,12 @@ static void jit_bc_flush(void) {
 	for (int i = 0; i < JIT_BC_SIZE; i++) jit_bc[i].code = NULL;
 }
 
+static void jit_bc_invalidate_pc(uint32_t pc) {
+	/* Remove one block from cache so interpreter handles it on next execution. */
+	struct jit_bc_entry *e = &jit_bc[pc & JIT_BC_MASK];
+	if (e->code && e->pc == pc) e->code = NULL;
+}
+
 static const struct jit_bc_entry *jit_bc_lookup(uint32_t pc) {
 	const struct jit_bc_entry *e = &jit_bc[pc & JIT_BC_MASK];
 	return (e->code && e->pc == pc) ? e : NULL;
@@ -3061,6 +3067,11 @@ void ppc_jit_aarch64_flush(void)
 	 * Contract: see SheepShaver/docs/AARCH64_JIT_RUNTIME_CONTRACT.md — flush discipline. */
 	jit_cache_wp = (uint32_t *)jit_cache_base;
 	jit_bc_flush();
+}
+
+void ppc_jit_aarch64_invalidate_pc(uint32_t pc)
+{
+	jit_bc_invalidate_pc(pc);
 }
 
 bool ppc_jit_aarch64_compile(
