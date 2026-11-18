@@ -223,6 +223,12 @@ extern void Quit680x0(void);	// Quit 680x0
 extern "C" void Execute68k(uint32 addr, M68kRegisters *r);		// Execute 68k code from EMUL_OP routine
 extern "C" void Execute68kTrap(uint16 trap, M68kRegisters *r);	// Execute MacOS 68k trap from EMUL_OP routine
 
+// Host code wrote guest memory that may hold 68k code (e.g. a disk read):
+// drop translations of [addr, addr + size) that the CPU engine can't see
+// being overwritten.  Only the Unicorn engine needs this.
+#define HAVE_HOST_WROTE_MAC_MEMORY 1
+extern void HostWroteMacMemory(uint32 addr, uint32 size);
+
 // Interrupt functions
 #if 0
 extern int MFPdoInterrupt(void);

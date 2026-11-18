@@ -32,6 +32,7 @@
 #include "newcpu.h"
 #include "fpu/fpu.h"
 #include "compiler/compemu.h"
+#include "unicorn_cpu.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -150,14 +151,30 @@ bool Init680x0(void)
 #endif
 
 	init_m68k();
+
+	// Unicorn replaces both the UAE interpreter and the JIT when available
+	const bool use_unicorn = unicorn_cpu_init();
 #if USE_JIT
-	UseJIT = compiler_use_jit();
+	UseJIT = !use_unicorn && compiler_use_jit();
 	if (UseJIT)
 	    compiler_init();
 	else
 		TimerRestoreAsyncOwnership();
+#else
+	(void)use_unicorn;
 #endif
 	return true;
+}
+
+
+/*
+ *  Host code wrote guest memory: invalidate translated code
+ */
+
+void HostWroteMacMemory(uint32 addr, uint32 size)
+{
+	if (unicorn_cpu_enabled)
+		unicorn_cpu_invalidate(addr, size);
 }
 
 
@@ -167,6 +184,7 @@ bool Init680x0(void)
 
 void Exit680x0(void)
 {
+	unicorn_cpu_exit();
 #if USE_JIT
     if (UseJIT)
 	compiler_exit();
@@ -557,6 +575,7 @@ static bool run_opcode_test_mode_glue()
 			(unsigned)m68k_areg(regs, 4), (unsigned)m68k_areg(regs, 5),
 			(unsigned)m68k_areg(regs, 6), (unsigned)m68k_areg(regs, 7), (unsigned)regs.sr,
 			(unsigned)fpu_get_fpsr());
+#if defined(USE_JIT) && (defined(CPU_arm) || defined(CPU_aarch64) || defined(CPU_AARCH64))
 		if (test_dump_fp_enabled_glue())
 			fprintf(stderr,
 			" FP0=%016llx FP1=%016llx FP2=%016llx FP3=%016llx FP4=%016llx FP5=%016llx FP6=%016llx FP7=%016llx",
@@ -568,6 +587,7 @@ static bool run_opcode_test_mode_glue()
 			(unsigned long long)double_bits_glue(regs.jit_fpregs[5]),
 			(unsigned long long)double_bits_glue(regs.jit_fpregs[6]),
 			(unsigned long long)double_bits_glue(regs.jit_fpregs[7]));
+#endif
 		fputc('\n', stderr);
 		dump_test_mem_ranges_glue();
 	}
@@ -604,6 +624,8 @@ void TriggerInterrupt(void)
 	   Now we always set SPCFLAG_INT; the spcflags dispatch in newcpu.cpp
 	   already checks intmask vs interrupt level before delivery. */
 	SPCFLAGS_SET(SPCFLAG_INT);
+	if (unicorn_cpu_enabled)
+		unicorn_cpu_request_stop();
 	if (UseDeferredInterruptModel() && trace_irqmanaged_env_glue()) {
 		static unsigned long trace_count = 0;
 		if (trace_count < 4000) {

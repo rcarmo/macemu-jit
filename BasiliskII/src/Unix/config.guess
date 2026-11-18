@@ -1330,6 +1330,10 @@ EOF
 	if test "$UNAME_PROCESSOR" = unknown ; then
 	    UNAME_PROCESSOR=powerpc
 	fi
+	# Apple Silicon: uname -p reports "arm"; it is a 64-bit aarch64 host.
+	if test "$UNAME_PROCESSOR" = arm && test "`uname -m`" = arm64 ; then
+	    UNAME_PROCESSOR=aarch64
+	fi
 	if test "`echo "$UNAME_RELEASE" | sed -e 's/\..*//'`" -le 10 ; then
 	    if [ "$CC_FOR_BUILD" != no_compiler_found ]; then
 		if (echo '#ifdef __LP64__'; echo IS_64BIT_ARCH; echo '#endif') | \

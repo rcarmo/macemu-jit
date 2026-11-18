@@ -36,14 +36,16 @@ AC_ARG_ENABLE(sdl-video,     [  --enable-sdl-video      use SDL for video graphi
 AC_ARG_ENABLE(sdl-audio,     [  --enable-sdl-audio      use SDL for audio [default=no]], [WANT_SDL_AUDIO=$enableval], [WANT_SDL_AUDIO=yes])
 AC_ARG_ENABLE(sdl-framework,    [  --enable-sdl-framework  use SDL framework [default=no]], [WANT_SDL_FRAMEWORK=$enableval], [WANT_SDL_FRAMEWORK=no])
 AC_ARG_ENABLE(sdl-framework-prefix,    [  --enable-sdl-framework-prefix=PFX    default=/Library/Frameworks], [SDL_FRAMEWORK="$enableval"], [SDL_FRAMEWORK=/Library/Frameworks])
-AC_ARG_WITH(sdl1,            [  --with-sdl1             use SDL 1.x, rather than SDL 2.x [default=no]], [WANT_SDL_VERSION_MAJOR=1], [])
-AC_ARG_WITH(sdl3,            [  --with-sdl3             use SDL 3.x, rather than SDL 2.x [default=no]], [WANT_SDL_VERSION_MAJOR=3], [])
+AC_ARG_WITH(sdl1,            [  --with-sdl1             use SDL 1.x, rather than SDL 3.x [default=no]], [WANT_SDL_VERSION_MAJOR=1], [])
+AC_ARG_WITH(sdl2,            [  --with-sdl2             use SDL 2.x, rather than SDL 3.x [default=no]], [WANT_SDL_VERSION_MAJOR=2], [])
+AC_ARG_WITH(sdl3,            [  --with-sdl3             use SDL 3.x (this is the default) [default=yes]], [WANT_SDL_VERSION_MAJOR=3], [])
 
 dnl JIT compiler options.
 AC_ARG_ENABLE(jit-compiler,  [  --enable-jit-compiler   enable JIT compiler [default=yes]], [WANT_JIT=$enableval], [WANT_JIT=yes])
 AC_ARG_ENABLE(jit-debug,     [  --enable-jit-debug      activate native code disassemblers [default=no]], [WANT_JIT_DEBUG=$enableval], [WANT_JIT_DEBUG=no])
 AC_ARG_ENABLE(arm-jit-experimental, [  --enable-arm-jit-experimental  enable experimental ARM32 JIT backend (unsupported, default=no)], [WANT_ARM_JIT_EXPERIMENTAL=$enableval], [WANT_ARM_JIT_EXPERIMENTAL=no])
-AC_ARG_ENABLE(aarch64-jit-experimental, [  --enable-aarch64-jit-experimental  enable experimental AArch64 JIT backend (unsupported, default=no)], [WANT_AARCH64_JIT_EXPERIMENTAL=$enableval], [WANT_AARCH64_JIT_EXPERIMENTAL=no])
+AC_ARG_ENABLE(aarch64-jit-experimental, [  --enable-aarch64-jit-experimental  enable experimental AArch64 JIT backend (default=yes on macOS/AArch64, no elsewhere)], [WANT_AARCH64_JIT_EXPERIMENTAL=$enableval], [WANT_AARCH64_JIT_EXPERIMENTAL=auto])
+AC_ARG_ENABLE(unicorn,       [  --enable-unicorn        execute 68k code with the Unicorn engine (needs libunicorn) [default=auto]], [WANT_UNICORN=$enableval], [WANT_UNICORN=auto])
 AC_ARG_WITH(uae-core,
   AS_HELP_STRING([--with-uae-core=CORE], [select UAE CPU core: auto|legacy|2021 [default=auto]]),
   [WANT_UAE_CORE=$withval],
@@ -188,6 +190,26 @@ dnl Canonical system information.
 AC_CANONICAL_HOST
 AC_CANONICAL_TARGET
 
+dnl The bundled config.guess predates Apple Silicon and reports
+dnl arm-apple-darwin on arm64 Macs, which selects 32-bit ARM code paths.
+case "$build_os:$build_cpu:$target_os:$target_cpu" in
+darwin*:arm:darwin*:arm)
+  if [[ "x`uname -m`" = "xarm64" ]]; then
+    build_cpu=aarch64
+    host_cpu=aarch64
+    target_cpu=aarch64
+  fi
+  ;;
+esac
+
+dnl The AArch64 JIT is opt-in on Linux, but the default on macOS/AArch64.
+if [[ "x$WANT_AARCH64_JIT_EXPERIMENTAL" = "xauto" ]]; then
+  case "$target_os:$target_cpu" in
+  darwin*:aarch64*) WANT_AARCH64_JIT_EXPERIMENTAL=yes;;
+  *) WANT_AARCH64_JIT_EXPERIMENTAL=no;;
+  esac
+fi
+
 dnl Target OS type (target is host if not cross-compiling).
 case "$target_os" in
   linux*)	OS_TYPE=linux;;
@@ -235,6 +257,17 @@ fi
 
 dnl Checks for programs.
 AC_PROG_CC_C99
+dnl Autoconf >= 2.73 selects -std=gnu23, which rejects the K&R-style function
+dnl definitions in slirp. Keep C at gnu11 so modern clang/gcc can build it.
+dnl The flag goes in CFLAGS, not CC: CC is also used as "$(CC) -E" on C++
+dnl sources (e.g. SheepShaver's ppc-execute-impl.cpp generator), where clang
+dnl rejects a C -std= flag.
+case "$CC" in
+*-std=gnu23*|*-std=c23*)
+  CC=`echo "$CC" | sed -e 's/ *-std=gnu23//' -e 's/ *-std=c23//'`
+  CFLAGS="$CFLAGS -std=gnu11"
+  ;;
+esac
 AC_PROG_CC_C_O
 AC_PROG_CPP
 AC_PROG_CXX
@@ -314,14 +347,30 @@ if [[ "x$WANT_SDL_AUDIO" = "xyes" ]]; then
   SDL_SUPPORT="$SDL_SUPPORT audio"
 fi
 if [[ "x$WANT_SDL" = "xyes" ]]; then
+  SDL_FRAMEWORK_FOUND=no
   if [[ "x$WANT_SDL_FRAMEWORK" = "xyes" ]]; then
     TEMP_WANT_SDL_VERSION_MAJOR=$WANT_SDL_VERSION_MAJOR
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x" ]]; then
-      TEMP_WANT_SDL_VERSION_MAJOR=2
+      TEMP_WANT_SDL_VERSION_MAJOR=3
+    fi
+    if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x3" ]]; then
+      saved_fw_CPPFLAGS="$CPPFLAGS"
+      CPPFLAGS="$CPPFLAGS -F$SDL_FRAMEWORK"
+      AC_CHECK_SDLFRAMEWORK(SDL3, [#include <SDL3/SDL.h>], [
+        CFLAGS="$CFLAGS -F$SDL_FRAMEWORK"
+        CXXFLAGS="$CXXFLAGS -F$SDL_FRAMEWORK"
+        AC_DEFINE([USE_SDL3], [1], [Use SDL3])
+        WANT_SDL_VERSION_MAJOR=3
+        SDL_FRAMEWORK_FOUND=yes
+      ], [
+        CPPFLAGS="$saved_fw_CPPFLAGS"
+        TEMP_WANT_SDL_VERSION_MAJOR=2
+      ])
     fi
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x2" ]]; then
       AC_CHECK_SDLFRAMEWORK(SDL2, [#include <SDL.h>], [
         WANT_SDL_VERSION_MAJOR=2
+        SDL_FRAMEWORK_FOUND=yes
       ], [
         TEMP_WANT_SDL_VERSION_MAJOR=1
       ])
@@ -329,15 +378,14 @@ if [[ "x$WANT_SDL" = "xyes" ]]; then
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x1" ]]; then
       AC_CHECK_SDLFRAMEWORK(SDL, [#include <SDL.h>], [
         WANT_SDL_VERSION_MAJOR=1
+        SDL_FRAMEWORK_FOUND=yes
       ])
     fi
-  else
-    ac_cv_framework_SDL=no
   fi
-  if [[ "x$ac_cv_framework_SDL" = "xno" ]]; then
+  if [[ "x$SDL_FRAMEWORK_FOUND" = "xno" ]]; then
     TEMP_WANT_SDL_VERSION_MAJOR=$WANT_SDL_VERSION_MAJOR
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x" ]]; then
-      TEMP_WANT_SDL_VERSION_MAJOR=2
+      TEMP_WANT_SDL_VERSION_MAJOR=3
     fi
 
     dnl use PKG_PROG_PKG_CONFIG to declare PKG_CONFIG variables.  Otherwise,
@@ -355,7 +403,8 @@ if [[ "x$WANT_SDL" = "xyes" ]]; then
 	AC_DEFINE([USE_SDL3], [1], [Use SDL3])
         WANT_SDL_VERSION_MAJOR=3
       ], [
-        TEMP_WANT_SDL_VERSION_MAJOR=1
+        AC_MSG_WARN([SDL 3.x not found via pkg-config, falling back to SDL 2.x])
+        TEMP_WANT_SDL_VERSION_MAJOR=2
       ])
     fi
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x2" ]]; then
@@ -1546,7 +1595,8 @@ fi
 
 if [[ "x$OS_TYPE" = "xdarwin" ]]; then
   WANT_VOSF=no
-  if [[ "$target_cpu" != "arm" ]]; then
+  dnl arm64 macOS refuses to run non-PIE executables.
+  if [[ "$target_cpu" != "arm" -a "$target_cpu" != "aarch64" ]]; then
     LDFLAGS="$LDFLAGS -Wl,-no_pie -pagezero_size 0x1000"
   fi
 fi
@@ -2061,6 +2111,29 @@ if [[ "x$WANT_NATIVE_M68K" = "xno" ]]; then
   fi
 fi
 
+dnl Unicorn engine 68k backend (uae_cpu_2026 core, real or direct addressing)
+HAVE_UNICORN=no
+if [[ "x$WANT_UNICORN" != "xno" ]]; then
+  if [[ "x$WANT_NATIVE_M68K" = "xno" -a "$UAE_PATH" = "../uae_cpu_2026" ]] &&
+     [[ "x$ADDRESSING_MODE" = "xreal" -o "x$ADDRESSING_MODE" = "xdirect" ]]; then
+    PKG_CHECK_MODULES([unicorn], [unicorn >= 2.0], [
+      HAVE_UNICORN=yes
+      CXXFLAGS="$CXXFLAGS $unicorn_CFLAGS"
+      CFLAGS="$CFLAGS $unicorn_CFLAGS"
+      LIBS="$LIBS $unicorn_LIBS -lpthread -lm"
+      DEFINES="$DEFINES -DUSE_UNICORN_M68K"
+      CPUSRCS="$CPUSRCS $UAE_PATH/unicorn_cpu.cpp"
+    ], [
+      AC_MSG_WARN([Unicorn engine not found via pkg-config])
+    ])
+  else
+    AC_MSG_WARN([Unicorn backend needs the 2026 UAE core with real or direct addressing])
+  fi
+  if [[ "x$WANT_UNICORN" = "xyes" -a "x$HAVE_UNICORN" = "xno" ]]; then
+    AC_MSG_ERROR([--enable-unicorn was given but the Unicorn backend cannot be built])
+  fi
+fi
+
 dnl Or if we have -IPA (MIPSPro compilers)
 if [[ "x$HAVE_IPA" = "xyes" ]]; then
   CFLAGS="`echo $CFLAGS | sed -e 's/-g//g'` -O3 -OPT:Olimit=0 -IPA"
@@ -2108,6 +2181,7 @@ echo Use JIT compiler ....................... : $WANT_JIT
 echo Experimental ARM JIT toggle ........... : $WANT_ARM_JIT_EXPERIMENTAL
 echo Experimental AArch64 JIT toggle ....... : $WANT_AARCH64_JIT_EXPERIMENTAL
 echo "Selected UAE CPU core ................. : $WANT_UAE_CORE ($UAE_PATH)"
+echo Unicorn 68k engine ..................... : $HAVE_UNICORN
 echo JIT debug mode ......................... : $WANT_JIT_DEBUG
 echo Floating-Point emulation core .......... : $FPE_CORE
 echo Assembly optimizations ................. : $ASM_OPTIMIZATIONS

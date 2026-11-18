@@ -351,6 +351,9 @@ int16 SonyPrime(uint32 pb, uint32 dce)
 
 		// Read
 		actual = Sys_read(info->fh, buffer, position, length);
+#if defined(SHEEPSHAVER) || defined(HAVE_HOST_WROTE_MAC_MEMORY)
+		HostWroteMacMemory(ReadMacInt32(pb + ioBuffer), (uint32)actual);
+#endif
 		if (actual != length)
 			return set_dsk_err(readErr);
 
