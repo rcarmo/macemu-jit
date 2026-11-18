@@ -30,7 +30,7 @@
 #include <Cocoa/Cocoa.h>
 #include "VMSettingsController.h"
 
-#include <SDL.h>
+#include "my_sdl.h"
 
 @interface SheepShaverMain : NSObject
 {

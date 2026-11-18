@@ -244,7 +244,7 @@ static void powerpc_decode_instruction(instruction_t *instruction, unsigned int 
 
 #if HAVE_SIGINFO_T
 // Generic extended signal handler
-#if defined(__hpux)
+#if defined(__hpux) || (defined(__APPLE__) && defined(__MACH__))
 #define SIGSEGV_ALL_SIGNALS				FAULT_HANDLER(SIGSEGV) FAULT_HANDLER(SIGBUS)
 #else
 #define SIGSEGV_ALL_SIGNALS				FAULT_HANDLER(SIGSEGV)
@@ -324,6 +324,13 @@ static void powerpc_decode_instruction(instruction_t *instruction, unsigned int 
 #define SIGSEGV_SKIP_INSTRUCTION		powerpc_skip_instruction
 #endif
 #endif
+#if defined(__APPLE__) && defined(__MACH__) && (defined(__aarch64__) || defined(__arm64__))
+#include <sys/ucontext.h>
+#define SIGSEGV_CONTEXT_REGS			(((ucontext_t *)scp)->uc_mcontext->__ss)
+#define SIGSEGV_FAULT_INSTRUCTION		(SIGSEGV_CONTEXT_REGS.__pc)
+#define SIGSEGV_REGISTER_FILE			((unsigned long *)&SIGSEGV_CONTEXT_REGS)
+#define SIGSEGV_SKIP_INSTRUCTION		aarch64_skip_instruction
+#endif
 #if defined(__linux__)
 #if HAVE_ASM_UCONTEXT
 #include <asm/ucontext.h> /* use kernel structure, glibc may not be in sync */
@@ -371,6 +378,18 @@ static void powerpc_decode_instruction(instruction_t *instruction, unsigned int 
 #define SIGSEGV_SKIP_INSTRUCTION		mips_skip_instruction
 #endif
 #endif  // defined(__linux__)
+#if defined(__APPLE__) && defined(__MACH__) && (defined(__aarch64__) || defined(__arm64__))
+// macOS on Apple Silicon: protection faults on mapped pages arrive as SIGBUS.
+// _STRUCT_ARM_THREAD_STATE64 is x0-x28, fp, lr, sp, pc, so pc sits at index 32
+// exactly like the Linux regs[31]/sp/pc layout used by aarch64_skip_instruction.
+#include <sys/ucontext.h>
+#undef  SIGSEGV_ALL_SIGNALS
+#define SIGSEGV_ALL_SIGNALS				FAULT_HANDLER(SIGSEGV) FAULT_HANDLER(SIGBUS)
+#define SIGSEGV_CONTEXT_REGS			(((ucontext_t *)scp)->uc_mcontext->__ss)
+#define SIGSEGV_FAULT_INSTRUCTION		(SIGSEGV_CONTEXT_REGS.__pc)
+#define SIGSEGV_REGISTER_FILE			((unsigned long *)&SIGSEGV_CONTEXT_REGS)
+#define SIGSEGV_SKIP_INSTRUCTION		aarch64_skip_instruction
+#endif
 #if (defined(__hpux) || defined(__hpux__))
 #if (defined(__hppa) || defined(__hppa__))
 #define SIGSEGV_CONTEXT_REGS			(&((ucontext_t *)scp)->uc_mcontext)
@@ -2560,7 +2579,7 @@ static bool arm_skip_instruction(unsigned long * regs)
 }
 #endif
 
-#ifdef _STRUCT_ARM_THREAD_STATE64
+#if defined(_STRUCT_ARM_THREAD_STATE64) && defined(HAVE_MACH_EXCEPTIONS)
 static bool aarch64_skip_instruction(unsigned long *regs) {
 	_STRUCT_ARM_THREAD_STATE64 *ts = (_STRUCT_ARM_THREAD_STATE64 *)regs;
 	if (!ts->__pc) return false;
@@ -2568,7 +2587,7 @@ static bool aarch64_skip_instruction(unsigned long *regs) {
 	return true;
 }
 #endif
-#ifdef __linux__
+#if defined(__linux__) || (defined(__APPLE__) && !defined(HAVE_MACH_EXCEPTIONS) && (defined(__aarch64__) || defined(__arm64__)))
 static bool aarch64_skip_instruction(unsigned long *regs) {
 	unsigned long long *r = (unsigned long long *)regs;
 	unsigned long long pc = r[32];

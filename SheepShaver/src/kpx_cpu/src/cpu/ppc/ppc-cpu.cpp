@@ -27,6 +27,9 @@
 #include "vm_alloc.h"
 #include "cpu/vm.hpp"
 #include "cpu/ppc/ppc-cpu.hpp"
+#if PPC_ENABLE_UNICORN
+#include "cpu/ppc/ppc-unicorn.hpp"
+#endif
 #ifndef SHEEPSHAVER
 #include "basic-kernel.hpp"
 #endif
@@ -41,9 +44,33 @@
 #define PPC_AARCH64_DIRECT_JIT 0
 #endif
 
+#if PPC_AARCH64_DIRECT_JIT
+/* The AArch64 PPC JIT emits guest EAs as host pointers, so it requires the
+ * guest address space to be mapped 1:1 (VMBaseDiff == 0). Direct addressing
+ * with a non-zero offset (e.g. NATMEM_OFFSET on Apple Silicon, where the 4 GB
+ * __PAGEZERO forbids low fixed mappings) must use the interpreter instead. */
+static bool ppc_aarch64_jit_address_space_ok(void)
+{
+#if DIRECT_ADDRESSING
+	static bool warned = false;
+	if (VMBaseDiff != 0) {
+		if (!warned) {
+			fprintf(stderr, "AArch64 PPC JIT disabled: needs 1:1 guest mapping, "
+				"VMBaseDiff=0x%lx; using the interpreter\n", (unsigned long)VMBaseDiff);
+			warned = true;
+		}
+		return false;
+	}
+#endif
+	return true;
+}
+#endif
+
 static bool ppc_aarch64_reentrant_direct_jit_enabled(void)
 {
 #if PPC_AARCH64_DIRECT_JIT
+	if (!ppc_aarch64_jit_address_space_ok())
+		return false;
 	/* AArch64 direct-JIT reentrant execution is the default product path after
 	 * the slow-path store byte-order fix and 3600s opt-in cold-boot hold.  Keep
 	 * SS_JIT_REENTRANT_DIRECT=0 as an emergency/runtime diagnostic opt-out. */
@@ -732,6 +759,9 @@ void powerpc_cpu::initialize()
 	init_registers();
 	init_decode_cache();
 	execute_depth = 0;
+#if PPC_ENABLE_UNICORN
+	unicorn = NULL;
+#endif
 
 	// Initialize block lookup table
 #if PPC_DECODE_CACHE || PPC_ENABLE_JIT
@@ -843,6 +873,10 @@ powerpc_cpu::powerpc_cpu(task_struct *parent_task)
 powerpc_cpu::~powerpc_cpu()
 {
 	--ppc_refcount;
+#if PPC_ENABLE_UNICORN
+	delete unicorn;
+	unicorn = NULL;
+#endif
 #if PPC_PROFILE_COMPILE_TIME
 	clock_t emul_end_time = clock();
 
@@ -983,7 +1017,15 @@ bool powerpc_cpu::check_spcflags()
 			processing_interrupt = true;
 			powerpc_registers r;
 			powerpc_registers::interrupt_copy(r, regs());
+#if PPC_ENABLE_UNICORN
+			if (unicorn)
+				unicorn->save_interrupted_state();
+#endif
 			HandleInterrupt(&r);
+#if PPC_ENABLE_UNICORN
+			if (unicorn)
+				unicorn->restore_interrupted_state();
+#endif
 			powerpc_registers::interrupt_copy(regs(), r);
 			processing_interrupt = false;
 		}
@@ -1037,6 +1079,12 @@ void * PF_CONVENTION powerpc_cpu::compile_chain_block(block_info *sbi)
 
 void powerpc_cpu::execute(uint32 entry)
 {
+#if PPC_ENABLE_UNICORN
+	if (unicorn) {
+		execute_unicorn(entry);
+		return;
+	}
+#endif
 	bool invalidated_cache = false;
 	pc() = entry;
 #if PPC_EXECUTE_DUMP_STATE
@@ -1170,7 +1218,8 @@ void powerpc_cpu::execute(uint32 entry)
 			{
 				static bool jit_init_done = false;
 				static const char *jit_env = getenv("SS_USE_JIT");
-				static bool jit_enabled = !(jit_env && jit_env[0] == '0' && jit_env[1] == '\0');
+				static bool jit_enabled = !(jit_env && jit_env[0] == '0' && jit_env[1] == '\0') &&
+					ppc_aarch64_jit_address_space_ok();
 				if (!jit_enabled) {
 					jit_skip_reason = PPC_JIT_SKIP_DISABLED;
 					jit_skip_pc = pc();
@@ -1452,6 +1501,402 @@ void powerpc_cpu::execute()
 	execute(pc());
 }
 
+#if PPC_ENABLE_UNICORN
+/*
+ *  Unicorn engine backend
+ *
+ *  Guest code runs inside Unicorn until it needs the host: an instruction
+ *  that traps (SheepShaver's opcode-6 EMUL_OP/NATIVE_OP/EXEC_RETURN
+ *  instructions, privileged instructions, anything Unicorn does not
+ *  implement), a store to a read-only range, or an asynchronous stop for
+ *  an interrupt.  The trapping instruction is then executed by this
+ *  interpreter on the kpx register file, so SheepShaver semantics are
+ *  identical to the interpreter path.  Nested execute() calls (interrupts,
+ *  Execute68k, call_macos) simply start another Unicorn run.
+ */
+
+void powerpc_cpu::enable_unicorn(ppc_unicorn *engine)
+{
+	delete unicorn;
+	unicorn = engine;
+}
+
+void powerpc_cpu::unicorn_request_stop()
+{
+	ppc_unicorn *u = unicorn;
+	if (u)
+		u->request_stop();
+}
+
+void powerpc_cpu::unicorn_invalidate_range(uint32 start, uint32 end)
+{
+	if (unicorn)
+		unicorn->invalidate_range(start, end);
+}
+
+void powerpc_cpu::unicorn_dump_history()
+{
+	if (unicorn)
+		unicorn->dump_history();
+}
+
+/*
+ *  Differential self test: execute random instructions with the
+ *  interpreter and with Unicorn from identical state and compare.
+ */
+
+static uint32 st_rng_state;
+static uint32 st_rand()
+{
+	st_rng_state ^= st_rng_state << 13;
+	st_rng_state ^= st_rng_state >> 17;
+	st_rng_state ^= st_rng_state << 5;
+	return st_rng_state;
+}
+
+static uint32 st_value()
+{
+	static const uint32 specials[] = {
+		0, 1, 2, 0xffffffff, 0x80000000, 0x7fffffff, 0x0000ffff, 0xffff0000,
+		0x00008000, 0xffff8000, 0x00000020, 0x0000001f, 0x12345678, 0xfffffffe
+	};
+	switch (st_rand() % 4) {
+	case 0: return specials[st_rand() % (sizeof(specials) / sizeof(specials[0]))];
+	case 1: return st_rand() & 0xff;
+	default: return st_rand();
+	}
+}
+
+static uint64 st_fp_value()
+{
+	static const uint64 specials[] = {
+		0x0000000000000000ULL, 0x8000000000000000ULL, 0x3ff0000000000000ULL, 0xbff0000000000000ULL,
+		0x7ff0000000000000ULL, 0xfff0000000000000ULL, 0x7ff8000000000000ULL, 0x7ff4000000000000ULL,
+		0x0000000000000001ULL, 0x000fffffffffffffULL, 0x4330000000000000ULL, 0x41dfffffffc00000ULL,
+		0xc1e0000000000000ULL, 0x3fe0000000000000ULL, 0x4008000000000000ULL, 0x47efffffe0000000ULL,
+		0x3810000000000000ULL, 0x36a0000000000000ULL
+	};
+	switch (st_rand() % 3) {
+	case 0: return specials[st_rand() % (sizeof(specials) / sizeof(specials[0]))];
+	case 1: {	// "nice" doubles
+		union { double d; uint64 j; } u;
+		u.d = (double)(int32)st_rand() / (double)((st_rand() & 0xffff) + 1);
+		return u.j;
+	}
+	default: return ((uint64)st_rand() << 32) | st_rand();
+	}
+}
+
+// Build a random instruction.  Memory forms get their base register pointed
+// into the data buffer by the caller (*mem_ra / *mem_rb).
+static uint32 st_make_insn(int *mem_ra, int *mem_rb, bool *mem_update, bool *skip)
+{
+	*mem_ra = *mem_rb = -1;
+	*mem_update = false;
+	*skip = false;
+	const uint32 rd = st_rand() & 31, ra = st_rand() & 31, rb = st_rand() & 31, rc = st_rand() & 31;
+	const uint32 rcbit = st_rand() & 1, oe = (st_rand() & 1) << 10;
+	const uint32 imm = st_rand() & 0xffff;
+	#define D_FORM(op) (((op) << 26) | (rd << 21) | (ra << 16) | imm)
+	#define X_FORM(xo) ((31u << 26) | (rd << 21) | (ra << 16) | (rb << 11) | ((xo) << 1) | rcbit)
+	#define XO_FORM(xo) ((31u << 26) | (rd << 21) | (ra << 16) | (rb << 11) | oe | ((xo) << 1) | rcbit)
+	static const int xo_arith[] = { 266, 10, 138, 234, 202, 40, 8, 136, 232, 200, 104, 235, 75, 11, 491, 459 };
+	static const int x_logic[] = { 28, 60, 444, 412, 316, 476, 124, 284, 24, 536, 792, 824, 26, 954, 922 };
+	static const int d_alu[] = { 14, 15, 12, 13, 8, 7, 28, 29, 24, 25, 26, 27 };
+	static const int d_load[] = { 32, 33, 34, 35, 40, 41, 42, 43, 48, 49, 50, 51 };
+	static const int d_store[] = { 36, 37, 38, 39, 44, 45, 52, 53, 54, 55 };
+	static const int x_mem[] = { 23, 55, 87, 119, 151, 183, 215, 247, 279, 311, 343, 375, 407, 439,
+		534, 662, 790, 918, 535, 599, 663, 727, 983, 1014, 567, 631, 695, 759 };
+	static const int fp_a[] = { 21, 20, 25, 18, 29, 28, 31, 30, 23 };
+	static const int fp_x[] = { 14, 15, 12, 40, 264, 136, 72, 0, 32, 583, 711, 134, 70, 38, 64 };
+	static const int cr_ops[] = { 257, 449, 193, 225, 33, 289, 129, 417, 0 };
+	#define PICK(a) (a[st_rand() % (sizeof(a) / sizeof(a[0]))])
+	switch (st_rand() % 14) {
+	case 0: case 1: return XO_FORM(PICK(xo_arith));
+	case 2: case 3: {
+		int xo = PICK(x_logic);
+		// X-form logical ops: rS in rd field, rA destination
+		return X_FORM(xo);
+	}
+	case 4: return D_FORM(PICK(d_alu));
+	case 5: {	// rotates
+		static const int rot[] = { 20, 21, 23 };
+		return (PICK(rot) << 26) | (rd << 21) | (ra << 16) | (rb << 11) | ((st_rand() & 31) << 6) | ((st_rand() & 31) << 1) | rcbit;
+	}
+	case 6: {	// compares
+		const uint32 crf = (st_rand() & 7) << 23;
+		switch (st_rand() % 4) {
+		case 0: return (11u << 26) | crf | (ra << 16) | imm;
+		case 1: return (10u << 26) | crf | (ra << 16) | imm;
+		case 2: return (31u << 26) | crf | (ra << 16) | (rb << 11) | (0 << 1);
+		default: return (31u << 26) | crf | (ra << 16) | (rb << 11) | (32 << 1);
+		}
+	}
+	case 7: {	// CR / SPR moves
+		switch (st_rand() % 6) {
+		case 0: return (31u << 26) | (rd << 21) | (19 << 1);								// mfcr
+		case 1: return (31u << 26) | (rd << 21) | ((st_rand() & 0xff) << 12) | (144 << 1);	// mtcrf
+		case 2: return (31u << 26) | ((st_rand() & 7) << 23) | (512 << 1);					// mcrxr
+		case 3: { static const int spr[] = { 1, 8, 9 }; int s = PICK(spr);
+			return (31u << 26) | (rd << 21) | ((s & 31) << 16) | ((s >> 5) << 11) | (339 << 1); }	// mfspr
+		case 4: { static const int spr[] = { 1, 8, 9 }; int s = PICK(spr);
+			return (31u << 26) | (rd << 21) | ((s & 31) << 16) | ((s >> 5) << 11) | (467 << 1); }	// mtspr
+		default: return (19u << 26) | (rd << 21) | (ra << 16) | (rb << 11) | (PICK(cr_ops) << 1);	// CR logical
+		}
+	}
+	case 8: case 9: {	// D-form loads/stores
+		const int op = (st_rand() & 1) ? PICK(d_load) : PICK(d_store);
+		const uint32 a = (ra == 0) ? 3 : ra;
+		*mem_ra = a;
+		*mem_update = (op & 1) && op != 42 + 0 ? ((op == 33 || op == 35 || op == 41 || op == 43 || op == 49 || op == 51 || op == 37 || op == 39 || op == 45 || op == 53 || op == 55)) : false;
+		const bool is_load = (op >= 32 && op <= 35) || (op >= 40 && op <= 43);
+		if (*mem_update && is_load && rd == a)
+			*skip = true;	// invalid form
+		return (op << 26) | (rd << 21) | (a << 16) | ((st_rand() % 512) & ~0u);
+	}
+	case 10: {	// X-form loads/stores
+		const int xo = PICK(x_mem);
+		const uint32 a = (ra == 0) ? 3 : ra;
+		uint32 b = rb;
+		if (b == a) b = (a + 1) & 31;
+		if (b == 0) b = 4;
+		*mem_ra = a;
+		*mem_rb = b;
+		*mem_update = (xo == 55 || xo == 119 || xo == 183 || xo == 247 || xo == 311 || xo == 375 || xo == 439 ||
+					   xo == 567 || xo == 631 || xo == 695 || xo == 759);
+		const bool is_load = (xo == 55 || xo == 119 || xo == 311 || xo == 375);
+		if ((*mem_update && is_load && rd == a) || rd == b)
+			*skip = true;
+		return (31u << 26) | (rd << 21) | (a << 16) | (b << 11) | (xo << 1);
+	}
+	case 11: {	// lmw / stmw / lswi / stswi / lwarx+stwcx.
+		const uint32 a = (ra == 0) ? 3 : ra;
+		*mem_ra = a;
+		switch (st_rand() % 4) {
+		case 0: { uint32 d = 20 + (st_rand() % 12); if (a >= d) *skip = true; return (46u << 26) | (d << 21) | (a << 16) | (st_rand() % 256); }
+		case 1: { uint32 d = 20 + (st_rand() % 12); return (47u << 26) | (d << 21) | (a << 16) | (st_rand() % 256); }
+		case 2: { uint32 nb = st_rand() & 31; uint32 d = 24 + (st_rand() % 4); uint32 nr = ((nb ? nb : 32) + 3) / 4;
+			for (uint32 i = 0; i < nr; i++) if (((d + i) & 31) == a) *skip = true;
+			return (31u << 26) | (d << 21) | (a << 16) | (nb << 11) | (597 << 1); }
+		default: { uint32 nb = st_rand() & 31; return (31u << 26) | (rd << 21) | (a << 16) | (nb << 11) | (725 << 1); }
+		}
+	}
+	case 12: {	// FP A-form (double and single)
+		const uint32 op = (st_rand() & 1) ? 63 : 59;
+		const int xo = PICK(fp_a);
+		if (op == 59 && xo == 23) return (63u << 26) | (rd << 21) | (ra << 16) | (rb << 11) | (rc << 6) | (23 << 1) | rcbit;
+		return (op << 26) | (rd << 21) | (ra << 16) | (rb << 11) | (rc << 6) | (xo << 1) | rcbit;
+	}
+	default: {	// FP X-form
+		const int xo = PICK(fp_x);
+		if (xo == 0 || xo == 32 || xo == 64)	// fcmpu/fcmpo/mcrfs: crfD
+			return (63u << 26) | ((st_rand() & 7) << 23) | (ra << 16) | (rb << 11) | (xo << 1);
+		if (xo == 711)	// mtfsf
+			return (63u << 26) | ((st_rand() & 0xff) << 17) | (rb << 11) | (xo << 1) | rcbit;
+		if (xo == 134)	// mtfsfi
+			return (63u << 26) | ((st_rand() & 7) << 23) | ((st_rand() & 15) << 12) | (xo << 1) | rcbit;
+		if (xo == 70 || xo == 38) {	// mtfsb0/1 (not FEX/VX)
+			uint32 bt = st_rand() & 31; if (bt == 1 || bt == 2) bt = 24;
+			return (63u << 26) | (bt << 21) | (xo << 1) | rcbit;
+		}
+		return (63u << 26) | (rd << 21) | (rb << 11) | (xo << 1) | rcbit;
+	}
+	}
+	#undef PICK
+	#undef D_FORM
+	#undef X_FORM
+	#undef XO_FORM
+}
+
+int powerpc_cpu::unicorn_selftest(uint32 code_addr, uint32 data_addr, int count, uint32 seed)
+{
+	if (unicorn == NULL)
+		return -1;
+	ppc_unicorn *engine = unicorn;
+	st_rng_state = seed ? seed : 0x2545f491;
+	const uint32 DATA_SIZE = 4096;
+	static uint8 data0[4096], data_i[4096], data_u[4096];
+	int failures = 0, ran = 0;
+	const bool verbose = getenv("SS_UNICORN_SELFTEST_VERBOSE") != NULL;
+	const bool check_fpscr = getenv("SS_UNICORN_SELFTEST_NOFPSCR") == NULL;
+
+	for (int t = 0; t < count; t++) {
+		int mem_ra, mem_rb;
+		bool mem_update, skip;
+		const uint32 insn = st_make_insn(&mem_ra, &mem_rb, &mem_update, &skip);
+		if (skip)
+			continue;
+
+		// Initial state
+		powerpc_registers s0 = regs();
+		for (int i = 0; i < 32; i++) {
+			s0.gpr[i] = st_value();
+			s0.fpr[i].j = st_fp_value();
+		}
+		if (mem_ra >= 0)
+			s0.gpr[mem_ra] = data_addr + 1024 + ((st_rand() % 256) & ~3u);
+		if (mem_rb >= 0)
+			s0.gpr[mem_rb] = (st_rand() % 512) & ~3u;
+		// lswx/stswx byte count etc.
+		s0.cr.set(st_rand());
+		s0.xer.set(st_rand() & 0xe000007f);
+		s0.lr = st_value();
+		s0.ctr = st_value();
+		s0.fpscr = (st_rand() & 1) ? (st_rand() & 3) : 0;	// rounding mode only
+		for (uint32 i = 0; i < DATA_SIZE; i++)
+			data0[i] = st_rand() & 0xff;
+
+		vm_write_memory_4(code_addr, insn);
+		vm_write_memory_4(code_addr + 4, 0x18000001);	// EXEC_RETURN
+		invalidate_cache_range(code_addr, code_addr + 8);	// interpreter decode cache and Unicorn
+		spcflags().clear(SPCFLAG_JIT_EXEC_RETURN);
+
+		// Interpreter
+		memcpy(vm_do_get_real_address(data_addr), data0, DATA_SIZE);
+		regs() = s0;
+		unicorn = NULL;
+		execute(code_addr);
+		unicorn = engine;
+		powerpc_registers ri = regs();
+		memcpy(data_i, vm_do_get_real_address(data_addr), DATA_SIZE);
+
+		// Unicorn
+		memcpy(vm_do_get_real_address(data_addr), data0, DATA_SIZE);
+		regs() = s0;
+		execute(code_addr);
+		powerpc_registers ru = regs();
+		memcpy(data_u, vm_do_get_real_address(data_addr), DATA_SIZE);
+		ran++;
+
+		// Compare
+		char diff[1024];
+		int len = 0;
+		#define ADD(...) len += snprintf(diff + len, sizeof(diff) - len > 0 ? sizeof(diff) - len : 0, __VA_ARGS__)
+		for (int i = 0; i < 32; i++)
+			if (ri.gpr[i] != ru.gpr[i]) ADD(" r%d:%08x/%08x", i, ri.gpr[i], ru.gpr[i]);
+		for (int i = 0; i < 32; i++)
+			if (ri.fpr[i].j != ru.fpr[i].j) ADD(" f%d:%016llx/%016llx", i, (unsigned long long)ri.fpr[i].j, (unsigned long long)ru.fpr[i].j);
+		if (ri.cr.get() != ru.cr.get()) ADD(" cr:%08x/%08x", ri.cr.get(), ru.cr.get());
+		if (ri.xer.get() != ru.xer.get()) ADD(" xer:%08x/%08x", ri.xer.get(), ru.xer.get());
+		if (ri.lr != ru.lr) ADD(" lr:%08x/%08x", ri.lr, ru.lr);
+		if (ri.ctr != ru.ctr) ADD(" ctr:%08x/%08x", ri.ctr, ru.ctr);
+		if (ri.pc != ru.pc) ADD(" pc:%08x/%08x", ri.pc, ru.pc);
+		if (check_fpscr && ri.fpscr != ru.fpscr) ADD(" fpscr:%08x/%08x", ri.fpscr, ru.fpscr);
+		for (uint32 i = 0; i < DATA_SIZE; i++)
+			if (data_i[i] != data_u[i]) { ADD(" mem+%u:%02x/%02x", i, data_i[i], data_u[i]); break; }
+		#undef ADD
+		if (len > 0) {
+			failures++;
+			fprintf(stderr, "SELFTEST MISMATCH insn %08x (interp/unicorn):%s [rS/frS=%08x/%016llx]\n", insn, diff,
+					s0.gpr[(insn >> 21) & 31], (unsigned long long)s0.fpr[(insn >> 21) & 31].j);
+		}
+		else if (verbose)
+			fprintf(stderr, "SELFTEST ok %08x\n", insn);
+	}
+	fprintf(stderr, "SELFTEST %d instructions, %d mismatches\n", ran, failures);
+	return failures;
+}
+
+void powerpc_cpu::execute_one_interpreted()
+{
+	const uint32 opcode = vm_read_memory_4(pc());
+	const instr_info_t *ii = decode(opcode);
+#if PPC_FLIGHT_RECORDER
+	if (is_logging())
+		record_step(opcode);
+#endif
+	ii->execute(this, opcode);
+}
+
+// Skip a store that targeted a read-only guest range (e.g. ROM), like the
+// SIGSEGV handler does for the interpreter: the memory access is dropped
+// but the base register update of update-form stores still happens.
+void powerpc_cpu::skip_protected_store()
+{
+	const uint32 opcode = vm_read_memory_4(pc());
+	const uint32 ra = (opcode >> 16) & 0x1f;
+	const uint32 rb = (opcode >> 11) & 0x1f;
+	switch (opcode >> 26) {
+	case 37:	// stwu
+	case 39:	// stbu
+	case 45:	// sthu
+	case 53:	// stfsu
+	case 55:	// stfdu
+		gpr(ra) += (int32)(int16)(opcode & 0xffff);
+		break;
+	case 31:
+		switch ((opcode >> 1) & 0x3ff) {
+		case 183:	// stwux
+		case 247:	// stbux
+		case 439:	// sthux
+		case 695:	// stfsux
+		case 759:	// stfdux
+			gpr(ra) += gpr(rb);
+			break;
+		}
+		break;
+	}
+	pc() += 4;
+}
+
+void powerpc_cpu::execute_unicorn(uint32 entry)
+{
+	pc() = entry;
+	execute_depth++;
+
+	for (;;) {
+		ppc_unicorn::exit_info ei;
+		unicorn->load_state(regs());
+		unicorn->run(ei);
+		unicorn->store_state(regs());
+
+		switch (ei.reason) {
+		case ppc_unicorn::EXIT_ASYNC:
+			break;
+
+		case ppc_unicorn::EXIT_EXCEPTION:
+			pc() = ei.insn_pc;
+			execute_one_interpreted();
+			break;
+
+		case ppc_unicorn::EXIT_WRITE_PROTECT:
+			pc() = ei.insn_pc;
+			skip_protected_store();
+			break;
+
+		case ppc_unicorn::EXIT_ERROR:
+			// Typically an access to a guest address without host memory.
+			// Let the interpreter execute the instruction: it either succeeds
+			// or faults on the host, where the SIGSEGV handler applies the
+			// usual SheepShaver policy (skip, or report and quit)
+			pc() = ei.insn_pc;
+			if (ei.restore_gpr >= 0)
+				gpr(ei.restore_gpr) = ei.restore_val;
+			{
+				static const bool debug = getenv("SS_UNICORN_DEBUG") != NULL;
+				if (debug)
+					fprintf(stderr, "Unicorn PPC: %s at pc %08x (address %08x), using interpreter\n",
+							ppc_unicorn::error_string(ei.err), ei.insn_pc, ei.fault_addr);
+			}
+			execute_one_interpreted();
+			break;
+		}
+
+		if (!spcflags().empty()) {
+			spcflags().clear(SPCFLAG_JIT_EXEC_RETURN);
+			if (!check_spcflags())
+				break;
+			// check_spcflags() turns TRIGGER into HANDLE; handle it right away
+			// instead of after the next Unicorn run
+			if (spcflags().test(SPCFLAG_CPU_HANDLE_INTERRUPT) && !check_spcflags())
+				break;
+		}
+	}
+
+	execute_depth--;
+}
+#endif
+
 void powerpc_cpu::init_decode_cache()
 {
 #if PPC_DECODE_CACHE
@@ -1485,6 +1930,10 @@ void powerpc_cpu::kill_decode_cache()
 void powerpc_cpu::invalidate_cache()
 {
 	D(bug("Invalidate all cache blocks\n"));
+#if PPC_ENABLE_UNICORN
+	if (unicorn)
+		unicorn->invalidate_all();
+#endif
 #if PPC_DECODE_CACHE || PPC_ENABLE_JIT
 	my_block_cache.clear();
 	my_block_cache.initialize();
@@ -1523,6 +1972,10 @@ void powerpc_block_info::invalidate()
 void powerpc_cpu::invalidate_cache_range(uintptr start, uintptr end)
 {
 	D(bug("Invalidate cache block [%08x - %08x]\n", start, end));
+#if PPC_ENABLE_UNICORN
+	if (unicorn)
+		unicorn->invalidate_range((uint32)start, (uint32)end);
+#endif
 #if PPC_DECODE_CACHE || PPC_ENABLE_JIT
 #if DYNGEN_DIRECT_BLOCK_CHAINING
 	if (use_jit) {

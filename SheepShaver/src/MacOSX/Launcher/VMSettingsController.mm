@@ -30,7 +30,7 @@
 
 #include <unistd.h>
 
-#include "SDL.h"
+#include "my_sdl.h"
 
 // NSInteger was added in 10.5 SDK.
 #if MAC_OS_X_VERSION_MIN_REQUIRED < 1050

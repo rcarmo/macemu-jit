@@ -117,6 +117,12 @@ extern void Execute68k(uint32, M68kRegisters *r);			// Execute 68k subroutine fr
 extern void Execute68kTrap(uint16 trap, M68kRegisters *r);	// Execute 68k A-Trap from EMUL_OP routine
 #if EMULATED_PPC
 extern void FlushCodeCache(uintptr start, uintptr end);		// Invalidate emulator caches
+// Host code wrote guest memory that may hold code (e.g. a disk read):
+// drop translations of [addr, addr + size) that the CPU engine can't see
+// being overwritten
+extern void HostWroteMacMemory(uint32 addr, uint32 size);
+#else
+static inline void HostWroteMacMemory(uint32 addr, uint32 size) { }
 #endif
 extern void ExecuteNative(int selector);					// Execute native code from EMUL_OP routine (real mode switch)
 

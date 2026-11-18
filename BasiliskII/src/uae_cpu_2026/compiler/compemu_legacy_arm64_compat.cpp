@@ -484,7 +484,13 @@ void cmov_l_rr(RW4 d, RR4 s, uae_s32 cc)
 	const bool s_is_const = isconst(s);
 	int src = s;
 	if (s_is_const) {
-		LOAD_U32(REG_WORK1, live.state[s].val);
+		/* DBcc selects between PC_P and a host-pointer branch target, so a
+		   constant source can be a 64-bit host address (always the case on
+		   macOS, where the Mac address space sits above 4 GB). */
+		if (s == PC_P || s >= S1)
+			LOAD_U64(REG_WORK1, live.state[s].val);
+		else
+			LOAD_U32(REG_WORK1, live.state[s].val);
 		src = REG_WORK1;
 	} else {
 		src = readreg(s);

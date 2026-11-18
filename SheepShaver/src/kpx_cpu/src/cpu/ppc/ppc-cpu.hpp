@@ -35,6 +35,10 @@
 #include "cpu/ppc/ppc-instructions.hpp"
 #include <vector>
 
+#if PPC_ENABLE_UNICORN
+class ppc_unicorn;
+#endif
+
 class powerpc_cpu
 #ifndef SHEEPSHAVER
 	: public basic_cpu
@@ -249,7 +253,28 @@ private:
 	// Current execute() nested level
 	int execute_depth;
 
+#if PPC_ENABLE_UNICORN
+	// Unicorn engine execution backend (NULL if not in use)
+	ppc_unicorn *unicorn;
+	void execute_unicorn(uint32 entry);
+	void execute_one_interpreted();
+	void skip_protected_store();
+#endif
+
 public:
+
+#if PPC_ENABLE_UNICORN
+	// Run guest code with the Unicorn engine; takes ownership of ENGINE
+	void enable_unicorn(ppc_unicorn *engine);
+	bool unicorn_enabled() const { return unicorn != NULL; }
+	void unicorn_request_stop();
+	void unicorn_invalidate_range(uint32 start, uint32 end);
+	void unicorn_dump_history();
+	// Differential test: random instructions, interpreter vs. Unicorn
+	int unicorn_selftest(uint32 code_addr, uint32 data_addr, int count, uint32 seed);
+#else
+	bool unicorn_enabled() const { return false; }
+#endif
 
 	// Initialization & finalization
 	void initialize();
@@ -508,6 +533,11 @@ inline void powerpc_cpu::trigger_interrupt()
 {
 #if PPC_CHECK_INTERRUPTS
 	spcflags().set(SPCFLAG_CPU_TRIGGER_INTERRUPT);
+#if PPC_ENABLE_UNICORN
+	// Make the Unicorn engine return so that the flag is noticed
+	if (unicorn)
+		unicorn_request_stop();
+#endif
 #endif
 }
 

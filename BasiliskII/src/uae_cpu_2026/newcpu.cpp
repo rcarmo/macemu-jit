@@ -381,6 +381,7 @@ extern "C" void basilisk_trace_dump_recent(const char *reason, uaecptr addr, uae
 #endif
 #include "fpu/fpu.h"
 #include "cpummu.h"
+#include "unicorn_cpu.h"
 #if 0
 #include "natfeats.h"
 #include "disasm-glue.h"
@@ -1498,6 +1499,18 @@ void m68k_reset (void)
 #endif
 }
 
+/* Flag words for diagnostic dumps. Only the ARM/AArch64 optimized-flags
+   layouts carry a packed nzcv word; other builds rebuild it in ARM bit order. */
+#if defined(OPTIMIZED_FLAGS) && ((defined(CPU_arm) && defined(ARM_ASSEMBLY)) || \
+    (defined(CPU_aarch64) && defined(AARCH64_ASSEMBLY)))
+#define B2_DBG_NZCV()	((unsigned)regflags.nzcv)
+#define B2_DBG_X()	((unsigned)regflags.x)
+#else
+#define B2_DBG_NZCV()	(((unsigned)GET_NFLG() << 31) | ((unsigned)GET_ZFLG() << 30) | \
+			 ((unsigned)GET_CFLG() << 29) | ((unsigned)GET_VFLG() << 28))
+#define B2_DBG_X()	((unsigned)GET_XFLG())
+#endif
+
 static bool b2_test_retdump_enabled(void)
 {
 	static int cached = -1;
@@ -1523,7 +1536,7 @@ void m68k_emulop_return(void)
 			(unsigned)m68k_areg(regs, 2), (unsigned)m68k_areg(regs, 3),
 			(unsigned)m68k_areg(regs, 4), (unsigned)m68k_areg(regs, 5),
 			(unsigned)m68k_areg(regs, 6), (unsigned)m68k_areg(regs, 7), (unsigned)regs.sr,
-			(unsigned)regflags.nzcv, (unsigned)regflags.x);
+			B2_DBG_NZCV(), B2_DBG_X());
 	}
 	SPCFLAGS_SET( SPCFLAG_BRK );
 	quit_program = 1;
@@ -2256,7 +2269,7 @@ void m68k_do_execute (void)
 	            (unsigned)m68k_areg(regs,2), (unsigned)m68k_areg(regs,3),
 	            (unsigned)m68k_areg(regs,4), (unsigned)m68k_areg(regs,5),
 	            (unsigned)m68k_areg(regs,6), (unsigned)m68k_areg(regs,7),
-	            (unsigned)regs.sr, (unsigned)regflags.nzcv, (unsigned)regflags.x,
+	            (unsigned)regs.sr, B2_DBG_NZCV(), B2_DBG_X(),
 	            (unsigned)get_long(m68k_areg(regs,7) + 0),
 	            (unsigned)get_long(m68k_areg(regs,7) + 4),
 	            (unsigned)get_long(m68k_areg(regs,7) + 8),
@@ -2415,6 +2428,9 @@ setjmpagain:
 	    if (debugging && !after_exception) debug();
 	    after_exception = false;
 #endif
+	    if (unicorn_cpu_enabled)
+		unicorn_cpu_execute();
+	    else
 #ifdef USE_JIT
 	    if (UseJIT)
 		m68k_do_compile_execute();

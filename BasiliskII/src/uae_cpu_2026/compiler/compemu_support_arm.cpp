@@ -62,7 +62,7 @@
 #include "comptbl_arm.h"
 #include "compemu_arm.h"
 #include "jit_native_helpers.h"
-#include <SDL2/SDL.h>
+#include "my_sdl.h"
 
 extern "C" void jit_op_bftst(void);
 extern "C" void jit_op_bfextu(void);
@@ -80,6 +80,22 @@ extern "C" void jit_op_bfins(void);
 #ifdef __MACH__
 // Needed for sys_cache_invalidate on the JIT space region, Mac OS X specific
 #include <libkern/OSCacheControl.h>
+#endif
+
+#if defined(__APPLE__) && defined(CPU_AARCH64)
+#include <pthread.h>
+#include <sys/mman.h>
+#include <unistd.h>
+/* Apple Silicon enforces W^X on MAP_JIT pages per thread:
+   enable=true -> executable (writes fault), enable=false -> writable. */
+static inline void uae_vm_jit_write_protect(bool enable)
+{
+	pthread_jit_write_protect_np(enable ? 1 : 0);
+}
+static inline unsigned long uae_vm_page_size(void)
+{
+	return (unsigned long)getpagesize();
+}
 #endif
 
 static inline void* vm_acquire_code(uae_u32 size, int options = VM_MAP_DEFAULT)
@@ -3769,9 +3785,14 @@ static int alloc_reg_hinted(int r, int willclobber, int hint)
     if (!willclobber) {
         if (live.state[r].status != UNDEF) {
             if (isconst(r)) {
-                if (r == PC_P) {
-                    /* PC_P holds a 64-bit host pointer — use LOAD_U64.
-                       compemu_raw_mov_l_ri uses LOAD_U32 which truncates. */
+                if (r == PC_P || r >= S1) {
+                    /* PC_P and scratch vregs (e.g. the DBcc branch target built
+                       by arm_ADD_l_ri_hostptr) can hold 64-bit host pointers —
+                       use LOAD_U64. compemu_raw_mov_l_ri uses LOAD_U32 which
+                       truncates; that only went unnoticed while the Mac address
+                       space sat below 4 GB (Linux), not on macOS where
+                       __PAGEZERO forces it above. LOAD_U64 of a 32-bit value
+                       zero-extends exactly like LOAD_U32. */
                     LOAD_U64(bestreg, live.state[r].val);
                 } else {
                     compemu_raw_mov_l_ri(bestreg, live.state[r].val);
@@ -6230,14 +6251,21 @@ static uint8 *do_alloc_code(uint32 size, int depth)
 		jit_log("JIT lifecycle probe: rejecting executable allocation of %u bytes", size);
 		return NULL;
 	}
-#if defined(CPU_AARCH64) && defined(__linux__)
+#if defined(CPU_AARCH64) && (defined(__linux__) || defined(__APPLE__))
 	/* AArch64 code pointers are 64-bit clean and helper calls use BLR.
 	   Do not allocate JIT code through the low-4GB scanner: in direct-addressing
 	   builds, low host addresses alias the emulated Mac address space
 	   (host = MEMBaseDiff + mac), so ROM/NuBus probes can read or fault on the
 	   JIT cache. Keep generated code in a normal high host mapping instead. */
+#if defined(__APPLE__)
+	/* macOS on Apple Silicon only allows RWX pages created with MAP_JIT;
+	   writes are then gated per thread by pthread_jit_write_protect_np(). */
+	void *code = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+		MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+#else
 	void *code = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
 		MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
 	return code == MAP_FAILED ? NULL : (uint8 *)code;
 #else
 	uint8* code = (uint8 *)vm_acquire_code(size, VM_MAP_DEFAULT | VM_MAP_32BIT);

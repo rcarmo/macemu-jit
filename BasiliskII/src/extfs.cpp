@@ -1876,6 +1876,10 @@ static int16 fs_read(uint32 pb)
 
 	// Read
 	ssize_t actual = extfs_read(fd, Mac2HostAddr(ReadMacInt32(pb + ioBuffer)), ReadMacInt32(pb + ioReqCount));
+#if defined(SHEEPSHAVER) || defined(HAVE_HOST_WROTE_MAC_MEMORY)
+	if (actual > 0)
+		HostWroteMacMemory(ReadMacInt32(pb + ioBuffer), (uint32)actual);
+#endif
 	int16 read_err = errno2oserr();
 	D(bug("  actual %d\n", actual));
 	WriteMacInt32(pb + ioActCount, actual >= 0 ? actual : 0);

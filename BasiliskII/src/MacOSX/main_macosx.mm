@@ -532,6 +532,11 @@ void QuitEmulator(void)
 
 void FlushCodeCache(void *start, uint32 size)
 {
+#if EMULATED_68K && defined(HAVE_HOST_WROTE_MAC_MEMORY)
+	// Drop translations held by the Unicorn engine (no-op otherwise)
+	if (size)
+		HostWroteMacMemory(Host2MacAddr((uint8 *)start), size);
+#endif
 #if USE_JIT
 	if (UseJIT)
 		flush_icache_range((uint8 *)start, size);

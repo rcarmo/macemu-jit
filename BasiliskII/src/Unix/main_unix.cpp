@@ -106,6 +106,70 @@ size_t jit_popallspace_size = 0;
 #include <sys/personality.h>
 #endif
 
+#if defined(__APPLE__) && DIRECT_ADDRESSING
+// macOS has no low reserved window like the Linux layout, so the 4 GB Mac
+// address space (host = MEMBaseDiff + mac) is reserved PROT_NONE up front and
+// RAM/ROM/I/O/NuBus mappings are placed inside it with MAP_FIXED.
+static uintptr mac_space_base = 0;
+static const size_t MAC_SPACE_SIZE = (size_t)0x100000000ULL + 0x10000;
+
+static uint8 *reserve_mac_space(size_t ram_rom_size)
+{
+	void *base = mmap(NULL, MAC_SPACE_SIZE, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+	if (base == MAP_FAILED)
+		return (uint8 *)VM_MAP_FAILED;
+	void *ram = mmap(base, ram_rom_size, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+	if (ram == MAP_FAILED) {
+		munmap(base, MAC_SPACE_SIZE);
+		return (uint8 *)VM_MAP_FAILED;
+	}
+	mac_space_base = (uintptr)base;
+	// Frame buffer reserve (vm_acquire_reserved) directly after RAM/ROM, as
+	// vm_acquire() would place it, so it stays inside the Mac address space.
+	// vm_acquire_fixed() refuses to map over our PROT_NONE placeholder, so
+	// hand that slice back first (size matches RESERVED_SIZE in vm_alloc.cpp).
+	const size_t fb_reserve_size = 80 * 1024 * 1024;
+	munmap((uint8 *)ram + ram_rom_size, fb_reserve_size);
+	if (vm_init_reserved((uint8 *)ram + ram_rom_size) < 0) {
+		munmap(base, MAC_SPACE_SIZE);
+		mac_space_base = 0;
+		return (uint8 *)VM_MAP_FAILED;
+	}
+	return (uint8 *)ram;
+}
+
+static bool in_mac_space(void *addr, size_t len)
+{
+	uintptr a = (uintptr)addr;
+	return mac_space_base && a >= mac_space_base &&
+		a + len <= mac_space_base + MAC_SPACE_SIZE;
+}
+#endif
+
+// mmap() at an exact address without clobbering an existing mapping.
+// Linux provides MAP_FIXED_NOREPLACE; elsewhere (e.g. macOS) pass the address
+// as a hint and reject the result if the kernel placed it somewhere else.
+static void *mmap_fixed_noreplace(void *addr, size_t len, int prot, int flags)
+{
+#ifdef MAP_FIXED_NOREPLACE
+	return mmap(addr, len, prot, flags | MAP_FIXED_NOREPLACE, -1, 0);
+#else
+#if defined(__APPLE__) && DIRECT_ADDRESSING
+	// Inside our own PROT_NONE reservation MAP_FIXED cannot clobber anything else.
+	if (in_mac_space(addr, len))
+		return mmap(addr, len, prot, flags | MAP_FIXED, -1, 0);
+#endif
+	void *p = mmap(addr, len, prot, flags, -1, 0);
+	if (p != MAP_FAILED && p != addr) {
+		munmap(p, len);
+		errno = EEXIST;
+		return MAP_FAILED;
+	}
+	return p;
+#endif
+}
+
 #if USE_JIT
 #ifdef UPDATE_UAE
 extern void (*flush_icache)(void); // from compemu_support.cpp
@@ -711,7 +775,9 @@ int main(int argc, char **argv)
 	// Set hints before SDL_Init for proper input handling
 	// These help with KMSDRM and console-mode operation on Raspberry Pi
 #if SDL_VERSION_ATLEAST(2,0,0)
+#ifdef SDL_HINT_GRAB_KEYBOARD	/* SDL2 only; SDL3 grabs per window */
 	SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
+#endif
 	// Allow running without being DRM master (needed for input when not root)
 	SDL_SetHint(SDL_HINT_KMSDRM_REQUIRE_DRM_MASTER, "0");
 	// Enable input when video is minimized/unfocused
@@ -840,7 +906,11 @@ int main(int argc, char **argv)
 	else
 #endif
 	{
+#if defined(__APPLE__) && DIRECT_ADDRESSING
+		uint8 *ram_rom_area = reserve_mac_space(RAMSize + ROM_MAX_SIZE + SCRATCH_MEM_SIZE);
+#else
 		uint8 *ram_rom_area = (uint8 *)vm_acquire_mac(RAMSize + ROM_MAX_SIZE + SCRATCH_MEM_SIZE);
+#endif
 		if (ram_rom_area == VM_MAP_FAILED) {
 			ErrorAlert(STR_NO_MEM_ERR);
 			QuitEmulator();
@@ -883,10 +953,9 @@ int main(int argc, char **argv)
 		};
 		for (auto &r : io_ranges) {
 			void *target = (void*)(MEMBaseDiff + r.mac_start);
-			void *result = mmap(target, r.size,
+			void *result = mmap_fixed_noreplace(target, r.size,
 				PROT_READ | PROT_WRITE,
-				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE,
-				-1, 0);
+				MAP_ANONYMOUS | MAP_PRIVATE);
 			if (result == MAP_FAILED) {
 				fprintf(stderr, "MEM: failed to map %s at %p size=%lx: %s\n",
 					r.name, target, (unsigned long)r.size, strerror(errno));
@@ -958,11 +1027,17 @@ int main(int argc, char **argv)
 			// needed mprotect(). On current AArch64 direct-addressing runs with
 			// smaller RAM, it can be fully unmapped; mprotect() then fails with
 			// ENOMEM and ROM NuBus reads fall into SIGSEGV-skip corruption paths.
+#if defined(__APPLE__)
+			// No vm_alloc reserve or JIT cache lives here on macOS: the whole
+			// 0x08000000-0x0FFFFFFF window is ours, so map it in one piece.
+			size_t head_size = lo_host_end - lo_host_base;
+			(void)reserved_end; (void)unmapped_start;
+#else
 			size_t head_size = reserved_end - lo_host_base;
-			void *head = mmap((void *)lo_host_base, head_size,
+#endif
+			void *head = mmap_fixed_noreplace((void *)lo_host_base, head_size,
 				PROT_READ | PROT_WRITE,
-				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE,
-				-1, 0);
+				MAP_ANONYMOUS | MAP_PRIVATE);
 			if (head != MAP_FAILED) {
 				memset(head, 0xFF, head_size);
 				fprintf(stderr, "MEM: NuBus-lo 0x08000000-0x0A013FFF filled 0xFF (mmap)\n");
@@ -975,6 +1050,7 @@ int main(int argc, char **argv)
 			}
 			// (JIT cache gap 0x0A014000-0x0A815000 is skipped; JIT overwrites it)
 
+#if !defined(__APPLE__)
 			// Part 2: mmap the unmapped tail → R/W, fill 0xFF
 			size_t tail_size = lo_host_end - unmapped_start;
 			void *tail = mmap((void *)unmapped_start, tail_size,
@@ -987,6 +1063,7 @@ int main(int argc, char **argv)
 			} else {
 				fprintf(stderr, "MEM: NuBus-lo tail mmap failed: %s\n", strerror(errno));
 			}
+#endif
 		}
 
 		// Machine type register at 0x5ffffffc.
@@ -1165,7 +1242,12 @@ int main(int argc, char **argv)
 	const char *retirement_tick_env = getenv("B2_JIT_RETIREMENT_TICK_EVERY");
 	const bool retirement_ticks = retirement_tick_env && *retirement_tick_env &&
 		strtoul(retirement_tick_env, NULL, 0) != 0;
-	const bool jit_dispatcher_owns_ticks = UseJIT &&
+#if USE_JIT && defined(UPDATE_UAE)
+	const bool jit_enabled = UseJIT;
+#else
+	const bool jit_enabled = false;
+#endif
+	const bool jit_dispatcher_owns_ticks = jit_enabled &&
 		(retirement_ticks || !(sync_tick_env && sync_tick_env[0] == '0'));
 	if (jit_dispatcher_owns_ticks) {
 		tick_thread_active = false;
@@ -1357,6 +1439,11 @@ void QuitEmulator(void)
 
 void FlushCodeCache(void *start, uint32 size)
 {
+#if EMULATED_68K && defined(HAVE_HOST_WROTE_MAC_MEMORY)
+	// Drop translations held by the Unicorn engine (no-op otherwise)
+	if (size)
+		HostWroteMacMemory(Host2MacAddr((uint8 *)start), size);
+#endif
 #if USE_JIT
     if (UseJIT)
 #ifdef UPDATE_UAE
@@ -2118,19 +2205,33 @@ void jit_one_tick(void)
 
 // SIGILL diagnostic handler
 #include <signal.h>
+#if defined(__APPLE__) && defined(__aarch64__)
+#define SIGILL_DIAG_PC(uc)     ((uc)->uc_mcontext->__ss.__pc)
+#define SIGILL_DIAG_REG(uc, i) ((i) < 29 ? (uc)->uc_mcontext->__ss.__x[(i)] : \
+                                (i) == 29 ? (uc)->uc_mcontext->__ss.__fp : (uc)->uc_mcontext->__ss.__lr)
+#define SIGILL_DIAG_NREGS 31
+#elif defined(__linux__) && defined(__aarch64__)
+#define SIGILL_DIAG_PC(uc)     ((uc)->uc_mcontext.pc)
+#define SIGILL_DIAG_REG(uc, i) ((uc)->uc_mcontext.regs[(i)])
+#define SIGILL_DIAG_NREGS 31
+#endif
 static void sigill_handler_diag(int sig, siginfo_t *si, void *ctx) {
+#ifdef SIGILL_DIAG_PC
     ucontext_t *uc = (ucontext_t *)ctx;
     fprintf(stderr, "\n=== SIGILL at PC=0x%lx addr=%p ===\n",
-        (unsigned long)uc->uc_mcontext.pc, si->si_addr);
-    for (int i = 0; i < 31; i++) {
-        fprintf(stderr, "x%02d=0x%016lx ", i, (unsigned long)uc->uc_mcontext.regs[i]);
+        (unsigned long)SIGILL_DIAG_PC(uc), si->si_addr);
+    for (int i = 0; i < SIGILL_DIAG_NREGS; i++) {
+        fprintf(stderr, "x%02d=0x%016lx ", i, (unsigned long)SIGILL_DIAG_REG(uc, i));
         if ((i % 4) == 3) fprintf(stderr, "\n");
     }
     fprintf(stderr, "\nInstruction words around PC:\n");
-    uae_u32 *p = (uae_u32*)(uc->uc_mcontext.pc - 16);
+    uae_u32 *p = (uae_u32*)(SIGILL_DIAG_PC(uc) - 16);
     for (int i = 0; i < 12; i++)
         fprintf(stderr, "  %s %p: %08x\n", i==4 ? ">>>" : "   ", p+i, p[i]);
     fprintf(stderr, "=== END ===\n");
+#else
+    fprintf(stderr, "\n=== SIGILL addr=%p ===\n", si->si_addr);
+#endif
     fflush(stderr);
     _exit(132);
 }

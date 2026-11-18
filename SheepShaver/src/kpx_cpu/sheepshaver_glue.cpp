@@ -34,6 +34,9 @@
 #include "cpu/ppc/ppc-cpu.hpp"
 #include "cpu/ppc/ppc-operations.hpp"
 #include "cpu/ppc/ppc-instructions.hpp"
+#if PPC_ENABLE_UNICORN
+#include "cpu/ppc/ppc-unicorn.hpp"
+#endif
 #include "thunks.h"
 
 // Used for NativeOp trampolines
@@ -867,7 +870,7 @@ static bool sheepshaver_jit_page_mapped(uint32 ea)
 	if (!psize) psize = (uint32)getpagesize();
 	uint32 page = ea & ~(psize - 1);
 	unsigned char v = 0;
-	return mincore((void *)(uintptr_t)Mac2HostAddr(page), psize, &v) == 0;
+	return mincore((const void *)(uintptr_t)Mac2HostAddr(page), psize, (char *)&v) == 0;
 }
 
 static inline bool sheepshaver_jit_range_contains(uint32 ea, uint32 size, uint32 start, uint64 bytes)
@@ -1378,6 +1381,18 @@ void FlushCodeCache(uintptr start, uintptr end)
 	ppc_cpu->invalidate_cache_range(start, end);
 }
 
+// Host code wrote guest memory (disk reads etc.).  The interpreter and the
+// built-in JITs rely on MakeExecutable()/icbi like real hardware, but the
+// Unicorn engine only notices guest stores and treats icbi as a no-op, so
+// drop its translations of the written range.
+void HostWroteMacMemory(uint32 addr, uint32 size)
+{
+#if PPC_ENABLE_UNICORN
+	if (ppc_cpu && size)
+		ppc_cpu->unicorn_invalidate_range(addr, addr + size);
+#endif
+}
+
 // Dump PPC registers
 static void dump_registers(void)
 {
@@ -1480,6 +1495,9 @@ sigsegv_return_t sigsegv_handler(sigsegv_info_t *sip)
 #endif
 
 	fprintf(stderr, "SIGSEGV\n");
+#if PPC_ENABLE_UNICORN
+	ppc_cpu->unicorn_dump_history();
+#endif
 	fprintf(stderr, "  pc %p\n", sigsegv_get_fault_instruction_address(sip));
 	fprintf(stderr, "  ea %p\n", sigsegv_get_fault_address(sip));
 	dump_registers();
@@ -1671,7 +1689,12 @@ bool ss_run_opcode_test(void)
 	uint8 *test_ram = (uint8 *)mmap(
 		(void *)0x10000000UL, test_ram_size,
 		PROT_READ | PROT_WRITE | PROT_EXEC,
-		MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+		MAP_PRIVATE | MAP_ANONYMOUS
+#ifndef __APPLE__
+        | MAP_FIXED_NOREPLACE,
+#else
+        ,
+#endif
 		-1, 0);
 	if (test_ram == MAP_FAILED && !bench) {
 		/* Ordinary opcode tests may retry without the fixed hint. Benchmarks fail
@@ -1914,6 +1937,53 @@ regdump:
 	munmap(test_ram, test_ram_size);
 	return true;
 }
+#if PPC_ENABLE_UNICORN
+/*
+ *  Unicorn engine backend for the main CPU
+ *
+ *  Enabled by default when SheepShaver is configured with --enable-unicorn;
+ *  set SS_USE_UNICORN=0 to use the built-in interpreter/JIT instead.
+ */
+
+static uint64 unicorn_ticks_usec(void)
+{
+	return GetTicks_usec();
+}
+
+
+static void init_unicorn_backend(sheepshaver_cpu *cpu)
+{
+	const char *env = getenv("SS_USE_UNICORN");
+	if (env && strcmp(env, "0") == 0) {
+		printf("Unicorn PPC engine disabled (SS_USE_UNICORN=0)\n");
+		return;
+	}
+
+	ppc_unicorn_config cfg;
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.pvr = PVR;
+	cfg.stub_addr = SheepMem::ReserveProc(ppc_unicorn::STUB_SIZE);
+	cfg.timebase_hz = (uint32)TimebaseSpeed;
+	cfg.ticks_usec = unicorn_ticks_usec;
+	cfg.ro_ranges[cfg.n_ro_ranges].start = ROMBase;			// ROM (write protected after init)
+	cfg.ro_ranges[cfg.n_ro_ranges++].size = ROM_AREA_SIZE;
+	cfg.ro_ranges[cfg.n_ro_ranges].start = SheepMem::ZeroPage();	// read-only zero page
+	cfg.ro_ranges[cfg.n_ro_ranges++].size = SheepMem::PageSize();
+	// Accesses to guest addresses without host memory are not handled inside
+	// Unicorn: the instruction is re-executed by the interpreter, where the
+	// SIGSEGV handler applies SheepShaver's usual policy (e.g. a skipped load
+	// leaves its target register unchanged with "ignoresegv")
+	cfg.ignore_fault = NULL;
+
+	ppc_unicorn *engine = ppc_unicorn::create(cfg);
+	if (engine == NULL) {
+		fprintf(stderr, "Unicorn PPC engine unavailable, using the built-in CPU emulator\n");
+		return;
+	}
+	cpu->enable_unicorn(engine);
+}
+#endif
+
 void init_emul_ppc(void)
 {
 	// Get pointer to KernelData in host address space
@@ -1921,6 +1991,15 @@ void init_emul_ppc(void)
 
 	// Initialize main CPU emulator
 	ppc_cpu = new sheepshaver_cpu();
+#if PPC_ENABLE_UNICORN
+	init_unicorn_backend(ppc_cpu);
+	if (getenv("SS_UNICORN_SELFTEST")) {
+		const int n = atoi(getenv("SS_UNICORN_SELFTEST"));
+		const uint32 seed = getenv("SS_UNICORN_SELFTEST_SEED") ? strtoul(getenv("SS_UNICORN_SELFTEST_SEED"), NULL, 0) : 0;
+		int fails = ppc_cpu->unicorn_selftest(RAMBase + 0x100000, RAMBase + 0x200000, n, seed);
+		exit(fails == 0 ? 0 : 1);
+	}
+#endif
 	ppc_cpu->set_register(powerpc_registers::GPR(3), any_register((uint32)ROMBase + 0x30d000));
 	ppc_cpu->set_register(powerpc_registers::GPR(4), any_register(KernelDataAddr + 0x1000));
 	WriteMacInt32(XLM_RUN_MODE, MODE_68K);

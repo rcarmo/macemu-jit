@@ -513,11 +513,22 @@ STATIC_INLINE void compemu_raw_call(uintptr t)
 	   using it for the call target destroys argument 3 before BLR.  x18 is
 	   permanently reserved from the JIT allocator; use it as the call-only
 	   target scratch regardless of the current helper's arity. */
+#if defined(__APPLE__)
+	/* x18 is the Darwin platform register: the kernel may zero it on any
+	   context switch, so a preemption between the load and BLR would jump to
+	   0. LR is saved first anyway, so use x30 itself as the call target
+	   (BLR reads the target before it writes the return address). */
+	STR_xXpre(RLR_INDEX, RSP_INDEX, -16);
+	LOAD_U64(RLR_INDEX, t);
+	BLR_x(RLR_INDEX);
+	LDR_xXpost(RLR_INDEX, RSP_INDEX, 16);
+#else
 	LOAD_U64(R18_INDEX, t);
 
 	STR_xXpre(RLR_INDEX, RSP_INDEX, -16);
 	BLR_x(R18_INDEX);
 	LDR_xXpost(RLR_INDEX, RSP_INDEX, 16);
+#endif
 }
 
 STATIC_INLINE void compemu_raw_call_r(RR4 r)
@@ -532,10 +543,18 @@ STATIC_INLINE void compemu_raw_call_r(RR4 r)
  * serviced FPU opcode cannot alter the integer CCR carried by host flags. */
 STATIC_INLINE void compemu_raw_call_preserve_nzcv(uintptr t)
 {
+#if defined(__APPLE__)
+	/* See compemu_raw_call: never hold a call target in x18 on Darwin. */
+	MRS_NZCV_x(REG_WORK4);
+	STP_xxXpre(RLR_INDEX, REG_WORK4, RSP_INDEX, -16);
+	LOAD_U64(RLR_INDEX, t);
+	BLR_x(RLR_INDEX);
+#else
 	LOAD_U64(R18_INDEX, t);
 	MRS_NZCV_x(REG_WORK4);
 	STP_xxXpre(RLR_INDEX, REG_WORK4, RSP_INDEX, -16);
 	BLR_x(R18_INDEX);
+#endif
 	LDP_xxXpost(RLR_INDEX, REG_WORK4, RSP_INDEX, 16);
 	MSR_NZCV_x(REG_WORK4);
 }

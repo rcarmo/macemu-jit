@@ -31,6 +31,7 @@ esac
 dnl Options.
 AC_ARG_ENABLE(jit,          [  --enable-jit            enable JIT compiler [default=yes]], [WANT_JIT=$enableval], [WANT_JIT=yes])
 AC_ARG_ENABLE(ppc-emulator, [  --enable-ppc-emulator   use the selected PowerPC emulator [default=auto]], [WANT_EMULATED_PPC=$enableval], [WANT_EMULATED_PPC=auto])
+AC_ARG_ENABLE(unicorn,      [  --enable-unicorn        run emulated PowerPC code with the Unicorn engine [default=auto]], [WANT_UNICORN=$enableval], [WANT_UNICORN=auto])
 AC_ARG_ENABLE(fbdev-dga,    [  --enable-fbdev-dga      use direct frame buffer access via /dev/fb0 [default=yes]], [WANT_FBDEV_DGA=$enableval], [WANT_FBDEV_DGA=yes])
 AC_ARG_ENABLE(xf86-dga,     [  --enable-xf86-dga       use the XFree86 DGA extension [default=yes]], [WANT_XF86_DGA=$enableval], [WANT_XF86_DGA=yes])
 AC_ARG_ENABLE(xf86-vidmode, [  --enable-xf86-vidmode   use the XFree86 VidMode extension [default=yes]], [WANT_XF86_VIDMODE=$enableval], [WANT_XF86_VIDMODE=yes])
@@ -72,11 +73,23 @@ AC_ARG_ENABLE(sdl-video,    [  --enable-sdl-video      use SDL for video graphic
 AC_ARG_ENABLE(sdl-audio,    [  --enable-sdl-audio      use SDL for audio [default=no]], [WANT_SDL_AUDIO=$enableval], [WANT_SDL_AUDIO=yes])
 AC_ARG_ENABLE(sdl-framework,    [  --enable-sdl-framework  use SDL framework [default=no]], [WANT_SDL_FRAMEWORK=$enableval], [WANT_SDL_FRAMEWORK=no])
 AC_ARG_ENABLE(sdl-framework-prefix,    [  --enable-sdl-framework-prefix=PFX    default=/Library/Frameworks], [SDL_FRAMEWORK="$enableval"], [SDL_FRAMEWORK=/Library/Frameworks])
-AC_ARG_WITH(sdl1,            [  --with-sdl1             use SDL 1.x, rather than SDL 2.x [default=no]], [WANT_SDL_VERSION_MAJOR=1], [])
-AC_ARG_WITH(sdl3,            [  --with-sdl3             use SDL 3.x, rather than SDL 2.x [default=no]], [WANT_SDL_VERSION_MAJOR=3], [])
+AC_ARG_WITH(sdl1,            [  --with-sdl1             use SDL 1.x, rather than SDL 3.x [default=no]], [WANT_SDL_VERSION_MAJOR=1], [])
+AC_ARG_WITH(sdl2,            [  --with-sdl2             use SDL 2.x, rather than SDL 3.x [default=no]], [WANT_SDL_VERSION_MAJOR=2], [])
+AC_ARG_WITH(sdl3,            [  --with-sdl3             use SDL 3.x (this is the default) [default=yes]], [WANT_SDL_VERSION_MAJOR=3], [])
 
 dnl Checks for programs.
 AC_PROG_CC_C99
+dnl Autoconf >= 2.73 selects -std=gnu23, which rejects the K&R-style function
+dnl definitions in slirp. Keep C at gnu11 so modern clang/gcc can build it.
+dnl The flag goes in CFLAGS, not CC: CC is also used as "$(CC) -E" on C++
+dnl sources (e.g. SheepShaver's ppc-execute-impl.cpp generator), where clang
+dnl rejects a C -std= flag.
+case "$CC" in
+*-std=gnu23*|*-std=c23*)
+  CC=`echo "$CC" | sed -e 's/ *-std=gnu23//' -e 's/ *-std=c23//'`
+  CFLAGS="$CFLAGS -std=gnu11"
+  ;;
+esac
 AC_PROG_CPP
 AC_PROG_CXX
 AC_PROG_MAKE_SET
@@ -188,14 +201,30 @@ if [[ "x$WANT_SDL_AUDIO" = "xyes" ]]; then
   SDL_SUPPORT="$SDL_SUPPORT audio"
 fi
 if [[ "x$WANT_SDL" = "xyes" ]]; then
+  SDL_FRAMEWORK_FOUND=no
   if [[ "x$WANT_SDL_FRAMEWORK" = "xyes" ]]; then
     TEMP_WANT_SDL_VERSION_MAJOR=$WANT_SDL_VERSION_MAJOR
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x" ]]; then
-      TEMP_WANT_SDL_VERSION_MAJOR=2
+      TEMP_WANT_SDL_VERSION_MAJOR=3
+    fi
+    if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x3" ]]; then
+      saved_fw_CPPFLAGS="$CPPFLAGS"
+      CPPFLAGS="$CPPFLAGS -F$SDL_FRAMEWORK"
+      AC_CHECK_SDLFRAMEWORK(SDL3, [#include <SDL3/SDL.h>], [
+        CFLAGS="$CFLAGS -F$SDL_FRAMEWORK"
+        CXXFLAGS="$CXXFLAGS -F$SDL_FRAMEWORK"
+        AC_DEFINE([USE_SDL3], [1], [Use SDL3])
+        WANT_SDL_VERSION_MAJOR=3
+        SDL_FRAMEWORK_FOUND=yes
+      ], [
+        CPPFLAGS="$saved_fw_CPPFLAGS"
+        TEMP_WANT_SDL_VERSION_MAJOR=2
+      ])
     fi
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x2" ]]; then
       AC_CHECK_SDLFRAMEWORK(SDL2, [#include <SDL.h>], [
         WANT_SDL_VERSION_MAJOR=2
+        SDL_FRAMEWORK_FOUND=yes
       ], [
         TEMP_WANT_SDL_VERSION_MAJOR=1
       ])
@@ -203,15 +232,14 @@ if [[ "x$WANT_SDL" = "xyes" ]]; then
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x1" ]]; then
       AC_CHECK_SDLFRAMEWORK(SDL, [#include <SDL.h>], [
         WANT_SDL_VERSION_MAJOR=1
+        SDL_FRAMEWORK_FOUND=yes
       ])
     fi
-  else
-    ac_cv_framework_SDL=no
   fi
-  if [[ "x$ac_cv_framework_SDL" = "xno" ]]; then
+  if [[ "x$SDL_FRAMEWORK_FOUND" = "xno" ]]; then
     TEMP_WANT_SDL_VERSION_MAJOR=$WANT_SDL_VERSION_MAJOR
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x" ]]; then
-      TEMP_WANT_SDL_VERSION_MAJOR=2
+      TEMP_WANT_SDL_VERSION_MAJOR=3
     fi
 
     dnl use PKG_PROG_PKG_CONFIG to declare PKG_CONFIG variables.  Otherwise,
@@ -229,7 +257,8 @@ if [[ "x$WANT_SDL" = "xyes" ]]; then
         AC_DEFINE([USE_SDL3], [1], [Use SDL3])
         WANT_SDL_VERSION_MAJOR=3
       ], [
-        TEMP_WANT_SDL_VERSION_MAJOR=1
+        AC_MSG_WARN([SDL 3.x not found via pkg-config, falling back to SDL 2.x])
+        TEMP_WANT_SDL_VERSION_MAJOR=2
       ])
     fi
     if [[ "x$TEMP_WANT_SDL_VERSION_MAJOR" = "x2" ]]; then
@@ -1315,9 +1344,14 @@ EOF
   fi
 fi
 
+dnl Apple Silicon: the 4 GB __PAGEZERO covers every fixed low Mac address
+dnl (Kernel Data at 0x68ffe000, RAM, ROM), so real addressing cannot work.
+dnl Use direct addressing with the Mac space at a high constant offset.
+dnl (config.guess reports arm-apple-* when old and aarch64-apple-* when current.)
 case "$host" in
-  arm-apple-*)
+  arm-apple-* | aarch64-apple-*)
     AC_DEFINE_UNQUOTED(NATMEM_OFFSET, 0x400000000000, [Define constant offset for Mac address translation])
+    WANT_ADDRESSING_MODE="direct,0x400000000000"
     ;;
 esac
 
@@ -1713,8 +1747,37 @@ if [[ "x$EMULATED_PPC" = "xyes" ]]; then
     AC_TRANSLATE_DEFINE(ENABLE_DYNGEN, no, [Define to enable dyngen engine])
   fi
   CPUSRCS="$CPUSRCS ../kpx_cpu/sheepshaver_glue.cpp ../kpx_cpu/ppc-dis.c"
+
+  dnl Unicorn engine execution backend (see kpx_cpu/src/cpu/ppc/ppc-unicorn.cpp)
+  HAVE_UNICORN=no
+  if [[ "x$WANT_UNICORN" != "xno" ]]; then
+    PKG_CHECK_MODULES([UNICORN], [unicorn >= 2.0.0], [HAVE_UNICORN=yes], [
+      dnl No pkg-config file: try the default search paths
+      saved_LIBS="$LIBS"
+      AC_CHECK_HEADER([unicorn/unicorn.h], [
+        AC_CHECK_LIB([unicorn], [uc_ctl], [
+          HAVE_UNICORN=yes
+          UNICORN_CFLAGS=""
+          UNICORN_LIBS="-lunicorn -lpthread -lm"
+        ], [], [-lpthread -lm])
+      ])
+      LIBS="$saved_LIBS"
+    ])
+    if [[ "x$HAVE_UNICORN" = "xyes" ]]; then
+      dnl A static libunicorn needs its private dependencies as well
+      if $PKG_CONFIG --exists unicorn 2>/dev/null; then
+        UNICORN_LIBS=`$PKG_CONFIG --static --libs unicorn`
+      fi
+      CPPFLAGS="$CPPFLAGS -DUSE_UNICORN $UNICORN_CFLAGS"
+      LIBS="$LIBS $UNICORN_LIBS"
+      CPUSRCS="$CPUSRCS ../kpx_cpu/src/cpu/ppc/ppc-unicorn.cpp"
+    elif [[ "x$WANT_UNICORN" = "xyes" ]]; then
+      AC_MSG_ERROR([--enable-unicorn was given but the Unicorn engine (>= 2.0) was not found])
+    fi
+  fi
 else
   WANT_JIT=no
+  HAVE_UNICORN=no
 fi
 if [[ "x$WANT_JIT" = "xyes" ]]; then
   CPPFLAGS="$CPPFLAGS -DUSE_JIT"
@@ -1791,6 +1854,7 @@ echo FBDev DGA support ................ : $WANT_FBDEV_DGA
 echo XFree86 DGA support .............. : $WANT_XF86_DGA
 echo XFree86 VidMode support .......... : $WANT_XF86_VIDMODE
 echo Using PowerPC emulator ........... : $EMULATED_PPC
+echo Unicorn PowerPC engine ........... : $HAVE_UNICORN
 echo Enable JIT compiler .............. : $WANT_JIT
 echo Enable video on SEGV signals ..... : $WANT_VOSF
 echo ESD sound support ................ : $WANT_ESD

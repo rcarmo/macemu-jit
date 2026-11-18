@@ -75,6 +75,23 @@
 
 
 /**
+ *	PPC_ENABLE_UNICORN
+ *
+ *		Define to 1 to build the Unicorn engine execution backend
+ *		(ppc-unicorn.cpp).  It is selected at configure time with
+ *		--enable-unicorn, which defines USE_UNICORN.
+ **/
+
+#ifndef PPC_ENABLE_UNICORN
+#ifdef USE_UNICORN
+#define PPC_ENABLE_UNICORN 1
+#else
+#define PPC_ENABLE_UNICORN 0
+#endif
+#endif
+
+
+/**
  *	PPC_REENTRANT_JIT
  *
  *		Define to 1 if we are guaranteed to be able to invoke the JIT
